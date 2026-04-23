@@ -38,3 +38,20 @@ pnpm tauri build
 
 - **QQ / 微信**：`770492966`
 - 详细条款见 [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md)
+
+## 贡献（Contributing）
+
+欢迎贡献代码、报告 Bug、提建议！
+
+⚠️ **提交 PR 前请务必阅读 [CONTRIBUTING.md](CONTRIBUTING.md)**，特别注意：
+
+- 本项目为 **AGPL-3.0 + 商业授权** 双许可模式
+- 所有外部 PR 必须同意 **CLA（贡献者许可协议）**
+- 未勾选 CLA 同意的 PR **不会被审核**
+
+快速入口：
+
+- 🐛 [报告 Bug](../../issues/new?template=bug_report.md)
+- ✨ [功能建议](../../issues/new?template=feature_request.md)
+- 🔨 [提交 Pull Request](../../compare)
+- 💼 [商业授权咨询](COMMERCIAL-LICENSE.md)
