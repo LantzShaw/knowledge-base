@@ -41,7 +41,9 @@ impl super::Database {
 
         let sql = format!(
             "SELECT id, title, description, priority, important, status, due_date,
-                    completed_at, created_at, updated_at, remind_before_minutes, reminded_at
+                    completed_at, created_at, updated_at, remind_before_minutes, reminded_at,
+                    repeat_kind, repeat_interval, repeat_weekdays, repeat_until,
+                    repeat_count, repeat_done_count
              FROM tasks
              {}
              ORDER BY status ASC,
@@ -68,6 +70,12 @@ impl super::Database {
                     updated_at: row.get(9)?,
                     remind_before_minutes: row.get(10)?,
                     reminded_at: row.get(11)?,
+                    repeat_kind: row.get(12)?,
+                    repeat_interval: row.get(13)?,
+                    repeat_weekdays: row.get(14)?,
+                    repeat_until: row.get(15)?,
+                    repeat_count: row.get(16)?,
+                    repeat_done_count: row.get(17)?,
                     links: Vec::new(),
                 })
             })?
@@ -114,7 +122,9 @@ impl super::Database {
         let task: Option<Task> = conn
             .query_row(
                 "SELECT id, title, description, priority, important, status, due_date,
-                        completed_at, created_at, updated_at, remind_before_minutes, reminded_at
+                        completed_at, created_at, updated_at, remind_before_minutes, reminded_at,
+                        repeat_kind, repeat_interval, repeat_weekdays, repeat_until,
+                        repeat_count, repeat_done_count
                  FROM tasks WHERE id = ?1",
                 params![id],
                 |row| {
@@ -131,6 +141,12 @@ impl super::Database {
                         updated_at: row.get(9)?,
                         remind_before_minutes: row.get(10)?,
                         reminded_at: row.get(11)?,
+                        repeat_kind: row.get(12)?,
+                        repeat_interval: row.get(13)?,
+                        repeat_weekdays: row.get(14)?,
+                        repeat_until: row.get(15)?,
+                        repeat_count: row.get(16)?,
+                        repeat_done_count: row.get(17)?,
                         links: Vec::new(),
                     })
                 },
@@ -167,9 +183,18 @@ impl super::Database {
             .lock()
             .map_err(|e| AppError::Custom(e.to_string()))?;
         let tx = conn.transaction()?;
+        let kind = input
+            .repeat_kind
+            .as_deref()
+            .filter(|k| !k.is_empty())
+            .unwrap_or("none")
+            .to_string();
+        let interval = input.repeat_interval.unwrap_or(1).max(1);
         tx.execute(
-            "INSERT INTO tasks (title, description, priority, important, due_date, remind_before_minutes)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO tasks (title, description, priority, important, due_date,
+                                remind_before_minutes, repeat_kind, repeat_interval,
+                                repeat_weekdays, repeat_until, repeat_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 input.title,
                 input.description,
@@ -177,6 +202,11 @@ impl super::Database {
                 if input.important.unwrap_or(false) { 1 } else { 0 },
                 input.due_date,
                 input.remind_before_minutes,
+                kind,
+                interval,
+                input.repeat_weekdays,
+                input.repeat_until,
+                input.repeat_count,
             ],
         )?;
         let task_id = tx.last_insert_rowid();
@@ -233,6 +263,38 @@ impl super::Database {
             // 改动提醒时机时重置已触发，使新设置立即生效
             sets.push("reminded_at = NULL");
         }
+        // ─── 循环规则 ─────────────────────────────
+        if let Some(k) = input.repeat_kind.as_ref() {
+            sets.push("repeat_kind = ?");
+            binds.push(Box::new(k.clone()));
+            // 关闭循环时重置已触发次数
+            if k == "none" {
+                sets.push("repeat_done_count = 0");
+            }
+        }
+        if let Some(iv) = input.repeat_interval {
+            sets.push("repeat_interval = ?");
+            binds.push(Box::new(iv.max(1)));
+        }
+        if input.clear_repeat_weekdays.unwrap_or(false) {
+            sets.push("repeat_weekdays = NULL");
+        } else if let Some(w) = input.repeat_weekdays.as_ref() {
+            sets.push("repeat_weekdays = ?");
+            binds.push(Box::new(w.clone()));
+        }
+        if input.clear_repeat_until.unwrap_or(false) {
+            sets.push("repeat_until = NULL");
+        } else if let Some(u) = input.repeat_until.as_ref() {
+            sets.push("repeat_until = ?");
+            binds.push(Box::new(u.clone()));
+        }
+        if input.clear_repeat_count.unwrap_or(false) {
+            sets.push("repeat_count = NULL");
+            sets.push("repeat_done_count = 0");
+        } else if let Some(c) = input.repeat_count {
+            sets.push("repeat_count = ?");
+            binds.push(Box::new(c));
+        }
         if sets.is_empty() {
             return Ok(false);
         }
@@ -245,6 +307,50 @@ impl super::Database {
             params_from_iter(binds.iter().map(|b| b.as_ref())),
         )?;
         Ok(affected > 0)
+    }
+
+    /// 推进循环任务到下一次：更新 due_date、清 reminded_at、写 repeat_done_count。
+    ///
+    /// - `next_due = Some(...)`：保留未完成状态，仅移动截止时间，等下次到点
+    /// - `next_due = None`：循环已结束，自动把任务标记完成
+    pub fn advance_task_recurrence(
+        &self,
+        id: i64,
+        next_due: Option<String>,
+        new_done_count: i32,
+    ) -> Result<(), AppError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
+        match next_due {
+            Some(due) => {
+                conn.execute(
+                    "UPDATE tasks
+                        SET due_date = ?1,
+                            reminded_at = NULL,
+                            repeat_done_count = ?2,
+                            updated_at = datetime('now','localtime')
+                      WHERE id = ?3",
+                    params![due, new_done_count, id],
+                )?;
+            }
+            None => {
+                // 循环结束：置为已完成，关闭循环，停止再次调度
+                conn.execute(
+                    "UPDATE tasks
+                        SET status = 1,
+                            completed_at = datetime('now','localtime'),
+                            reminded_at = datetime('now','localtime'),
+                            repeat_done_count = ?1,
+                            repeat_kind = 'none',
+                            updated_at = datetime('now','localtime')
+                      WHERE id = ?2",
+                    params![new_done_count, id],
+                )?;
+            }
+        }
+        Ok(())
     }
 
     /// 切换完成状态：返回新状态（0/1）
@@ -324,7 +430,9 @@ impl super::Database {
 
         let sql = "
             SELECT id, title, description, priority, important, status, due_date,
-                   completed_at, created_at, updated_at, remind_before_minutes, reminded_at
+                   completed_at, created_at, updated_at, remind_before_minutes, reminded_at,
+                   repeat_kind, repeat_interval, repeat_weekdays, repeat_until,
+                   repeat_count, repeat_done_count
             FROM tasks
             WHERE status = 0
               AND reminded_at IS NULL
@@ -353,6 +461,12 @@ impl super::Database {
                     updated_at: row.get(9)?,
                     remind_before_minutes: row.get(10)?,
                     reminded_at: row.get(11)?,
+                    repeat_kind: row.get(12)?,
+                    repeat_interval: row.get(13)?,
+                    repeat_weekdays: row.get(14)?,
+                    repeat_until: row.get(15)?,
+                    repeat_count: row.get(16)?,
+                    repeat_done_count: row.get(17)?,
                     links: Vec::new(),
                 })
             })?

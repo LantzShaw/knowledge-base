@@ -493,6 +493,18 @@ pub struct Task {
     pub remind_before_minutes: Option<i32>,
     /// 上次触发提醒的时刻（ISO 'YYYY-MM-DD HH:MM:SS'），去重用
     pub reminded_at: Option<String>,
+    /// 循环规则: "none" / "daily" / "weekly" / "monthly"
+    pub repeat_kind: String,
+    /// 每 N 个单位，默认 1
+    pub repeat_interval: i32,
+    /// 每周的哪几天，ISO 1=Mon..7=Sun，逗号分隔；仅 weekly 有效
+    pub repeat_weekdays: Option<String>,
+    /// 循环终止日期 'YYYY-MM-DD'
+    pub repeat_until: Option<String>,
+    /// 总触发次数上限（含首次）
+    pub repeat_count: Option<i32>,
+    /// 已触发次数
+    pub repeat_done_count: i32,
     pub links: Vec<TaskLink>,
 }
 
@@ -506,6 +518,12 @@ pub struct CreateTaskInput {
     pub due_date: Option<String>,
     pub remind_before_minutes: Option<i32>,
     pub links: Option<Vec<TaskLinkInput>>,
+    /// 循环规则: "none"/"daily"/"weekly"/"monthly"，缺省按 "none"
+    pub repeat_kind: Option<String>,
+    pub repeat_interval: Option<i32>,
+    pub repeat_weekdays: Option<String>,
+    pub repeat_until: Option<String>,
+    pub repeat_count: Option<i32>,
 }
 
 /// 更新任务入参（字段缺省表示不改动）
@@ -521,6 +539,15 @@ pub struct UpdateTaskInput {
     pub remind_before_minutes: Option<i32>,
     /// 传 true 显式清空 remind_before_minutes
     pub clear_remind_before_minutes: Option<bool>,
+    /// 循环规则；传 "none" 或传 clear_repeat=true 表示关闭循环
+    pub repeat_kind: Option<String>,
+    pub repeat_interval: Option<i32>,
+    pub repeat_weekdays: Option<String>,
+    pub clear_repeat_weekdays: Option<bool>,
+    pub repeat_until: Option<String>,
+    pub clear_repeat_until: Option<bool>,
+    pub repeat_count: Option<i32>,
+    pub clear_repeat_count: Option<bool>,
 }
 
 /// 任务关联入参（新建任务时一起传）

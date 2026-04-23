@@ -357,4 +357,7 @@ export const taskApi = {
   /** 稍后提醒：向后推 minutes 分钟 + 重置已提醒标记 */
   snooze: (id: number, minutes: number) =>
     invoke<boolean>("snooze_task_reminder", { id, minutes }),
+  /** 完成本次：循环任务推进到下一次；非循环任务等同于 toggleStatus */
+  completeOccurrence: (id: number) =>
+    invoke<void>("complete_task_occurrence", { id }),
 };

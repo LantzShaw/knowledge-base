@@ -89,6 +89,27 @@ function groupTasks(tasks: Task[]) {
   return { overdue, today: todayGroup, tomorrow: [] as Task[], upcoming, noDate, done };
 }
 
+const WEEKDAY_LABELS = ["", "一", "二", "三", "四", "五", "六", "日"];
+
+/** 用一句中文描述循环规则，供列表上的小 tag 显示 */
+function describeRepeat(task: Task): string {
+  const { repeat_kind, repeat_interval, repeat_weekdays } = task;
+  if (repeat_kind === "none") return "";
+  const iv = Math.max(1, repeat_interval);
+  if (repeat_kind === "daily") return iv === 1 ? "每天" : `每${iv}天`;
+  if (repeat_kind === "monthly") return iv === 1 ? "每月" : `每${iv}月`;
+  if (repeat_weekdays) {
+    const days = repeat_weekdays
+      .split(",")
+      .map((s) => Number(s.trim()))
+      .filter((n) => n >= 1 && n <= 7)
+      .sort((a, b) => a - b);
+    if (days.length === 5 && days.join(",") === "1,2,3,4,5") return "工作日";
+    return `周${days.map((d) => WEEKDAY_LABELS[d]).join("")}`;
+  }
+  return iv === 1 ? "每周" : `每${iv}周`;
+}
+
 function describeDueDate(due: string | null): { text: string; overdue: boolean } {
   if (!due) return { text: "", overdue: false };
   const today = ymdLocal(new Date());
@@ -157,7 +178,12 @@ export default function TasksPage() {
 
   async function handleToggle(task: Task) {
     try {
-      await taskApi.toggleStatus(task.id);
+      if (task.status === 0 && task.repeat_kind !== "none") {
+        // 循环任务：完成本次并推进到下一次；若想结束整条循环，在提醒 Modal 或编辑页里操作
+        await taskApi.completeOccurrence(task.id);
+      } else {
+        await taskApi.toggleStatus(task.id);
+      }
       await loadTasks();
     } catch (e) {
       message.error(`操作失败: ${e}`);
@@ -521,6 +547,18 @@ function TaskRow({ task, isLast, token, onToggle, onDelete, onEdit, onOpenLink }
               }}
             >
               重要
+            </span>
+          )}
+          {task.repeat_kind !== "none" && (
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded"
+              style={{
+                background: token.colorInfoBg,
+                color: token.colorInfoText ?? token.colorPrimary,
+              }}
+              title="循环任务"
+            >
+              {describeRepeat(task)}
             </span>
           )}
         </div>

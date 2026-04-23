@@ -55,7 +55,11 @@ export function KanbanView({ tasks, onRefresh, onEdit, onNew }: Props) {
 
   async function handleToggle(task: Task) {
     try {
-      await taskApi.toggleStatus(task.id);
+      if (task.status === 0 && task.repeat_kind !== "none") {
+        await taskApi.completeOccurrence(task.id);
+      } else {
+        await taskApi.toggleStatus(task.id);
+      }
       onRefresh();
     } catch (e) {
       message.error(`操作失败: ${e}`);

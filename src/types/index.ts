@@ -391,6 +391,8 @@ export interface SyncHistoryItem {
 export type TaskPriority = 0 | 1 | 2; // 0=urgent / 1=normal / 2=low
 export type TaskStatus = 0 | 1;       // 0=todo / 1=done
 export type TaskLinkKind = "note" | "path" | "url";
+/** 循环规则：不循环 / 每天 / 每周 / 每月 */
+export type TaskRepeatKind = "none" | "daily" | "weekly" | "monthly";
 
 export interface TaskLink {
   id: number;
@@ -416,6 +418,18 @@ export interface Task {
   remind_before_minutes: number | null;
   /** 上次已触发提醒的时刻，去重用 */
   reminded_at: string | null;
+  /** 循环规则 */
+  repeat_kind: TaskRepeatKind;
+  /** 每 N 个单位 */
+  repeat_interval: number;
+  /** ISO 1..7（Mon..Sun）逗号分隔；仅 weekly 有意义 */
+  repeat_weekdays: string | null;
+  /** 循环截止日期 'YYYY-MM-DD' */
+  repeat_until: string | null;
+  /** 总触发次数上限（含首次） */
+  repeat_count: number | null;
+  /** 已触发次数 */
+  repeat_done_count: number;
   links: TaskLink[];
 }
 
@@ -433,6 +447,11 @@ export interface CreateTaskInput {
   due_date?: string | null;
   remind_before_minutes?: number | null;
   links?: TaskLinkInput[];
+  repeat_kind?: TaskRepeatKind;
+  repeat_interval?: number;
+  repeat_weekdays?: string | null;
+  repeat_until?: string | null;
+  repeat_count?: number | null;
 }
 
 export interface UpdateTaskInput {
@@ -444,6 +463,14 @@ export interface UpdateTaskInput {
   clear_due_date?: boolean;
   remind_before_minutes?: number | null;
   clear_remind_before_minutes?: boolean;
+  repeat_kind?: TaskRepeatKind;
+  repeat_interval?: number;
+  repeat_weekdays?: string | null;
+  clear_repeat_weekdays?: boolean;
+  repeat_until?: string | null;
+  clear_repeat_until?: boolean;
+  repeat_count?: number | null;
+  clear_repeat_count?: boolean;
 }
 
 export interface TaskQuery {

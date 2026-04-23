@@ -51,17 +51,31 @@ export function TaskReminderListener() {
     }
   }
 
-  async function handleComplete() {
+  async function handleCompleteOccurrence() {
     if (!current) return;
     try {
-      await taskApi.toggleStatus(current.id);
-      message.success("已标记完成");
+      await taskApi.completeOccurrence(current.id);
+      message.success(isRepeating ? "已完成本次，已推进到下一次" : "已标记完成");
     } catch (e) {
       message.error(`操作失败: ${e}`);
     } finally {
       dismiss();
     }
   }
+
+  async function handleEndSeries() {
+    if (!current) return;
+    try {
+      await taskApi.toggleStatus(current.id);
+      message.success("已结束整条循环");
+    } catch (e) {
+      message.error(`操作失败: ${e}`);
+    } finally {
+      dismiss();
+    }
+  }
+
+  const isRepeating = !!current && current.repeat_kind !== "none";
 
   return (
     <Modal
@@ -84,8 +98,13 @@ export function TaskReminderListener() {
           </Space>
           <Space>
             <Button onClick={dismiss}>知道了</Button>
-            <Button type="primary" onClick={handleComplete}>
-              标记完成
+            {isRepeating && (
+              <Button onClick={handleEndSeries} danger>
+                结束循环
+              </Button>
+            )}
+            <Button type="primary" onClick={handleCompleteOccurrence}>
+              {isRepeating ? "完成本次" : "标记完成"}
             </Button>
           </Space>
         </div>
@@ -99,6 +118,9 @@ export function TaskReminderListener() {
             </Text>
             {current.priority === 0 && <Tag color="red">紧急</Tag>}
             {current.important && <Tag color="gold">重要</Tag>}
+            {isRepeating && (
+              <Tag color="blue">{describeRepeat(current)}</Tag>
+            )}
           </div>
           {current.due_date && (
             <Text type="secondary" style={{ fontSize: 13 }}>
@@ -128,4 +150,26 @@ function formatMinutes(m: number): string {
   if (m < 60) return `${m} 分钟`;
   if (m < 1440) return `${Math.round(m / 60)} 小时`;
   return `${Math.round(m / 1440)} 天`;
+}
+
+const WEEKDAY_LABELS = ["", "周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+
+/** 把循环规则用人话说出来 */
+function describeRepeat(task: Task): string {
+  const { repeat_kind, repeat_interval, repeat_weekdays } = task;
+  if (repeat_kind === "none") return "";
+  const iv = Math.max(1, repeat_interval);
+  if (repeat_kind === "daily") return iv === 1 ? "每天" : `每 ${iv} 天`;
+  if (repeat_kind === "monthly") return iv === 1 ? "每月" : `每 ${iv} 月`;
+  // weekly
+  if (repeat_weekdays) {
+    const days = repeat_weekdays
+      .split(",")
+      .map((s) => Number(s.trim()))
+      .filter((n) => n >= 1 && n <= 7)
+      .sort((a, b) => a - b);
+    if (days.length === 5 && days.join(",") === "1,2,3,4,5") return "工作日";
+    return days.map((d) => WEEKDAY_LABELS[d]).join("/");
+  }
+  return iv === 1 ? "每周" : `每 ${iv} 周`;
 }

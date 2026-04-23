@@ -1,8 +1,13 @@
 //! 待办任务定时提醒调度器
 //!
 //! 后台 tokio 任务，每分钟扫一次 `tasks` 表：命中"到提醒点但尚未提醒过"的
-//! 未完成任务后，发系统通知 + 推 `task:reminder` 事件给前端，并把该任务标记
-//! 为已提醒（reminded_at），避免重复触发。
+//! 未完成任务后，发系统通知 + 推 `task:reminder` 事件给前端，并根据是否为
+//! 循环任务选择两种推进策略：
+//!
+//! - 一次性任务：写 `reminded_at = now()`，避免重复触发
+//! - 循环任务：调用 `advance_recurrence` 把 `due_date` 推进到下一次 > now
+//!   的时刻（合并中间漏掉的多次，只通知一次），同时累计 `repeat_done_count`；
+//!   若触达 `repeat_until` / `repeat_count` 上限则直接写 status=1
 //!
 //! 触发条件由 SQL 侧计算（见 `Database::list_due_reminders`），这里只负责
 //! 周期调度与副作用分发。
@@ -50,10 +55,22 @@ fn tick_once(app: &AppHandle) -> Result<(), AppError> {
     log::info!("[reminder] 命中 {} 条待提醒任务", due.len());
 
     for task in due {
-        // 先标记，再推送。先标记能防止调度器重入导致重复通知；即便后续推送失败，
+        // 先更新状态，再推送。先更新能防止调度器重入导致重复通知；即便后续推送失败，
         // 用户只是少了一次提醒，不会被打扰到抓狂。
-        if let Err(e) = state.db.mark_task_reminded(task.id) {
-            log::warn!("[reminder] 标记任务 {} 已提醒失败: {}", task.id, e);
+        let advance_err = if task.repeat_kind == "none" {
+            state.db.mark_task_reminded(task.id).err()
+        } else {
+            // 循环任务：合并漏掉的多次，一次性跳到下一个 > now 的触发点
+            let now = chrono::Local::now().naive_local();
+            let result =
+                crate::services::tasks::advance_recurrence(&task, &base_time, now);
+            state
+                .db
+                .advance_task_recurrence(task.id, result.next_due, result.new_done_count)
+                .err()
+        };
+        if let Some(e) = advance_err {
+            log::warn!("[reminder] 更新任务 {} 提醒状态失败: {}", task.id, e);
             continue;
         }
 

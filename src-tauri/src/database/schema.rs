@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use crate::error::AppError;
 
 /// 当前 Schema 版本
-pub const SCHEMA_VERSION: i32 = 17;
+pub const SCHEMA_VERSION: i32 = 18;
 
 /// 获取数据库版本
 pub fn get_version(conn: &Connection) -> Result<i32, AppError> {
@@ -47,6 +47,7 @@ pub fn migrate(conn: &Connection) -> Result<(), AppError> {
             14 => migrate_v14_to_v15(conn)?,
             15 => migrate_v15_to_v16(conn)?,
             16 => migrate_v16_to_v17(conn)?,
+            17 => migrate_v17_to_v18(conn)?,
             _ => {
                 return Err(AppError::Custom(format!(
                     "未知的数据库版本: {}",
@@ -660,5 +661,50 @@ fn migrate_v16_to_v17(conn: &Connection) -> Result<(), AppError> {
     )?;
 
     set_version(conn, 17)?;
+    Ok(())
+}
+
+/// v17 -> v18: tasks 新增循环提醒字段
+///
+/// 原 v15 给任务加了"提前 N 分钟提醒 + reminded_at 去重"，只能提醒一次。
+/// 本迁移补上循环规则，让待办可按"每天/每周某几天/每月/每 N 天"反复提醒。
+///
+/// 新增列：
+///   · repeat_kind        'none'/'daily'/'weekly'/'monthly'，默认 'none'
+///   · repeat_interval    每 N 个单位（默认 1）
+///   · repeat_weekdays    '1,2,3,4,5'（1=Mon..7=Sun），仅 weekly 有效；NULL 表示按 interval 周
+///   · repeat_until       'YYYY-MM-DD'，循环终止日期；NULL 表示无上限
+///   · repeat_count       总触发次数上限（含首次）；NULL 表示无上限
+///   · repeat_done_count  已触发次数，默认 0
+fn migrate_v17_to_v18(conn: &Connection) -> Result<(), AppError> {
+    log::info!("数据库迁移: v17 -> v18 (tasks 循环提醒字段)");
+
+    let cols = list_columns(conn, "tasks")?;
+    if !cols.iter().any(|c| c == "repeat_kind") {
+        conn.execute_batch(
+            "ALTER TABLE tasks ADD COLUMN repeat_kind TEXT NOT NULL DEFAULT 'none';",
+        )?;
+    }
+    if !cols.iter().any(|c| c == "repeat_interval") {
+        conn.execute_batch(
+            "ALTER TABLE tasks ADD COLUMN repeat_interval INTEGER NOT NULL DEFAULT 1;",
+        )?;
+    }
+    if !cols.iter().any(|c| c == "repeat_weekdays") {
+        conn.execute_batch("ALTER TABLE tasks ADD COLUMN repeat_weekdays TEXT;")?;
+    }
+    if !cols.iter().any(|c| c == "repeat_until") {
+        conn.execute_batch("ALTER TABLE tasks ADD COLUMN repeat_until TEXT;")?;
+    }
+    if !cols.iter().any(|c| c == "repeat_count") {
+        conn.execute_batch("ALTER TABLE tasks ADD COLUMN repeat_count INTEGER;")?;
+    }
+    if !cols.iter().any(|c| c == "repeat_done_count") {
+        conn.execute_batch(
+            "ALTER TABLE tasks ADD COLUMN repeat_done_count INTEGER NOT NULL DEFAULT 0;",
+        )?;
+    }
+
+    set_version(conn, 18)?;
     Ok(())
 }

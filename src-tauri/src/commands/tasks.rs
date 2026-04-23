@@ -73,3 +73,18 @@ pub fn snooze_task_reminder(
 ) -> Result<bool, String> {
     TaskService::snooze(&state.db, id, minutes).map_err(|e| e.to_string())
 }
+
+/// 完成本次（循环任务）：推进到下一次；非循环任务等同于 toggle 到完成。
+/// 达到 repeat_count / repeat_until 上限时自动结束整条循环。
+#[tauri::command]
+pub fn complete_task_occurrence(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    // 从 app_config 读取全天任务提醒基准时刻，兼容 "HH:MM" / "HH:MM:SS"
+    let base = state
+        .db
+        .get_config("all_day_reminder_time")
+        .ok()
+        .flatten()
+        .map(|s| if s.len() == 5 { format!("{}:00", s) } else { s })
+        .unwrap_or_else(|| "09:00:00".to_string());
+    TaskService::complete_occurrence(&state.db, id, &base).map_err(|e| e.to_string())
+}

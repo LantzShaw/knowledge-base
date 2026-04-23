@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Modal,
   Input,
+  InputNumber,
   Segmented,
   DatePicker,
   Checkbox,
@@ -19,7 +20,19 @@ import { Plus, FileText, Folder as FolderIcon, Link as LinkIcon } from "lucide-r
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { taskApi, noteApi, configApi } from "@/lib/api";
 import { relativeTime } from "@/lib/utils";
-import type { Note, Task, TaskLinkInput, TaskPriority } from "@/types";
+import type {
+  Note,
+  Task,
+  TaskLinkInput,
+  TaskPriority,
+  TaskRepeatKind,
+  UpdateTaskInput,
+  CreateTaskInput,
+} from "@/types";
+
+type RepeatMode = "none" | "daily" | "weekdays" | "weekly" | "monthly" | "custom";
+type EndMode = "never" | "until" | "count";
+type CustomUnit = "day" | "week" | "month";
 
 interface Props {
   open: boolean;
@@ -55,6 +68,14 @@ export function CreateTaskModal({
   const [links, setLinks] = useState<TaskLinkInput[]>([]);
   const [saving, setSaving] = useState(false);
   const [continuous, setContinuous] = useState(false);
+  // ─── 循环提醒状态 ─────────────────────────
+  const [repeatMode, setRepeatMode] = useState<RepeatMode>("none");
+  const [customInterval, setCustomInterval] = useState(2);
+  const [customUnit, setCustomUnit] = useState<CustomUnit>("day");
+  const [customWeekdays, setCustomWeekdays] = useState<number[]>([]);
+  const [endMode, setEndMode] = useState<EndMode>("never");
+  const [repeatUntil, setRepeatUntil] = useState<Dayjs | null>(null);
+  const [repeatCount, setRepeatCount] = useState<number>(10);
   const [urlInputOpen, setUrlInputOpen] = useState(false);
   const [urlInput, setUrlInput] = useState("");
   /** 全天任务的提醒基准时刻（从 app_config.all_day_reminder_time 读，默认 09:00） */
@@ -113,6 +134,26 @@ export function CreateTaskModal({
           label: l.label,
         })),
       );
+      // 反向识别循环预设
+      const { mode, unit, interval, weekdays } = detectRepeatMode(editing);
+      setRepeatMode(mode);
+      setCustomUnit(unit);
+      setCustomInterval(interval);
+      setCustomWeekdays(weekdays);
+      // 结束条件
+      if (editing.repeat_until) {
+        setEndMode("until");
+        setRepeatUntil(dayjs(editing.repeat_until));
+        setRepeatCount(10);
+      } else if (editing.repeat_count) {
+        setEndMode("count");
+        setRepeatCount(editing.repeat_count);
+        setRepeatUntil(null);
+      } else {
+        setEndMode("never");
+        setRepeatUntil(null);
+        setRepeatCount(10);
+      }
     } else {
       setTitle("");
       setDescription("");
@@ -122,6 +163,14 @@ export function CreateTaskModal({
       setAllDay(true);
       setRemindBefore(null);
       setLinks([]);
+      // 循环默认清零
+      setRepeatMode("none");
+      setCustomInterval(2);
+      setCustomUnit("day");
+      setCustomWeekdays([]);
+      setEndMode("never");
+      setRepeatUntil(null);
+      setRepeatCount(10);
     }
     setContinuous(false);
     setUrlInputOpen(false);
@@ -236,6 +285,15 @@ export function CreateTaskModal({
           ? dueDate.format("YYYY-MM-DD")
           : dueDate.format("YYYY-MM-DD HH:mm:ss")
         : null;
+      const repeatPayload = buildRepeatPayload({
+        mode: repeatMode,
+        unit: customUnit,
+        interval: customInterval,
+        weekdays: customWeekdays,
+        endMode,
+        until: repeatUntil,
+        count: repeatCount,
+      });
       if (isEdit && editing) {
         await taskApi.update(editing.id, {
           title: title.trim(),
@@ -246,6 +304,7 @@ export function CreateTaskModal({
           clear_due_date: !dueStr,
           remind_before_minutes: remindBefore ?? undefined,
           clear_remind_before_minutes: remindBefore === null,
+          ...repeatPayload.update,
         });
         // 更新 links：简单策略——删除所有旧的，再加新的
         for (const l of editing.links) {
@@ -264,6 +323,7 @@ export function CreateTaskModal({
           due_date: dueStr,
           remind_before_minutes: remindBefore,
           links,
+          ...repeatPayload.create,
         });
         message.success("已创建");
       }
@@ -524,6 +584,114 @@ export function CreateTaskModal({
           )}
         </div>
 
+        {/* 重复 */}
+        <div>
+          <div className="text-[11px] mb-1" style={{ color: token.colorTextSecondary }}>
+            重复
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Select
+              value={repeatMode}
+              onChange={setRepeatMode}
+              disabled={!dueDate}
+              style={{ width: 140 }}
+              options={[
+                { value: "none", label: "不重复" },
+                { value: "daily", label: "每天" },
+                { value: "weekdays", label: "工作日" },
+                { value: "weekly", label: "每周" },
+                { value: "monthly", label: "每月" },
+                { value: "custom", label: "自定义" },
+              ]}
+            />
+            {repeatMode === "custom" && (
+              <>
+                <span className="text-xs" style={{ color: token.colorTextSecondary }}>
+                  每
+                </span>
+                <InputNumber
+                  min={1}
+                  max={365}
+                  value={customInterval}
+                  onChange={(v) => setCustomInterval(Math.max(1, Number(v) || 1))}
+                  style={{ width: 70 }}
+                />
+                <Select
+                  value={customUnit}
+                  onChange={setCustomUnit}
+                  style={{ width: 70 }}
+                  options={[
+                    { value: "day", label: "天" },
+                    { value: "week", label: "周" },
+                    { value: "month", label: "月" },
+                  ]}
+                />
+              </>
+            )}
+          </div>
+          {/* 自定义 + 周：星期多选 */}
+          {repeatMode === "custom" && customUnit === "week" && (
+            <div className="mt-2">
+              <Checkbox.Group
+                value={customWeekdays}
+                onChange={(v) => setCustomWeekdays(v as number[])}
+                options={WEEKDAY_OPTIONS}
+              />
+              <div className="text-[10px] mt-1" style={{ color: token.colorTextTertiary }}>
+                不选则沿用截止日的星期
+              </div>
+            </div>
+          )}
+          {/* 结束条件 */}
+          {repeatMode !== "none" && (
+            <div className="mt-2 flex items-center gap-2 flex-wrap">
+              <span className="text-xs" style={{ color: token.colorTextSecondary }}>
+                结束：
+              </span>
+              <Segmented
+                size="small"
+                value={endMode}
+                onChange={(v) => setEndMode(v as EndMode)}
+                options={[
+                  { value: "never", label: "永不" },
+                  { value: "until", label: "截至日期" },
+                  { value: "count", label: "重复 N 次" },
+                ]}
+              />
+              {endMode === "until" && (
+                <DatePicker
+                  size="small"
+                  value={repeatUntil}
+                  onChange={setRepeatUntil}
+                  format="YYYY-MM-DD"
+                  placeholder="YYYY-MM-DD"
+                  style={{ width: 140 }}
+                />
+              )}
+              {endMode === "count" && (
+                <Space size={4}>
+                  <InputNumber
+                    size="small"
+                    min={1}
+                    max={9999}
+                    value={repeatCount}
+                    onChange={(v) => setRepeatCount(Math.max(1, Number(v) || 1))}
+                    style={{ width: 80 }}
+                  />
+                  <span className="text-xs" style={{ color: token.colorTextSecondary }}>
+                    次
+                  </span>
+                </Space>
+              )}
+            </div>
+          )}
+          {!dueDate && repeatMode === "none" && (
+            <div className="text-[10px] mt-1" style={{ color: token.colorTextTertiary }}>
+              需先选择截止时间才能设置重复
+            </div>
+          )}
+        </div>
+
         {/* 描述 */}
         <div>
           <div className="text-[11px] mb-1" style={{ color: token.colorTextSecondary }}>
@@ -688,6 +856,138 @@ function formatReminderAt(t: Dayjs): string {
   if (diff === 1) return `明天 ${hm}`;
   if (diff === -1) return `昨天 ${hm}`;
   return `${t.format("YYYY-MM-DD")} ${hm}`;
+}
+
+/** 星期选项：ISO 1=Mon..7=Sun */
+const WEEKDAY_OPTIONS = [
+  { value: 1, label: "一" },
+  { value: 2, label: "二" },
+  { value: 3, label: "三" },
+  { value: 4, label: "四" },
+  { value: 5, label: "五" },
+  { value: 6, label: "六" },
+  { value: 7, label: "日" },
+];
+
+/** 从 Task 反推 UI 预设模式 */
+function detectRepeatMode(task: Task): {
+  mode: RepeatMode;
+  unit: CustomUnit;
+  interval: number;
+  weekdays: number[];
+} {
+  const { repeat_kind, repeat_interval, repeat_weekdays } = task;
+  const parsed = repeat_weekdays
+    ? repeat_weekdays
+        .split(",")
+        .map((s) => Number(s.trim()))
+        .filter((n) => n >= 1 && n <= 7)
+    : [];
+  if (repeat_kind === "none") {
+    return { mode: "none", unit: "day", interval: 1, weekdays: [] };
+  }
+  const isDefault = repeat_interval === 1;
+  if (repeat_kind === "daily" && isDefault) {
+    return { mode: "daily", unit: "day", interval: 1, weekdays: [] };
+  }
+  if (repeat_kind === "weekly" && isDefault && repeat_weekdays === "1,2,3,4,5") {
+    return { mode: "weekdays", unit: "week", interval: 1, weekdays: parsed };
+  }
+  if (repeat_kind === "weekly" && isDefault && parsed.length === 0) {
+    return { mode: "weekly", unit: "week", interval: 1, weekdays: [] };
+  }
+  if (repeat_kind === "monthly" && isDefault) {
+    return { mode: "monthly", unit: "month", interval: 1, weekdays: [] };
+  }
+  // 其他一律视作自定义
+  const unit: CustomUnit =
+    repeat_kind === "daily" ? "day" : repeat_kind === "weekly" ? "week" : "month";
+  return {
+    mode: "custom",
+    unit,
+    interval: Math.max(1, repeat_interval),
+    weekdays: parsed,
+  };
+}
+
+/** 把 UI 状态转成后端负载（create / update 格式不同） */
+function buildRepeatPayload(args: {
+  mode: RepeatMode;
+  unit: CustomUnit;
+  interval: number;
+  weekdays: number[];
+  endMode: EndMode;
+  until: Dayjs | null;
+  count: number;
+}): {
+  create: Partial<CreateTaskInput>;
+  update: Partial<UpdateTaskInput>;
+} {
+  let kind: TaskRepeatKind = "none";
+  let interval = 1;
+  let weekdays: string | null = null;
+  switch (args.mode) {
+    case "none":
+      return {
+        create: { repeat_kind: "none" },
+        update: {
+          repeat_kind: "none",
+          clear_repeat_weekdays: true,
+          clear_repeat_until: true,
+          clear_repeat_count: true,
+        },
+      };
+    case "daily":
+      kind = "daily";
+      break;
+    case "weekdays":
+      kind = "weekly";
+      weekdays = "1,2,3,4,5";
+      break;
+    case "weekly":
+      kind = "weekly";
+      break;
+    case "monthly":
+      kind = "monthly";
+      break;
+    case "custom":
+      kind =
+        args.unit === "day" ? "daily" : args.unit === "week" ? "weekly" : "monthly";
+      interval = Math.max(1, args.interval);
+      if (args.unit === "week" && args.weekdays.length > 0) {
+        weekdays = [...args.weekdays].sort((a, b) => a - b).join(",");
+      }
+      break;
+  }
+
+  const create: Partial<CreateTaskInput> = {
+    repeat_kind: kind,
+    repeat_interval: interval,
+  };
+  const update: Partial<UpdateTaskInput> = {
+    repeat_kind: kind,
+    repeat_interval: interval,
+  };
+  if (weekdays) {
+    create.repeat_weekdays = weekdays;
+    update.repeat_weekdays = weekdays;
+  } else {
+    update.clear_repeat_weekdays = true;
+  }
+  if (args.endMode === "until" && args.until) {
+    const u = args.until.format("YYYY-MM-DD");
+    create.repeat_until = u;
+    update.repeat_until = u;
+    update.clear_repeat_count = true;
+  } else if (args.endMode === "count" && args.count > 0) {
+    create.repeat_count = args.count;
+    update.repeat_count = args.count;
+    update.clear_repeat_until = true;
+  } else {
+    update.clear_repeat_until = true;
+    update.clear_repeat_count = true;
+  }
+  return { create, update };
 }
 
 /** 在标题中把匹配词加粗高亮（不区分大小写） */
