@@ -108,6 +108,9 @@ export function Sidebar() {
   const collapsed = useAppStore((s) => s.sidebarCollapsed);
   const urgentTodoCount = useAppStore((s) => s.urgentTodoCount);
   const refreshTaskStats = useAppStore((s) => s.refreshTaskStats);
+  // 订阅全局文件夹刷新信号：外部（如导入、设置页）调用 bumpFoldersRefresh
+  // 时 tick 递增，触发 Sidebar 重新拉取文件夹树
+  const foldersRefreshTick = useAppStore((s) => s.foldersRefreshTick);
   const { token } = antdTheme.useToken();
 
   // 应用启动时拉一次紧急任务数，后续由任务页在变更后触发 refreshTaskStats
@@ -204,7 +207,7 @@ export function Sidebar() {
 
   useEffect(() => {
     loadFolders();
-  }, []);
+  }, [foldersRefreshTick]);
 
   // 首次加载后默认展开所有节点
   useEffect(() => {
