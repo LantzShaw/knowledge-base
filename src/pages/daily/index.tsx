@@ -2,14 +2,15 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Button,
+  DatePicker,
   Input,
-  Typography,
   Space,
   Divider,
   Badge,
   message,
   Spin,
 } from "antd";
+import dayjs from "dayjs";
 import {
   Calendar,
   ChevronLeft,
@@ -24,7 +25,6 @@ import { useAppStore } from "@/store";
 import { PlanTodayModal } from "@/components/ai/PlanTodayModal";
 import type { Note } from "@/types";
 
-const { Text } = Typography;
 
 /** 格式化日期为中文显示 */
 function formatDateCN(dateStr: string): string {
@@ -200,7 +200,17 @@ export default function DailyPage() {
             icon={<ChevronLeft size={14} />}
             onClick={() => goToDate(offsetDate(date, -1))}
           />
-          <Text strong>{formatDateCN(date)}</Text>
+          <DatePicker
+            value={dayjs(date)}
+            onChange={(d) => d && goToDate(d.format("YYYY-MM-DD"))}
+            allowClear={false}
+            variant="borderless"
+            size="small"
+            format={(v) => formatDateCN(v.format("YYYY-MM-DD"))}
+            // 未来日期不能选（日记是对过去/当下的记录）
+            disabledDate={(d) => d.isAfter(dayjs().endOf("day"))}
+            style={{ fontWeight: 600, padding: "0 4px" }}
+          />
           <Button
             size="small"
             icon={<ChevronRight size={14} />}

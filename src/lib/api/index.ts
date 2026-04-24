@@ -53,6 +53,9 @@ import type {
   PromptTemplateInput,
   PlanTodayRequest,
   PlanTodayResponse,
+  DraftNoteRequest,
+  DraftNoteResponse,
+  VaultStatus,
 } from "@/types";
 
 /** 系统相关 API */
@@ -138,6 +141,15 @@ export const noteApi = {
   togglePin: (id: number) => invoke<boolean>("toggle_pin", { id }),
   moveToFolder: (noteId: number, folderId?: number | null) =>
     invoke<void>("move_note_to_folder", { noteId, folderId }),
+  /** 批量移动笔记到指定文件夹（folderId=null 表示根目录）；返回实际移动的条数 */
+  moveBatch: (ids: number[], folderId: number | null) =>
+    invoke<number>("move_notes_batch", { ids, folderId }),
+  /** 批量软删除（移入回收站）；返回实际删除的条数 */
+  trashBatch: (ids: number[]) =>
+    invoke<number>("trash_notes_batch", { ids }),
+  /** 批量给笔记追加标签（不清除原有）；返回新增的关联条数 */
+  addTagsBatch: (noteIds: number[], tagIds: number[]) =>
+    invoke<number>("add_tags_to_notes_batch", { noteIds, tagIds }),
   /** T-003: 切换"隐藏"状态；返回切换后的新状态 */
   setHidden: (id: number, hidden: boolean) =>
     invoke<boolean>("set_note_hidden", { id, hidden }),
@@ -147,6 +159,27 @@ export const noteApi = {
 export const hiddenApi = {
   list: (page?: number, pageSize?: number) =>
     invoke<PageResult<Note>>("list_hidden_notes", { page, pageSize }),
+};
+
+/**
+ * T-007 笔记加密 / Vault API
+ *
+ * - 首次使用先 `setup(主密码)`
+ * - 会话启动 / 空闲锁定后要 `unlock(主密码)` 才能加/解密
+ * - `encryptNote(id)` 把一篇笔记切换到加密态；`decryptNote(id)` 读出明文（不落盘）
+ * - `disableEncrypt(id)` 取消加密，明文写回 content
+ *
+ * **忘记主密码 = 数据永久不可读**。首次 setup 前 UI 要强提示 + 建议导出 Markdown 备份。
+ */
+export const vaultApi = {
+  status: () => invoke<VaultStatus>("vault_status"),
+  setup: (password: string) => invoke<void>("vault_setup", { password }),
+  unlock: (password: string) => invoke<void>("vault_unlock", { password }),
+  lock: () => invoke<void>("vault_lock"),
+  encryptNote: (id: number) => invoke<void>("encrypt_note", { id }),
+  decryptNote: (id: number) => invoke<string>("decrypt_note", { id }),
+  disableEncrypt: (id: number) =>
+    invoke<void>("disable_note_encrypt", { id }),
 };
 
 /** 文件夹 API */
@@ -161,6 +194,9 @@ export const folderApi = {
     invoke<void>("move_folder", { id, newParentId }),
   reorder: (orderedIds: number[]) =>
     invoke<void>("reorder_folders", { orderedIds }),
+  /** T-006: 按 "工作/周报" 这样的路径字符串递归确保存在，返回最深一级 folder id */
+  ensurePath: (path: string) =>
+    invoke<number | null>("ensure_folder_path", { path }),
 };
 
 /** 搜索 API */
@@ -319,9 +355,10 @@ export const exportApi = {
   /** 批量导出笔记为 Markdown 文件 */
   exportNotes: (outputDir: string, folderId?: number | null) =>
     invoke<ExportResult>("export_notes", { outputDir, folderId }),
-  /** 导出单篇笔记为 Markdown 文件 */
+  /** 导出单篇笔记为 Markdown 文件（同时拷贝图片/附件到 .assets/）
+   *  返回拷贝的资产文件数 */
   exportSingle: (id: number, filePath: string) =>
-    invoke<void>("export_single_note", { id, filePath }),
+    invoke<number>("export_single_note", { id, filePath }),
 };
 
 /** 附件 API（PDF/Office/ZIP/音视频等非图片非文本文件） */
@@ -380,6 +417,9 @@ export const aiWriteApi = {
 export const aiPlanApi = {
   planToday: (request: PlanTodayRequest) =>
     invoke<PlanTodayResponse>("ai_plan_today", { request }),
+  /** T-006: AI 生成笔记草稿 + 归档目录建议（未落库）*/
+  draftNote: (request: DraftNoteRequest) =>
+    invoke<DraftNoteResponse>("ai_draft_note", { request }),
 };
 
 /**

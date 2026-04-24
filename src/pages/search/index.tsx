@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Input, Typography, Empty, Spin } from "antd";
-import { Search as SearchIcon, FileText } from "lucide-react";
+import { Search as SearchIcon, NotebookText } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { searchApi } from "@/lib/api";
 import { useAppStore } from "@/store";
@@ -139,7 +139,7 @@ export default function SearchPage() {
                     }}
                     onClick={() => navigate(`/notes/${item.id}`)}
                   >
-                    <FileText size={20} style={{ marginTop: 4, flexShrink: 0 }} />
+                    <NotebookText size={20} style={{ marginTop: 4, flexShrink: 0 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <Text ellipsis style={{ display: "block", maxWidth: 500, fontWeight: 500 }}>
                         {item.title}

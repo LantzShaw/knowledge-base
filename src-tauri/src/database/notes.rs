@@ -1,4 +1,4 @@
-use rusqlite::params;
+use rusqlite::{params, params_from_iter};
 
 use crate::error::AppError;
 use crate::models::{Note, NoteInput};
@@ -65,6 +65,38 @@ impl Database {
         self.get_note_inner(&conn, id)
     }
 
+    /// 批量移动笔记到指定文件夹（`folder_id = None` 表示移到根目录）
+    ///
+    /// 只改 `folder_id`，**不碰 `updated_at`**：批量整理属于"归档动作"，
+    /// 不应把大量笔记的"最近更新"时间一起冒泡到最前。
+    /// 一条 `WHERE id IN (...)` SQL 完成，保证原子性。
+    pub fn move_notes_batch(
+        &self,
+        ids: &[i64],
+        folder_id: Option<i64>,
+    ) -> Result<usize, AppError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "UPDATE notes SET folder_id = ? WHERE id IN ({})",
+            placeholders,
+        );
+        // 参数顺序：[folder_id, id1, id2, ...]
+        let mut args: Vec<rusqlite::types::Value> = Vec::with_capacity(ids.len() + 1);
+        args.push(match folder_id {
+            Some(v) => rusqlite::types::Value::Integer(v),
+            None => rusqlite::types::Value::Null,
+        });
+        for id in ids {
+            args.push(rusqlite::types::Value::Integer(*id));
+        }
+        let affected = conn.execute(&sql, params_from_iter(args.iter()))?;
+        Ok(affected)
+    }
+
     /// 删除笔记（永久删除，预留给未来使用）
     #[allow(dead_code)]
     pub fn delete_note(&self, id: i64) -> Result<bool, AppError> {
@@ -81,7 +113,7 @@ impl Database {
         let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
 
         let mut stmt = conn.prepare(
-            "SELECT id, title, content, folder_id, is_daily, daily_date, is_pinned, is_hidden, word_count, created_at, updated_at, source_file_path, source_file_type
+            "SELECT id, title, content, folder_id, is_daily, daily_date, is_pinned, is_hidden, is_encrypted, word_count, created_at, updated_at, source_file_path, source_file_type
              FROM notes WHERE id = ?1",
         )?;
 
@@ -96,11 +128,12 @@ impl Database {
                     daily_date: row.get(5)?,
                     is_pinned: row.get::<_, i32>(6)? != 0,
                     is_hidden: row.get::<_, i32>(7)? != 0,
-                    word_count: row.get(8)?,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
-                    source_file_path: row.get(11)?,
-                    source_file_type: row.get(12)?,
+                    is_encrypted: row.get::<_, i32>(8)? != 0,
+                    word_count: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
+                    source_file_path: row.get(12)?,
+                    source_file_type: row.get(13)?,
                 })
             })
             .ok();
@@ -148,7 +181,7 @@ impl Database {
         // 查询分页数据
         let offset = (page.saturating_sub(1)) * page_size;
         let data_sql = format!(
-            "SELECT id, title, content, folder_id, is_daily, daily_date, is_pinned, is_hidden, word_count, created_at, updated_at, source_file_path, source_file_type
+            "SELECT id, title, content, folder_id, is_daily, daily_date, is_pinned, is_hidden, is_encrypted, word_count, created_at, updated_at, source_file_path, source_file_type
              FROM notes {} ORDER BY updated_at DESC LIMIT ?{} OFFSET ?{}",
             where_clause,
             param_values.len() + 1,
@@ -174,16 +207,102 @@ impl Database {
                     daily_date: row.get(5)?,
                     is_pinned: row.get::<_, i32>(6)? != 0,
                     is_hidden: row.get::<_, i32>(7)? != 0,
-                    word_count: row.get(8)?,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
-                    source_file_path: row.get(11)?,
-                    source_file_type: row.get(12)?,
+                    is_encrypted: row.get::<_, i32>(8)? != 0,
+                    word_count: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
+                    source_file_path: row.get(12)?,
+                    source_file_type: row.get(13)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok((notes, total))
+    }
+
+    // ─── T-007 笔记加密 DAO ────────────────────────
+
+    /// 启用加密：写入密文 + 占位 content + 标记 is_encrypted=1
+    ///
+    /// `placeholder` 是 content 列要写入的占位字符串（前端 Modal 里给用户看"🔒 已加密"）。
+    /// 真实明文已在上层用 vault key 加密成 blob，这里只负责落库。
+    pub fn enable_note_encryption(
+        &self,
+        id: i64,
+        placeholder: &str,
+        blob: &[u8],
+    ) -> Result<(), AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let affected = conn.execute(
+            "UPDATE notes
+             SET is_encrypted = 1, encrypted_blob = ?1, content = ?2,
+                 updated_at = datetime('now', 'localtime')
+             WHERE id = ?3 AND is_deleted = 0",
+            params![blob, placeholder, id],
+        )?;
+        if affected == 0 {
+            return Err(AppError::NotFound(format!("笔记 {} 不存在", id)));
+        }
+        Ok(())
+    }
+
+    /// 取消加密：还原明文到 content + 清空 encrypted_blob + is_encrypted=0
+    pub fn disable_note_encryption(
+        &self,
+        id: i64,
+        plaintext: &str,
+    ) -> Result<(), AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let affected = conn.execute(
+            "UPDATE notes
+             SET is_encrypted = 0, encrypted_blob = NULL, content = ?1,
+                 updated_at = datetime('now', 'localtime')
+             WHERE id = ?2 AND is_deleted = 0",
+            params![plaintext, id],
+        )?;
+        if affected == 0 {
+            return Err(AppError::NotFound(format!("笔记 {} 不存在", id)));
+        }
+        Ok(())
+    }
+
+    /// 读取加密笔记的 blob（未解密）。调用方拿到后用 vault 解密
+    pub fn get_encrypted_blob(&self, id: i64) -> Result<Option<Vec<u8>>, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let result = conn
+            .query_row(
+                "SELECT encrypted_blob FROM notes WHERE id = ?1 AND is_deleted = 0 AND is_encrypted = 1",
+                params![id],
+                |row| row.get::<_, Option<Vec<u8>>>(0),
+            )
+            .ok()
+            .flatten();
+        Ok(result)
+    }
+
+    /// 更新加密笔记的密文（不改 is_encrypted / placeholder；用于"已加密态下编辑"保存）
+    ///
+    /// 预留给 T-007b：解锁态下直接在编辑器里编辑加密笔记，保存时重加密写回。
+    /// v1 的流程是"取消加密 → 编辑 → 重新加密"，暂未调用。
+    #[allow(dead_code)]
+    pub fn update_encrypted_blob(
+        &self,
+        id: i64,
+        blob: &[u8],
+    ) -> Result<(), AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let affected = conn.execute(
+            "UPDATE notes SET encrypted_blob = ?1, updated_at = datetime('now', 'localtime')
+             WHERE id = ?2 AND is_deleted = 0 AND is_encrypted = 1",
+            params![blob, id],
+        )?;
+        if affected == 0 {
+            return Err(AppError::NotFound(format!(
+                "笔记 {} 不存在或未处于加密态",
+                id
+            )));
+        }
+        Ok(())
     }
 
     // ─── T-003 隐藏笔记 DAO ─────────────────────────
@@ -223,7 +342,7 @@ impl Database {
 
         let offset = (page.saturating_sub(1)) * page_size;
         let mut stmt = conn.prepare(
-            "SELECT id, title, content, folder_id, is_daily, daily_date, is_pinned, is_hidden,
+            "SELECT id, title, content, folder_id, is_daily, daily_date, is_pinned, is_hidden, is_encrypted,
                     word_count, created_at, updated_at, source_file_path, source_file_type
              FROM notes
              WHERE is_deleted = 0 AND is_hidden = 1
@@ -241,11 +360,12 @@ impl Database {
                     daily_date: row.get(5)?,
                     is_pinned: row.get::<_, i32>(6)? != 0,
                     is_hidden: row.get::<_, i32>(7)? != 0,
-                    word_count: row.get(8)?,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
-                    source_file_path: row.get(11)?,
-                    source_file_type: row.get(12)?,
+                    is_encrypted: row.get::<_, i32>(8)? != 0,
+                    word_count: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
+                    source_file_path: row.get(12)?,
+                    source_file_type: row.get(13)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -308,6 +428,27 @@ impl Database {
         Ok(affected > 0)
     }
 
+    /// 批量软删除（移入回收站）；返回实际标记删除的条数
+    /// 已经在回收站的笔记会被忽略（WHERE is_deleted = 0）
+    pub fn soft_delete_notes_batch(&self, ids: &[i64]) -> Result<usize, AppError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "UPDATE notes SET is_deleted = 1, deleted_at = datetime('now', 'localtime')
+             WHERE id IN ({}) AND is_deleted = 0",
+            placeholders,
+        );
+        let args: Vec<rusqlite::types::Value> = ids
+            .iter()
+            .map(|id| rusqlite::types::Value::Integer(*id))
+            .collect();
+        let affected = conn.execute(&sql, params_from_iter(args.iter()))?;
+        Ok(affected)
+    }
+
     /// 恢复笔记（从回收站恢复）
     pub fn restore_note(&self, id: i64) -> Result<bool, AppError> {
         let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
@@ -347,7 +488,7 @@ impl Database {
         // 查询分页数据
         let offset = (page.saturating_sub(1)) * page_size;
         let mut stmt = conn.prepare(
-            "SELECT id, title, content, folder_id, is_daily, daily_date, is_pinned, is_hidden, word_count, created_at, updated_at, source_file_path, source_file_type
+            "SELECT id, title, content, folder_id, is_daily, daily_date, is_pinned, is_hidden, is_encrypted, word_count, created_at, updated_at, source_file_path, source_file_type
              FROM notes WHERE is_deleted = 1
              ORDER BY deleted_at DESC
              LIMIT ?1 OFFSET ?2",
@@ -364,11 +505,12 @@ impl Database {
                     daily_date: row.get(5)?,
                     is_pinned: row.get::<_, i32>(6)? != 0,
                     is_hidden: row.get::<_, i32>(7)? != 0,
-                    word_count: row.get(8)?,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
-                    source_file_path: row.get(11)?,
-                    source_file_type: row.get(12)?,
+                    is_encrypted: row.get::<_, i32>(8)? != 0,
+                    word_count: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
+                    source_file_path: row.get(12)?,
+                    source_file_type: row.get(13)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -441,7 +583,7 @@ impl Database {
         let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
 
         let mut stmt = conn.prepare(
-            "SELECT id, title, content, folder_id, is_daily, daily_date, is_pinned, is_hidden, word_count, created_at, updated_at, source_file_path, source_file_type
+            "SELECT id, title, content, folder_id, is_daily, daily_date, is_pinned, is_hidden, is_encrypted, word_count, created_at, updated_at, source_file_path, source_file_type
              FROM notes WHERE is_daily = 1 AND daily_date = ?1 AND is_deleted = 0",
         )?;
 
@@ -456,11 +598,12 @@ impl Database {
                     daily_date: row.get(5)?,
                     is_pinned: row.get::<_, i32>(6)? != 0,
                     is_hidden: row.get::<_, i32>(7)? != 0,
-                    word_count: row.get(8)?,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
-                    source_file_path: row.get(11)?,
-                    source_file_type: row.get(12)?,
+                    is_encrypted: row.get::<_, i32>(8)? != 0,
+                    word_count: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
+                    source_file_path: row.get(12)?,
+                    source_file_type: row.get(13)?,
                 })
             })
             .ok();
@@ -474,7 +617,7 @@ impl Database {
 
         // 先查询是否已存在
         let mut stmt = conn.prepare(
-            "SELECT id, title, content, folder_id, is_daily, daily_date, is_pinned, is_hidden, word_count, created_at, updated_at, source_file_path, source_file_type
+            "SELECT id, title, content, folder_id, is_daily, daily_date, is_pinned, is_hidden, is_encrypted, word_count, created_at, updated_at, source_file_path, source_file_type
              FROM notes WHERE is_daily = 1 AND daily_date = ?1 AND is_deleted = 0",
         )?;
 
@@ -489,11 +632,12 @@ impl Database {
                     daily_date: row.get(5)?,
                     is_pinned: row.get::<_, i32>(6)? != 0,
                     is_hidden: row.get::<_, i32>(7)? != 0,
-                    word_count: row.get(8)?,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
-                    source_file_path: row.get(11)?,
-                    source_file_type: row.get(12)?,
+                    is_encrypted: row.get::<_, i32>(8)? != 0,
+                    word_count: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
+                    source_file_path: row.get(12)?,
+                    source_file_type: row.get(13)?,
                 })
             })
             .ok();
@@ -541,7 +685,7 @@ impl Database {
         id: i64,
     ) -> Result<Note, AppError> {
         let mut stmt = conn.prepare(
-            "SELECT id, title, content, folder_id, is_daily, daily_date, is_pinned, is_hidden, word_count, created_at, updated_at, source_file_path, source_file_type
+            "SELECT id, title, content, folder_id, is_daily, daily_date, is_pinned, is_hidden, is_encrypted, word_count, created_at, updated_at, source_file_path, source_file_type
              FROM notes WHERE id = ?1",
         )?;
 
@@ -555,11 +699,12 @@ impl Database {
                 daily_date: row.get(5)?,
                 is_pinned: row.get::<_, i32>(6)? != 0,
                 is_hidden: row.get::<_, i32>(7)? != 0,
-                word_count: row.get(8)?,
-                created_at: row.get(9)?,
-                updated_at: row.get(10)?,
-                source_file_path: row.get(11)?,
-                source_file_type: row.get(12)?,
+                is_encrypted: row.get::<_, i32>(8)? != 0,
+                word_count: row.get(9)?,
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
+                source_file_path: row.get(12)?,
+                source_file_type: row.get(13)?,
             })
         })?;
 

@@ -16,7 +16,7 @@ import {
 } from "antd";
 import type { MenuProps, RefSelectProps } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
-import { Plus, FileText, Folder as FolderIcon, Link as LinkIcon } from "lucide-react";
+import { Plus, NotebookText, Folder as FolderIcon, File as FileIcon, Link as LinkIcon } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { taskApi, noteApi, configApi } from "@/lib/api";
 import { relativeTime } from "@/lib/utils";
@@ -247,14 +247,18 @@ export function CreateTaskModal({
     setTimeout(() => noteSelectRef.current?.focus(), 0);
   }
 
-  async function handleAddPathLink() {
+  /**
+   * 关联本地路径：directory=true 选目录，false 选文件。
+   * 存储都走 kind="path"，点击时走 openPath，文件/目录均可用系统默认应用打开。
+   */
+  async function handleAddPathLink(directory: boolean) {
     try {
-      const picked = await openDialog({ directory: true, multiple: false });
+      const picked = await openDialog({ directory, multiple: false });
       if (!picked || typeof picked !== "string") return;
       const label = picked.split(/[\\/]/).filter(Boolean).pop() ?? picked;
       setLinks((prev) => [...prev, { kind: "path", target: picked, label }]);
     } catch (e) {
-      message.error(`选择目录失败: ${e}`);
+      message.error(`选择${directory ? "目录" : "文件"}失败: ${e}`);
     }
   }
 
@@ -345,13 +349,15 @@ export function CreateTaskModal({
 
   const addMenu: MenuProps = {
     items: [
-      { key: "note", icon: <FileText size={14} />, label: "笔记" },
+      { key: "note", icon: <NotebookText size={14} />, label: "笔记" },
+      { key: "file", icon: <FileIcon size={14} />, label: "本地文件" },
       { key: "path", icon: <FolderIcon size={14} />, label: "本地目录" },
       { key: "url", icon: <LinkIcon size={14} />, label: "外部链接" },
     ],
     onClick: ({ key }) => {
       if (key === "note") handleAddNoteLink();
-      else if (key === "path") handleAddPathLink();
+      else if (key === "file") handleAddPathLink(false);
+      else if (key === "path") handleAddPathLink(true);
       else {
         setUrlInputOpen(true);
       }
@@ -714,7 +720,7 @@ export function CreateTaskModal({
             {links.map((l, idx) => {
               const icon =
                 l.kind === "note" ? (
-                  <FileText size={10} />
+                  <NotebookText size={10} />
                 ) : l.kind === "path" ? (
                   <FolderIcon size={10} />
                 ) : (
@@ -781,7 +787,7 @@ export function CreateTaskModal({
                   return (
                     <div className="flex items-center justify-between gap-2 py-0.5">
                       <span className="truncate flex-1 text-xs">
-                        <FileText
+                        <NotebookText
                           size={10}
                           style={{
                             display: "inline",

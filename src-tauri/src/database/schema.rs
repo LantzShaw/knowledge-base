@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use crate::error::AppError;
 
 /// 当前 Schema 版本
-pub const SCHEMA_VERSION: i32 = 22;
+pub const SCHEMA_VERSION: i32 = 23;
 
 /// 获取数据库版本
 pub fn get_version(conn: &Connection) -> Result<i32, AppError> {
@@ -52,6 +52,7 @@ pub fn migrate(conn: &Connection) -> Result<(), AppError> {
             19 => migrate_v19_to_v20(conn)?,
             20 => migrate_v20_to_v21(conn)?,
             21 => migrate_v21_to_v22(conn)?,
+            22 => migrate_v22_to_v23(conn)?,
             _ => {
                 return Err(AppError::Custom(format!(
                     "未知的数据库版本: {}",
@@ -893,5 +894,43 @@ fn migrate_v21_to_v22(conn: &Connection) -> Result<(), AppError> {
     )?;
 
     set_version(conn, 22)?;
+    Ok(())
+}
+
+/// v22 -> v23: 笔记加密基础字段（T-007 笔记加密保险库）
+///
+/// - `notes.is_encrypted` 0/1：是否处于加密态
+/// - `notes.encrypted_blob` BLOB：密文全量包（nonce ‖ ciphertext ‖ tag）
+/// - vault 主密码相关写 app_config：
+///   - `vault.salt`       16 字节 base64（派生 key 用的盐）
+///   - `vault.verifier`   加密后的常量字符串（用于解锁时校验密码对不对，不泄露 key）
+///
+/// 设计取舍：
+/// 1. **App 层加密**（B1 方案）：密文存在现有 notes 表的新 BLOB 列里，不换 SQLCipher
+/// 2. **加密笔记的 content 列保留"🔒 已加密"占位**：这样老代码读取 content 时不会看到乱码；
+///    FTS5 索引到的也是这个占位，自然过滤掉加密笔记的搜索命中
+/// 3. 忘记主密码 = 数据丢失（T-007 决策 ④）：verifier 不是 key，靠解密校验密码
+fn migrate_v22_to_v23(conn: &Connection) -> Result<(), AppError> {
+    log::info!("数据库迁移: v22 -> v23 (notes 加密字段 + vault 基础)");
+
+    let cols = list_columns(conn, "notes")?;
+    if !cols.iter().any(|c| c == "is_encrypted") {
+        conn.execute_batch(
+            "ALTER TABLE notes ADD COLUMN is_encrypted INTEGER NOT NULL DEFAULT 0;",
+        )?;
+    }
+    if !cols.iter().any(|c| c == "encrypted_blob") {
+        conn.execute_batch("ALTER TABLE notes ADD COLUMN encrypted_blob BLOB;")?;
+    }
+
+    // 部分索引，过滤/定位加密笔记的常用热路径
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_notes_encrypted
+         ON notes(is_encrypted) WHERE is_deleted = 0;",
+    )?;
+
+    // vault 相关配置是可选的——不预置，在首次 setup 时由代码写入
+
+    set_version(conn, 23)?;
     Ok(())
 }

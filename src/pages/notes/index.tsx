@@ -19,6 +19,7 @@ import {
   Popover,
   Tree,
   Divider,
+  Pagination,
   theme as antdTheme,
 } from "antd";
 import {
@@ -37,16 +38,17 @@ import {
   Filter as FilterIcon,
 } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { ColumnsType, TablePaginationConfig } from "antd/es/table";
+import type { ColumnsType } from "antd/es/table";
 import { save } from "@tauri-apps/plugin-dialog";
-import { noteApi, exportApi, folderApi } from "@/lib/api";
+import { noteApi, exportApi, folderApi, tagApi } from "@/lib/api";
 import { useTabsStore } from "@/store/tabs";
 import { useAppStore } from "@/store";
 import { stripHtml, relativeTime } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { NewNoteButton } from "@/components/NewNoteButton";
 import { createBlankAndOpen } from "@/lib/noteCreator";
-import type { Note, PageResult, Folder } from "@/types";
+// AntD 已有 Tag 组件同名，这里给类型起个别名避免冲突
+import type { Note, PageResult, Folder, Tag as NoteTag } from "@/types";
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -109,6 +111,222 @@ function collectAllFolderKeys(nodes: FolderTreeNode[]): number[] {
     if (n.children?.length) out.push(...collectAllFolderKeys(n.children));
   }
   return out;
+}
+
+/** 批量移动按钮：Popover 里用 Tree 选目标文件夹（含"移到根目录"快捷项）
+ *  onMove 由父组件提供：负责调后端 + 清 selection + 刷新列表 */
+function BatchMoveButton({
+  folders,
+  open,
+  onOpenChange,
+  onMove,
+}: {
+  folders: Folder[];
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onMove: (folderId: number | null) => void | Promise<void>;
+}) {
+  const treeData = useMemo(() => foldersToAntTree(folders), [folders]);
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
+  useEffect(() => {
+    if (open) setExpandedKeys(collectAllFolderKeys(treeData));
+  }, [open, treeData]);
+
+  return (
+    <Popover
+      trigger="click"
+      open={open}
+      onOpenChange={onOpenChange}
+      placement="bottomLeft"
+      destroyOnHidden
+      content={
+        <div style={{ width: 260 }}>
+          <div
+            style={{
+              maxHeight: 280,
+              overflowY: "auto",
+              margin: "0 -4px",
+              padding: "0 4px",
+            }}
+          >
+            {treeData.length === 0 ? (
+              <div
+                style={{
+                  textAlign: "center",
+                  padding: "16px 8px",
+                  fontSize: 12,
+                  opacity: 0.6,
+                }}
+              >
+                还没有文件夹
+              </div>
+            ) : (
+              <Tree
+                blockNode
+                treeData={treeData}
+                expandedKeys={expandedKeys}
+                onExpand={(keys) => setExpandedKeys(keys)}
+                onSelect={(keys) => {
+                  if (keys.length > 0) {
+                    void onMove(keys[0] as number);
+                  }
+                }}
+              />
+            )}
+          </div>
+          <Divider style={{ margin: "8px 0" }} />
+          <Button
+            size="small"
+            type="text"
+            block
+            icon={<CornerUpLeft size={13} />}
+            onClick={() => void onMove(null)}
+            style={{ textAlign: "left", justifyContent: "flex-start" }}
+          >
+            移到根目录
+          </Button>
+        </div>
+      }
+    >
+      <Button size="small" type="primary">
+        移动到…
+      </Button>
+    </Popover>
+  );
+}
+
+/** 批量打标签按钮：Popover 里多选标签，确认后追加到所有选中笔记（不清除原有）
+ *  onDone 由父组件注入：调 API + 清 selection + 刷新 */
+function BatchTagButton({
+  noteIds,
+  onDone,
+}: {
+  noteIds: number[];
+  onDone: (tagIds: number[]) => void | Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [allTags, setAllTags] = useState<NoteTag[]>([]);
+  const [picked, setPicked] = useState<number[]>([]);
+  const [filter, setFilter] = useState("");
+
+  // 每次打开时拉一次最新标签，并重置选择
+  useEffect(() => {
+    if (!open) return;
+    setPicked([]);
+    setFilter("");
+    tagApi
+      .list()
+      .then(setAllTags)
+      .catch((e) => message.error(`加载标签失败: ${e}`));
+  }, [open]);
+
+  const filtered = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return allTags;
+    return allTags.filter((t) => t.name.toLowerCase().includes(q));
+  }, [allTags, filter]);
+
+  function toggle(id: number) {
+    setPicked((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }
+
+  async function confirm() {
+    if (picked.length === 0) {
+      message.info("请选择要添加的标签");
+      return;
+    }
+    await onDone(picked);
+    setOpen(false);
+  }
+
+  return (
+    <Popover
+      trigger="click"
+      open={open}
+      onOpenChange={setOpen}
+      placement="bottomLeft"
+      destroyOnHidden
+      content={
+        <div style={{ width: 260 }}>
+          <Input
+            size="small"
+            placeholder="筛选标签..."
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            allowClear
+            style={{ marginBottom: 6 }}
+          />
+          <div
+            style={{
+              maxHeight: 220,
+              overflowY: "auto",
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 6,
+              padding: "2px 0",
+            }}
+          >
+            {filtered.length === 0 ? (
+              <div
+                style={{
+                  textAlign: "center",
+                  padding: "12px 8px",
+                  fontSize: 12,
+                  opacity: 0.6,
+                  width: "100%",
+                }}
+              >
+                {allTags.length === 0 ? "还没有标签" : "无匹配"}
+              </div>
+            ) : (
+              filtered.map((tag) => {
+                const active = picked.includes(tag.id);
+                return (
+                  <Tag
+                    key={tag.id}
+                    color={active ? tag.color || "blue" : undefined}
+                    onClick={() => toggle(tag.id)}
+                    style={{
+                      cursor: "pointer",
+                      padding: "2px 10px",
+                      fontSize: 13,
+                      fontWeight: active ? 600 : undefined,
+                      opacity: active ? 1 : 0.75,
+                    }}
+                  >
+                    {tag.name}
+                  </Tag>
+                );
+              })
+            )}
+          </div>
+          <Divider style={{ margin: "8px 0" }} />
+          <div className="flex justify-between items-center">
+            <span style={{ fontSize: 11, opacity: 0.6 }}>
+              已选 {picked.length} 个 · 将应用到 {noteIds.length} 篇
+            </span>
+            <Space size={4}>
+              <Button size="small" onClick={() => setOpen(false)}>
+                取消
+              </Button>
+              <Button
+                size="small"
+                type="primary"
+                disabled={picked.length === 0}
+                onClick={confirm}
+              >
+                添加
+              </Button>
+            </Space>
+          </div>
+        </div>
+      }
+    >
+      <Button size="small">打标签…</Button>
+    </Popover>
+  );
 }
 
 /** 笔记列表"目录"列的单元格：
@@ -263,11 +481,15 @@ export default function NoteListPage() {
     items: [],
     total: 0,
     page: 1,
-    page_size: 20,
+    page_size: 12,
   });
   const [loading, setLoading] = useState(false);
   const [keyword, setKeyword] = useState(searchParams.get("keyword") || "");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
+  /** 列表视图下选中的笔记 id，切换到其他视图/翻页自动清空 */
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  /** 批量移动 Popover 的开关 */
+  const [batchMoveOpen, setBatchMoveOpen] = useState(false);
 
   const folderId = searchParams.get("folder");
 
@@ -318,7 +540,7 @@ export default function NoteListPage() {
       try {
         const result = await noteApi.list({
           page,
-          page_size: viewMode === "timeline" ? 50 : 20,
+          page_size: viewMode === "timeline" ? 50 : 12,
           keyword: (kw ?? keyword) || undefined,
           folder_id: folderId ? Number(folderId) : undefined,
         });
@@ -354,8 +576,10 @@ export default function NoteListPage() {
     });
     if (!filePath) return;
     try {
-      await exportApi.exportSingle(record.id, filePath);
-      message.success("导出成功");
+      const assets = await exportApi.exportSingle(record.id, filePath);
+      message.success(
+        assets > 0 ? `导出成功，附带 ${assets} 个资产文件` : "导出成功"
+      );
     } catch (e) {
       message.error(`导出失败: ${e}`);
     }
@@ -385,18 +609,13 @@ export default function NoteListPage() {
     loadNotes(1, keyword);
   }, [loadNotes, keyword]);
 
-  const handleTableChange = useCallback(
-    (pagination: TablePaginationConfig) => {
-      loadNotes(pagination.current ?? 1);
-    },
-    [loadNotes],
-  );
-
   const handleViewChange = useCallback(
     (v: string) => {
       // startTransition 标记为非紧急，让 Segmented 滑块动画先跑完
       startTransition(() => {
         setViewMode(v as ViewMode);
+        // 切到非列表视图时清空批量选择（只有 list 有 checkbox）
+        if (v !== "list") setSelectedIds([]);
         if (v === "timeline") {
           loadNotes(1);
         }
@@ -407,6 +626,18 @@ export default function NoteListPage() {
 
   const columns: ColumnsType<Note> = useMemo(
     () => [
+      {
+        // 绝对序号：跨页连续（(page-1)*pageSize + 行内索引 + 1），翻页不重置
+        title: "#",
+        key: "index",
+        width: 44,
+        align: "right" as const,
+        render: (_: unknown, __: Note, index: number) => (
+          <span style={{ color: token.colorTextTertiary, fontSize: 12 }}>
+            {(data.page - 1) * data.page_size + index + 1}
+          </span>
+        ),
+      },
       {
         title: "标题",
         dataIndex: "title",
@@ -489,7 +720,7 @@ export default function NoteListPage() {
         ),
       },
     ],
-    [navigate, token.colorWarning, handleDelete, handleExport, folderMap, folders, loadNotes, data.page],
+    [navigate, token.colorWarning, token.colorTextTertiary, handleDelete, handleExport, folderMap, folders, loadNotes, data.page, data.page_size],
   );
 
   // 时间线分组（缓存）
@@ -524,9 +755,9 @@ export default function NoteListPage() {
   });
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-4xl mx-auto h-full flex flex-col min-h-0">
       {/* 顶部标题栏 */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-2 flex-shrink-0">
         <Title level={3} style={{ margin: 0, lineHeight: "32px" }}>
           笔记
         </Title>
@@ -551,7 +782,7 @@ export default function NoteListPage() {
       </div>
 
       {/* 搜索栏 */}
-      <Space.Compact className="mb-4" style={{ width: "100%" }}>
+      <Space.Compact className="mb-2 flex-shrink-0" style={{ width: "100%" }}>
         <Input
           placeholder="搜索笔记标题..."
           prefix={<Search size={14} />}
@@ -565,23 +796,119 @@ export default function NoteListPage() {
         </Button>
       </Space.Compact>
 
-      {/* 列表视图 */}
-      {viewMode === "list" && (
-        <Table
-          columns={columns}
-          dataSource={data.items}
-          rowKey="id"
-          loading={loading}
-          size="small"
-          onChange={handleTableChange}
-          pagination={{
-            current: data.page,
-            pageSize: data.page_size,
-            total: data.total,
-            showTotal: (total) => `共 ${total} 篇`,
-            showSizeChanger: false,
+      {/* 批量工具条：仅列表视图 + 有选中时显示 */}
+      {viewMode === "list" && selectedIds.length > 0 && (
+        <div
+          className="mb-2 flex items-center gap-2 flex-shrink-0"
+          style={{
+            padding: "8px 12px",
+            borderRadius: 8,
+            background: token.colorPrimaryBg,
+            color: token.colorPrimary,
+            border: `1px solid ${token.colorPrimaryBorder}`,
           }}
-        />
+        >
+          <span style={{ fontSize: 13 }}>已选 {selectedIds.length} 条</span>
+          <Divider type="vertical" />
+          <BatchMoveButton
+            folders={folders}
+            open={batchMoveOpen}
+            onOpenChange={setBatchMoveOpen}
+            onMove={async (folderId) => {
+              try {
+                const n = await noteApi.moveBatch(selectedIds, folderId);
+                message.success(`已移动 ${n} 条到目标文件夹`);
+                setSelectedIds([]);
+                setBatchMoveOpen(false);
+                await loadNotes(data.page);
+                useAppStore.getState().bumpFoldersRefresh();
+              } catch (e) {
+                message.error(`移动失败: ${e}`);
+              }
+            }}
+          />
+          <BatchTagButton
+            noteIds={selectedIds}
+            onDone={async (tagIds) => {
+              try {
+                const n = await noteApi.addTagsBatch(selectedIds, tagIds);
+                message.success(`已添加 ${n} 条关联`);
+                setSelectedIds([]);
+                await loadNotes(data.page);
+                useAppStore.getState().bumpTagsRefresh();
+              } catch (e) {
+                message.error(`打标签失败: ${e}`);
+              }
+            }}
+          />
+          <Popconfirm
+            title={`确认将 ${selectedIds.length} 篇笔记移到回收站？`}
+            okText="移到回收站"
+            okButtonProps={{ danger: true }}
+            onConfirm={async () => {
+              try {
+                const n = await noteApi.trashBatch(selectedIds);
+                message.success(`已移到回收站 ${n} 条`);
+                setSelectedIds([]);
+                await loadNotes(data.page);
+              } catch (e) {
+                message.error(`删除失败: ${e}`);
+              }
+            }}
+          >
+            <Button size="small" danger icon={<Trash2 size={14} />}>
+              删除
+            </Button>
+          </Popconfirm>
+          <Button size="small" onClick={() => setSelectedIds([])}>
+            取消选择
+          </Button>
+        </div>
+      )}
+
+      {/* 列表视图：表格 + 分页条共享同一个白色卡片，短列表底下不再露出页面背景 */}
+      {viewMode === "list" && (
+        <div
+          className="flex-1 flex flex-col min-h-0 notes-list-flat"
+          style={{
+            background: token.colorBgContainer,
+            borderRadius: 8,
+            overflow: "hidden",
+          }}
+        >
+          <div className="flex-1 min-h-0 overflow-auto">
+            <Table
+              columns={columns}
+              dataSource={data.items}
+              rowKey="id"
+              loading={loading}
+              size="small"
+              pagination={false}
+              sticky
+              rowSelection={{
+                selectedRowKeys: selectedIds,
+                onChange: (keys) => setSelectedIds(keys.map((k) => Number(k))),
+                columnWidth: 40,
+              }}
+            />
+          </div>
+          <div
+            className="flex-shrink-0 flex justify-end items-center px-3 py-2"
+          >
+            <Pagination
+              current={data.page}
+              pageSize={data.page_size}
+              total={data.total}
+              showTotal={(total) => `共 ${total} 篇`}
+              showSizeChanger={false}
+              onChange={(page) => {
+                setSelectedIds([]);
+                loadNotes(page);
+              }}
+              size="small"
+            />
+          </div>
+        </div>
       )}
 
       {/* 卡片视图（虚拟滚动） */}

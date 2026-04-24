@@ -22,6 +22,41 @@ impl NoteService {
         db.update_note(id, input)
     }
 
+    /// 批量移动笔记到指定文件夹；返回实际移动的条数
+    ///
+    /// - `folder_id = None` → 移到根目录
+    /// - folder_id 的合法性由前端（`folderApi.list()`）保证；这里不再 round-trip 校验
+    pub fn move_batch(
+        db: &Database,
+        ids: &[i64],
+        folder_id: Option<i64>,
+    ) -> Result<usize, AppError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        db.move_notes_batch(ids, folder_id)
+    }
+
+    /// 批量软删除（移入回收站）；返回实际标记删除的条数
+    pub fn trash_batch(db: &Database, ids: &[i64]) -> Result<usize, AppError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        db.soft_delete_notes_batch(ids)
+    }
+
+    /// 批量给多篇笔记追加标签（不清除原有标签）；返回新增的关联条数
+    pub fn add_tags_batch(
+        db: &Database,
+        note_ids: &[i64],
+        tag_ids: &[i64],
+    ) -> Result<usize, AppError> {
+        if note_ids.is_empty() || tag_ids.is_empty() {
+            return Ok(0);
+        }
+        db.add_tags_to_notes_batch(note_ids, tag_ids)
+    }
+
     /// 删除笔记（永久删除，预留给未来使用）
     #[allow(dead_code)]
     pub fn delete(db: &Database, id: i64) -> Result<(), AppError> {
@@ -95,5 +130,58 @@ impl NoteService {
             page,
             page_size,
         })
+    }
+
+    // ─── T-007 笔记加密 ────────────────────────────
+
+    /// 加密这篇笔记：读 content → vault 加密 → 写入 blob + 占位 content
+    ///
+    /// 要求 vault 已解锁。调用前自行检查 `VaultService::status`。
+    pub fn encrypt_note(
+        db: &Database,
+        vault: &std::sync::RwLock<crate::services::vault::VaultState>,
+        id: i64,
+    ) -> Result<(), AppError> {
+        // 读现有明文 content
+        let note = db
+            .get_note(id)?
+            .ok_or_else(|| AppError::NotFound(format!("笔记 {} 不存在", id)))?;
+        if note.is_encrypted {
+            return Err(AppError::Custom("笔记已经处于加密态".to_string()));
+        }
+        let blob = crate::services::vault::VaultService::encrypt_plaintext(
+            vault,
+            note.content.as_bytes(),
+        )?;
+        // 占位符不会参与 FTS5 匹配（跟标题分隔开）；前端也用它做"已加密"提示
+        const PLACEHOLDER: &str = "🔒 已加密内容——请解锁后查看";
+        db.enable_note_encryption(id, PLACEHOLDER, &blob)?;
+        Ok(())
+    }
+
+    /// 解密并返回明文（不改库状态）。vault 必须已解锁
+    pub fn decrypt_note(
+        db: &Database,
+        vault: &std::sync::RwLock<crate::services::vault::VaultState>,
+        id: i64,
+    ) -> Result<String, AppError> {
+        let blob = db
+            .get_encrypted_blob(id)?
+            .ok_or_else(|| AppError::NotFound(format!("笔记 {} 未加密或不存在", id)))?;
+        let plaintext_bytes =
+            crate::services::vault::VaultService::decrypt_blob(vault, &blob)?;
+        String::from_utf8(plaintext_bytes)
+            .map_err(|e| AppError::Custom(format!("密文解码为 UTF-8 失败: {}", e)))
+    }
+
+    /// 取消加密：解密后把明文写回 content + 清 blob
+    pub fn disable_encrypt(
+        db: &Database,
+        vault: &std::sync::RwLock<crate::services::vault::VaultState>,
+        id: i64,
+    ) -> Result<(), AppError> {
+        let plaintext = Self::decrypt_note(db, vault, id)?;
+        db.disable_note_encryption(id, &plaintext)?;
+        Ok(())
     }
 }

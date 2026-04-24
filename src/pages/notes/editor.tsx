@@ -18,10 +18,11 @@ import {
   App as AntdApp,
   theme as antdTheme,
 } from "antd";
-import { ArrowLeft, Save, Trash2, Pin, FolderOpen, Tags, Link2, Share, Maximize2, Minimize2, FileText as FileTextIcon, ChevronRight, CornerUpLeft, Folder as FolderIcon, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft, Save, Trash2, Pin, FolderOpen, Tags, Link2, Share, Maximize2, Minimize2, FileText as FileTextIcon, ChevronRight, CornerUpLeft, Folder as FolderIcon, Eye, EyeOff, Lock, Unlock } from "lucide-react";
 import { useAppStore } from "@/store";
 import { useTabsStore } from "@/store/tabs";
-import { noteApi, tagApi, folderApi, linkApi, exportApi, sourceFileApi } from "@/lib/api";
+import { noteApi, tagApi, folderApi, linkApi, exportApi, sourceFileApi, vaultApi } from "@/lib/api";
+import { VaultModal } from "@/components/vault/VaultModal";
 import { save } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
@@ -463,6 +464,10 @@ export default function NoteEditorPage() {
   // PDF 预览 Modal 状态
   const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false);
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string>("");
+  /** PDF 原文件绝对路径（供 Modal 里"用系统应用打开"兜底按钮调 openPath） */
+  const [pdfPreviewAbsPath, setPdfPreviewAbsPath] = useState<string>("");
+  /** PDF 预览 Modal 是否最大化（全屏铺满） */
+  const [pdfPreviewMaximized, setPdfPreviewMaximized] = useState(false);
 
   const noteId = Number(id);
 
@@ -739,6 +744,63 @@ export default function NoteEditorPage() {
     }
   }
 
+  /**
+   * T-007: 切换笔记加密态。
+   *
+   * 前置：vault 必须已解锁。未解锁时弹 unlock/setup Modal，解锁后用户需再点一次本按钮。
+   *
+   * 加密时：读当前 content → 后端调 vault 加密 → content 变成 "🔒 已加密..." 占位；
+   * 取消加密时：后端解密得到原文并写回 content。
+   * 加密/取消后都重新 loadNote() 拿最新态。
+   */
+  const [vaultModal, setVaultModal] = useState<{
+    open: boolean;
+    mode: "setup" | "unlock";
+  }>({ open: false, mode: "unlock" });
+
+  async function handleToggleEncrypt() {
+    if (!note) return;
+    // 先确认 vault 状态
+    let vs;
+    try {
+      vs = await vaultApi.status();
+    } catch (e) {
+      message.error(`读取 vault 状态失败：${e}`);
+      return;
+    }
+    if (vs === "notset") {
+      // 首次设置
+      setVaultModal({ open: true, mode: "setup" });
+      message.info("请先设置主密码，然后再点加密");
+      return;
+    }
+    if (vs === "locked") {
+      setVaultModal({ open: true, mode: "unlock" });
+      message.info("请先解锁保险库，然后再点加密");
+      return;
+    }
+    // unlocked
+    try {
+      if (note.is_encrypted) {
+        await vaultApi.disableEncrypt(noteId);
+        message.success("已取消加密");
+      } else {
+        // 先把当前编辑器未保存的 content 落库，否则 encrypt_note 读到的是老内容
+        if (dirty) await handleSave(true);
+        await vaultApi.encryptNote(noteId);
+        message.success("已加密（主界面将显示占位文本）");
+      }
+      // 重新拉笔记以拿到最新 is_encrypted / content 占位符
+      const fresh = await noteApi.get(noteId);
+      setNote(fresh);
+      setContent(fresh.content);
+      setTitle(fresh.title);
+      setDirty(false);
+    } catch (e) {
+      message.error(String(e));
+    }
+  }
+
   /** Ctrl/Cmd + 点击 [[标题]] 时跳转到对应笔记 */
   async function handleWikiLinkClick(wikiTitle: string) {
     try {
@@ -799,6 +861,7 @@ export default function NoteEditorPage() {
       // PDF 用内置 iframe Modal 预览；其他类型（Word 等）用系统默认应用打开
       if (note?.source_file_type === "pdf") {
         setPdfPreviewUrl(convertFileSrc(abs));
+        setPdfPreviewAbsPath(abs);
         setPdfPreviewOpen(true);
       } else {
         await openPath(abs);
@@ -816,8 +879,10 @@ export default function NoteEditorPage() {
     });
     if (!filePath) return;
     try {
-      await exportApi.exportSingle(noteId, filePath);
-      message.success("导出成功");
+      const assets = await exportApi.exportSingle(noteId, filePath);
+      message.success(
+        assets > 0 ? `导出成功，附带 ${assets} 个资产文件` : "导出成功"
+      );
     } catch (e) {
       message.error(`导出失败: ${e}`);
     }
@@ -969,6 +1034,19 @@ export default function NoteEditorPage() {
               onClick={handleToggleHidden}
             />
           </Tooltip>
+          <Tooltip
+            title={
+              note?.is_encrypted
+                ? "取消加密（恢复为普通笔记）"
+                : "加密此笔记（需先设置并解锁主密码）"
+            }
+          >
+            <Button
+              type={note?.is_encrypted ? "primary" : "default"}
+              icon={note?.is_encrypted ? <Lock size={16} /> : <Unlock size={16} />}
+              onClick={handleToggleEncrypt}
+            />
+          </Tooltip>
           <Button
             type="primary"
             icon={<Save size={16} />}
@@ -1059,12 +1137,72 @@ export default function NoteEditorPage() {
       {/* PDF 原文件预览 */}
       <Modal
         open={pdfPreviewOpen}
-        title={note?.title ? `${note.title} · 原始 PDF` : "原始 PDF"}
+        title={
+          <div
+            className="flex items-center justify-between"
+            style={{ paddingRight: 32, gap: 8 }}
+          >
+            <span className="truncate" style={{ minWidth: 0 }}>
+              {note?.title ? `${note.title} · 原始 PDF` : "原始 PDF"}
+            </span>
+            <Space size={4}>
+              <Tooltip
+                title={pdfPreviewMaximized ? "还原窗口" : "最大化"}
+              >
+                <Button
+                  size="small"
+                  type="text"
+                  icon={
+                    pdfPreviewMaximized ? (
+                      <Minimize2 size={14} />
+                    ) : (
+                      <Maximize2 size={14} />
+                    )
+                  }
+                  onClick={() => setPdfPreviewMaximized((v) => !v)}
+                />
+              </Tooltip>
+              {/*
+                兜底按钮：部分 WebView2（较老版本 / 更严格的 CSP 配置）会拦截
+                iframe 加载 asset: 协议并显示"已阻止此内容"。点这个按钮可
+                立即切到系统 PDF 阅读器，避免卡在空白页。
+              */}
+              <Button
+                size="small"
+                icon={<FolderOpen size={14} />}
+                onClick={async () => {
+                  if (!pdfPreviewAbsPath) return;
+                  try {
+                    await openPath(pdfPreviewAbsPath);
+                    setPdfPreviewOpen(false);
+                  } catch (e) {
+                    message.error(`打开失败: ${e}`);
+                  }
+                }}
+              >
+                用系统应用打开
+              </Button>
+            </Space>
+          </div>
+        }
         footer={null}
-        onCancel={() => setPdfPreviewOpen(false)}
-        width="85vw"
-        style={{ top: 30 }}
-        styles={{ body: { padding: 0, height: "78vh" } }}
+        onCancel={() => {
+          setPdfPreviewOpen(false);
+          // 下次打开回到默认"大窗口"态，避免总是全屏打扰
+          setPdfPreviewMaximized(false);
+        }}
+        width={pdfPreviewMaximized ? "100vw" : "85vw"}
+        style={
+          pdfPreviewMaximized
+            ? { top: 0, paddingBottom: 0, maxWidth: "100vw", margin: 0 }
+            : { top: 30 }
+        }
+        styles={{
+          body: {
+            padding: 0,
+            height: pdfPreviewMaximized ? "calc(100vh - 56px)" : "78vh",
+          },
+        }}
         destroyOnHidden
       >
         {pdfPreviewUrl && (
@@ -1110,6 +1248,15 @@ export default function NoteEditorPage() {
           )}
         />
       </Modal>
+
+      <VaultModal
+        open={vaultModal.open}
+        mode={vaultModal.mode}
+        onClose={() => setVaultModal((s) => ({ ...s, open: false }))}
+        onSuccess={() => {
+          message.info("保险库已就绪，再次点击锁图标即可加密此笔记");
+        }}
+      />
     </div>
   );
 }

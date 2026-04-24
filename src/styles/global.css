@@ -494,3 +494,10 @@ body,
 .ai-markdown > *:first-child { margin-top: 0; }
 .ai-markdown > *:last-child { margin-bottom: 0; }
 
+/* ─── 笔记列表视图：去掉 Table 行分割线 ───────────────
+   把表格行做成"无横线纯白卡片"，和分页条共享连续白底。
+   只在 .notes-list-flat 下生效，避免影响其他页面的 Table。 */
+.notes-list-flat .ant-table-tbody > tr > td {
+  border-bottom: 0 !important;
+}
+

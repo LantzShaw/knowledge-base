@@ -76,6 +76,84 @@ pub fn decrypt(encoded: &str) -> Result<String, AppError> {
     String::from_utf8(plain).map_err(|e| AppError::Custom(format!("解密后非法 UTF-8: {}", e)))
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// T-007 笔记加密保险库（Vault）
+//
+// 与上面的 WebDAV 密码加密完全独立：
+// - 上面 encrypt/decrypt：key 来自 hostname（应用自动派生，用户无感）
+// - 下面 aead_encrypt/aead_decrypt + derive_user_key：key 来自用户主密码
+//
+// 数据包格式保持一致：nonce(12) || ciphertext + GCM tag(16)
+// ═══════════════════════════════════════════════════════════════════════
+
+use aes_gcm::aead::rand_core::RngCore as _;
+use argon2::{Algorithm, Argon2, Params, Version};
+
+/// 主密钥长度（AES-256）
+pub const KEY_LEN: usize = 32;
+/// AES-GCM nonce 长度
+pub const NONCE_LEN: usize = 12;
+/// Argon2 盐长度（≥16）
+pub const SALT_LEN: usize = 16;
+
+/// Argon2id 参数：内存 19 MiB / 迭代 2 / 并行 1
+///
+/// 比 OWASP 2024 建议最低值稍宽松，解锁单次耗时 ~50~200ms，弱机体验可接受。
+fn argon2_params() -> Argon2<'static> {
+    let params = Params::new(19_456, 2, 1, Some(KEY_LEN)).expect("argon2 params constant valid");
+    Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
+}
+
+/// 生成新盐（16 字节随机）
+pub fn new_salt() -> [u8; SALT_LEN] {
+    let mut salt = [0u8; SALT_LEN];
+    OsRng.fill_bytes(&mut salt);
+    salt
+}
+
+/// 从主密码 + 盐派生 32 字节 AES-256 key（Argon2id）
+///
+/// 耗时约 50~200ms。Command 里调用时务必用 async（tokio::task::spawn_blocking）
+/// 或放 vault 初始化路径，不要在主线程同步 block。
+pub fn derive_user_key(password: &str, salt: &[u8]) -> Result<[u8; KEY_LEN], AppError> {
+    let argon2 = argon2_params();
+    let mut key = [0u8; KEY_LEN];
+    argon2
+        .hash_password_into(password.as_bytes(), salt, &mut key)
+        .map_err(|e| AppError::Custom(format!("密钥派生失败: {}", e)))?;
+    Ok(key)
+}
+
+/// 用 key 加密 → blob（nonce ‖ ciphertext+tag）
+pub fn aead_encrypt(key: &[u8; KEY_LEN], plaintext: &[u8]) -> Result<Vec<u8>, AppError> {
+    let cipher = Aes256Gcm::new_from_slice(key)
+        .map_err(|e| AppError::Custom(format!("AES 初始化失败: {}", e)))?;
+    let mut nonce_bytes = [0u8; NONCE_LEN];
+    OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let ciphertext = cipher
+        .encrypt(nonce, plaintext)
+        .map_err(|e| AppError::Custom(format!("加密失败: {}", e)))?;
+    let mut blob = Vec::with_capacity(NONCE_LEN + ciphertext.len());
+    blob.extend_from_slice(&nonce_bytes);
+    blob.extend_from_slice(&ciphertext);
+    Ok(blob)
+}
+
+/// 解密 blob → 明文。密钥错 / blob 被篡改 → `AppError::Custom`（调用方当作"密码错误"）
+pub fn aead_decrypt(key: &[u8; KEY_LEN], blob: &[u8]) -> Result<Vec<u8>, AppError> {
+    if blob.len() < NONCE_LEN + 16 {
+        return Err(AppError::Custom("密文过短，可能已损坏".to_string()));
+    }
+    let (nonce_bytes, ciphertext) = blob.split_at(NONCE_LEN);
+    let cipher = Aes256Gcm::new_from_slice(key)
+        .map_err(|e| AppError::Custom(format!("AES 初始化失败: {}", e)))?;
+    let nonce = Nonce::from_slice(nonce_bytes);
+    cipher
+        .decrypt(nonce, ciphertext)
+        .map_err(|_| AppError::Custom("解密失败：密码错误或数据已损坏".to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,5 +172,46 @@ mod tests {
         let a = encrypt(p).unwrap();
         let b = encrypt(p).unwrap();
         assert_ne!(a, b, "nonce 必须随机，两次加密结果应不同");
+    }
+
+    // ─── T-007 vault 相关测试 ─────────
+    //
+    // 测试用低开销 argon2 参数（8 KiB / 1 iter）避免跑太慢；真实参数见 argon2_params()
+
+    fn derive_key_fast(password: &str, salt: &[u8]) -> [u8; KEY_LEN] {
+        let params = Params::new(8, 1, 1, Some(KEY_LEN)).unwrap();
+        let a2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+        let mut key = [0u8; KEY_LEN];
+        a2.hash_password_into(password.as_bytes(), salt, &mut key)
+            .unwrap();
+        key
+    }
+
+    #[test]
+    fn aead_roundtrip() {
+        let salt = new_salt();
+        let key = derive_key_fast("hunter2", &salt);
+        let plaintext = "Hello, secret 机密 🔒".as_bytes();
+        let blob = aead_encrypt(&key, plaintext).unwrap();
+        assert!(blob.len() > NONCE_LEN);
+        let decoded = aead_decrypt(&key, &blob).unwrap();
+        assert_eq!(decoded, plaintext);
+    }
+
+    #[test]
+    fn aead_wrong_key_fails() {
+        let salt = new_salt();
+        let k1 = derive_key_fast("correct", &salt);
+        let k2 = derive_key_fast("wrong", &salt);
+        let blob = aead_encrypt(&k1, b"data").unwrap();
+        assert!(aead_decrypt(&k2, &blob).is_err());
+    }
+
+    #[test]
+    fn aead_truncated_fails() {
+        let salt = new_salt();
+        let key = derive_key_fast("x", &salt);
+        let blob = aead_encrypt(&key, b"abc").unwrap();
+        assert!(aead_decrypt(&key, &blob[..NONCE_LEN]).is_err());
     }
 }

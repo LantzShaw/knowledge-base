@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import { theme as antdTheme } from "antd";
-import { FileText } from "lucide-react";
+import { NotebookText } from "lucide-react";
 
 export interface WikiSuggestionItem {
   id: number;
@@ -99,7 +99,7 @@ export const WikiLinkSuggestionList = forwardRef<WikiLinkSuggestionListRef, Prop
                 color: token.colorText,
               }}
             >
-              <FileText size={14} />
+              <NotebookText size={14} />
               <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {item.title}
               </span>

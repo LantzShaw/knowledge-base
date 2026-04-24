@@ -1,5 +1,5 @@
 import { Tooltip, theme as antdTheme } from "antd";
-import { FileText, Folder as FolderIcon, Link as LinkIcon, Clock } from "lucide-react";
+import { NotebookText, Folder as FolderIcon, Link as LinkIcon, Clock } from "lucide-react";
 import type { Task } from "@/types";
 
 interface Props {
@@ -89,7 +89,7 @@ export function TaskCard({ task, onToggle, onClick, onDragStart, compact }: Prop
           {task.links.length > 0 && !compact && (
             <div className="flex flex-wrap items-center gap-1 mt-1">
               {task.links.slice(0, 2).map((l) => {
-                const Icon = l.kind === "note" ? FileText : l.kind === "path" ? FolderIcon : LinkIcon;
+                const Icon = l.kind === "note" ? NotebookText : l.kind === "path" ? FolderIcon : LinkIcon;
                 return (
                   <span
                     key={l.id}

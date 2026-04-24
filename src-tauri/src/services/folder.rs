@@ -62,4 +62,34 @@ impl FolderService {
     pub fn list_tree(db: &Database) -> Result<Vec<Folder>, AppError> {
         db.list_folders_tree()
     }
+
+    /// T-006: 把 "工作/周报" 这样的路径字符串解析成 folder_id，不存在则一路递归创建
+    ///
+    /// - 路径分隔符用 "/"（跨平台友好，避免 Windows `\`）
+    /// - 空串或纯空白 → 返回 None（即根目录）
+    /// - 段内的前后空白会被 trim；空段跳过（容忍 `"a//b"`）
+    /// - 每一段先 `find_folder_by_name` 命中则复用，否则 `create_folder` 新建
+    pub fn ensure_path(db: &Database, path: &str) -> Result<Option<i64>, AppError> {
+        let segments: Vec<&str> = path
+            .split('/')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect();
+        if segments.is_empty() {
+            return Ok(None);
+        }
+
+        let mut parent: Option<i64> = None;
+        for name in segments {
+            let existing = db.find_folder_by_name(parent, name)?;
+            parent = match existing {
+                Some(id) => Some(id),
+                None => {
+                    let f = db.create_folder(name, parent)?;
+                    Some(f.id)
+                }
+            };
+        }
+        Ok(parent)
+    }
 }

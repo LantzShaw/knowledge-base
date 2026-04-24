@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Modal, Input, Empty, Spin, theme as antdTheme } from "antd";
 import {
   Search,
-  FileText,
+  NotebookText,
   Home,
   Calendar,
   Tags,
@@ -21,7 +21,7 @@ import type { SearchResult } from "@/types";
 /** 快速导航页面 */
 const pages = [
   { path: "/", icon: <Home size={14} />, label: "首页" },
-  { path: "/notes", icon: <FileText size={14} />, label: "笔记列表" },
+  { path: "/notes", icon: <NotebookText size={14} />, label: "笔记列表" },
   { path: "/search", icon: <Search size={14} />, label: "搜索" },
   { path: "/daily", icon: <Calendar size={14} />, label: "每日笔记" },
   { path: "/tags", icon: <Tags size={14} />, label: "标签" },
@@ -250,7 +250,7 @@ export function CommandPalette({ open, onClose, onOpenShortcuts }: CommandPalett
                   }}
                   onMouseEnter={() => setSelectedIndex(idx)}
                 >
-                  <FileText size={14} style={{ color: token.colorTextSecondary, flexShrink: 0 }} />
+                  <NotebookText size={14} style={{ color: token.colorTextSecondary, flexShrink: 0 }} />
                   <div className="flex-1 min-w-0">
                     <div className="truncate text-sm">{note.title || "无标题"}</div>
                     {note.snippet && (

@@ -20,7 +20,7 @@ import {
   Sun,
   CalendarRange,
   ChevronRight,
-  FileText,
+  NotebookText,
   Folder as FolderIcon,
   Link as LinkIcon,
   Trash2,
@@ -133,13 +133,25 @@ function describeDueDate(due: string | null): { text: string; overdue: boolean }
 }
 
 /** SidePanel 的 TasksPanel 和主区共享的筛选键 */
-type SmartFilter = "todo" | "done" | "all" | "overdue" | "today" | "urgent";
+type SmartFilter =
+  | "todo"
+  | "done"
+  | "all"
+  | "overdue"
+  | "today"
+  | "week"
+  | "no-date"
+  | "urgent"
+  | "normal"
+  | "low"
+  | "recurring"
+  | "linked";
 
 /** URL `?filter=` → 传给 taskApi.list 的 status 参数 */
 function filterToStatusArg(filter: SmartFilter): 0 | 1 | undefined {
   if (filter === "done") return 1;
   if (filter === "all") return undefined;
-  // todo / overdue / today / urgent 都只看未完成
+  // 其他维度都基于未完成
   return 0;
 }
 
@@ -156,13 +168,27 @@ function applySmartFilter(tasks: Task[], filter: SmartFilter): Task[] {
       return tasks.filter(
         (t) => t.due_date && dueDateOnly(t.due_date) === today,
       );
+    case "week":
+      return tasks.filter((t) => {
+        if (!t.due_date) return false;
+        const day = dueDateOnly(t.due_date);
+        return day > today && day <= weekEnd;
+      });
+    case "no-date":
+      return tasks.filter((t) => !t.due_date);
     case "urgent":
       return tasks.filter((t) => t.priority === 0);
+    case "normal":
+      return tasks.filter((t) => t.priority === 1);
+    case "low":
+      return tasks.filter((t) => t.priority === 2);
+    case "recurring":
+      return tasks.filter((t) => t.repeat_kind && t.repeat_kind !== "none");
+    case "linked":
+      return tasks.filter((t) => t.links && t.links.length > 0);
     default:
       return tasks;
   }
-  // weekEnd 暂未直接对应单独的 filter，但保留实现基础供后续"本周"扩展
-  void weekEnd;
 }
 
 /** 动态标题：和 SidePanel 选中项呼应，给用户"看的是什么"的反馈 */
@@ -172,7 +198,13 @@ function filterTitle(filter: SmartFilter): string {
     case "all": return "全部任务";
     case "overdue": return "逾期任务";
     case "today": return "今天的任务";
+    case "week": return "本周到期";
+    case "no-date": return "无日期任务";
     case "urgent": return "紧急任务";
+    case "normal": return "普通任务";
+    case "low": return "低优先级";
+    case "recurring": return "循环任务";
+    case "linked": return "有关联任务";
     default: return "待办";
   }
 }
@@ -368,9 +400,21 @@ export default function TasksPage() {
                 ? "太棒了，没有逾期任务 ✨"
                 : filter === "today"
                   ? "今天没有到期的任务"
-                  : filter === "urgent"
-                    ? "没有紧急任务"
-                    : "还没有任务，点右上「新建任务」开始吧"
+                  : filter === "week"
+                    ? "本周没有到期任务"
+                    : filter === "no-date"
+                      ? "所有任务都有日期"
+                      : filter === "urgent"
+                        ? "没有紧急任务"
+                        : filter === "normal"
+                          ? "没有普通优先级任务"
+                          : filter === "low"
+                            ? "没有低优先级任务"
+                            : filter === "recurring"
+                              ? "没有循环任务"
+                              : filter === "linked"
+                                ? "没有关联笔记/文件的任务"
+                                : "还没有任务，点右上「新建任务」开始吧"
           }
         />
       ) : (
@@ -659,7 +703,7 @@ function TaskRow({ task, isLast, token, onToggle, onDelete, onEdit, onOpenLink }
                 }}
                 title={l.target}
               >
-                {l.kind === "note" && <FileText size={10} />}
+                {l.kind === "note" && <NotebookText size={10} />}
                 {l.kind === "path" && <FolderIcon size={10} />}
                 {l.kind === "url" && <LinkIcon size={10} />}
                 <span className="truncate max-w-[180px]">

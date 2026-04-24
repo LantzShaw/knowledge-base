@@ -26,6 +26,8 @@ export interface Note {
   is_pinned: boolean;
   /** T-003: 是否"隐藏"（主列表/搜索/反链/图谱/RAG 全部过滤；wiki 跳转仍可访问）*/
   is_hidden: boolean;
+  /** T-007: 是否加密。content 字段会是占位符，真实内容需调 decryptNote */
+  is_encrypted: boolean;
   word_count: number;
   created_at: string;
   updated_at: string;
@@ -242,6 +244,32 @@ export interface PlanTodayResponse {
   summary?: string | null;
 }
 
+// ─── AI 写笔记并归档（T-006） ────────────
+
+export type TargetLength = "short" | "medium" | "long";
+
+export interface DraftNoteRequest {
+  topic: string;
+  reference?: string | null;
+  /** short=100~300 / medium=300~800 / long=800~2000 */
+  targetLength?: TargetLength;
+}
+
+/** AI 生成的笔记草稿（未落库，Modal 里用户确认后才写入）*/
+export interface DraftNoteResponse {
+  title: string;
+  /** Markdown 正文 */
+  content: string;
+  /** 建议目录路径，如 "工作/周报"；空串 = 根目录 */
+  folderPath: string;
+  reason?: string | null;
+}
+
+// ─── T-007 笔记加密 / Vault ─────────────────────
+
+/** Vault 整体状态（三态机）*/
+export type VaultStatus = "notset" | "locked" | "unlocked";
+
 // ─── 导入 ─────────────────────────────────────
 
 /** 扫描到的文件在库中的匹配类型（后端扫描时判定） */
@@ -329,6 +357,8 @@ export interface ExportResult {
   exported: number;
   errors: string[];
   output_dir: string;
+  /** 拷贝到 .assets/ 的资产文件总数（图片+附件，按物理文件去重） */
+  assets_copied: number;
 }
 
 /** 导出进度 */

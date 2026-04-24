@@ -25,6 +25,7 @@ pub struct SystemInfo {
 pub struct Note {
     pub id: i64,
     pub title: String,
+    /// 明文 content。加密笔记这里是"🔒 已加密"占位符；真实内容需调 decrypt_note 拿
     pub content: String,
     pub folder_id: Option<i64>,
     pub is_daily: bool,
@@ -32,6 +33,8 @@ pub struct Note {
     pub is_pinned: bool,
     /// T-003: 是否"隐藏"。默认视图全部过滤；wiki link 跳转仍可打开
     pub is_hidden: bool,
+    /// T-007: 是否加密。前端据此决定是否显示"已加密"/"解锁查看"按钮
+    pub is_encrypted: bool,
     pub word_count: i64,
     pub created_at: String,
     pub updated_at: String,
@@ -39,6 +42,22 @@ pub struct Note {
     pub source_file_path: Option<String>,
     /// 原始文件类型："pdf" / "docx" / "doc" / null
     pub source_file_type: Option<String>,
+}
+
+// ─── T-007 笔记加密保险库 ──────────────────────
+
+/// Vault 整体状态
+///
+/// 三元状态机：
+/// - `NotSet`：还没设置过主密码，首次使用前要走 setup
+/// - `Locked`：已设置但未解锁（会话启动态 / 手动锁定后）
+/// - `Unlocked`：会话内存里缓存了主密钥；可以加/解密
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum VaultStatus {
+    NotSet,
+    Locked,
+    Unlocked,
 }
 
 /// 创建/更新笔记的入参
@@ -355,6 +374,8 @@ pub struct ExportResult {
     pub exported: usize,
     pub errors: Vec<String>,
     pub output_dir: String,
+    /// 拷贝到 .assets/ 目录的资产文件总数（图片 + 附件，按物理文件去重）
+    pub assets_copied: usize,
 }
 
 /// 导出进度（通过事件推送）
@@ -734,6 +755,59 @@ pub struct PlanTodayResponse {
     pub tasks: Vec<TaskSuggestion>,
     /// 一句总结 AI 对今日安排的思路；可选
     pub summary: Option<String>,
+}
+
+// ─── AI 写笔记并归档（T-006） ──────────────
+
+/// 笔记目标长度
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TargetLength {
+    Short,  // 短，100~300 字
+    Medium, // 中等，300~800 字（默认）
+    Long,   // 长篇，800~2000 字
+}
+
+impl Default for TargetLength {
+    fn default() -> Self {
+        Self::Medium
+    }
+}
+
+impl TargetLength {
+    /// 给模型看的字数要求提示
+    pub fn word_hint(&self) -> &'static str {
+        match self {
+            Self::Short => "100~300 字",
+            Self::Medium => "300~800 字",
+            Self::Long => "800~2000 字",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftNoteRequest {
+    /// 笔记主题（必填）
+    pub topic: String,
+    /// 参考材料（可选；用户提供的背景/要点/链接等）
+    pub reference: Option<String>,
+    /// 目标长度；缺省用 Medium
+    #[serde(default)]
+    pub target_length: TargetLength,
+}
+
+/// AI 生成的笔记草稿（未写入 DB；前端 Modal 展示后用户确认才真正保存）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftNoteResponse {
+    pub title: String,
+    /// Markdown 正文
+    pub content: String,
+    /// AI 建议的目录路径，如 "工作/周报"；空串 = 根目录
+    pub folder_path: String,
+    /// AI 给出的"为什么归到这个目录"的理由；前端折叠展示
+    pub reason: Option<String>,
 }
 
 /// 创建提示词模板的入参

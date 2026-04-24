@@ -11,7 +11,7 @@ import {
   type MenuProps,
 } from "antd";
 import {
-  FileText,
+  NotebookText,
   FolderPlus,
   ChevronDown,
   ChevronRight,
@@ -474,7 +474,7 @@ export function NotesPanel() {
       },
       {
         key: "new-note",
-        icon: <FileText size={14} />,
+        icon: <NotebookText size={14} />,
         label: "在此新建笔记",
         onClick: () => {
           createBlankAndOpen(Number(key), navigate);
@@ -776,7 +776,7 @@ export function NotesPanel() {
           borderBottom: `1px solid ${token.colorBorderSecondary}`,
         }}
       >
-        <FileText size={15} style={{ color: token.colorPrimary }} />
+        <NotebookText size={15} style={{ color: token.colorPrimary }} />
         <span style={{ fontSize: 13, fontWeight: 600, color: token.colorText }}>
           笔记
         </span>

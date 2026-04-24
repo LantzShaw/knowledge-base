@@ -1,10 +1,11 @@
 use std::fs::File;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use tokio::sync::{watch, Notify};
 
 use crate::database::Database;
+use crate::services::vault::VaultState;
 
 /// 应用全局状态，通过 tauri::State 注入到 Command 中
 pub struct AppState {
@@ -22,6 +23,8 @@ pub struct AppState {
     pub sync_scheduler_notify: Arc<Notify>,
     /// 启动时 argv 里的 .md 文件路径，等前端 mount 后 take 出来
     pub pending_open_md_path: Mutex<Option<String>>,
+    /// T-007 笔记加密保险库：内存中的主密钥（可选），锁定时清空
+    pub vault: RwLock<VaultState>,
     /// 实例锁文件句柄（保持存活以维持独占锁，进程退出时自动释放）
     _lock_file: Option<File>,
 }
@@ -40,6 +43,7 @@ impl AppState {
             ai_cancel: Mutex::new(std::collections::HashMap::new()),
             sync_scheduler_notify: Arc::new(Notify::new()),
             pending_open_md_path: Mutex::new(None),
+            vault: RwLock::new(VaultState::default()),
             _lock_file: lock_file,
         }
     }

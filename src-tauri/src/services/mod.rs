@@ -25,4 +25,5 @@ pub mod sync_scheduler;
 pub mod task_reminder;
 pub mod tasks;
 pub mod template;
+pub mod vault;
 pub mod webdav;

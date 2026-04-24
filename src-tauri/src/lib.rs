@@ -422,8 +422,19 @@ pub fn run() {
             commands::notes::list_notes,
             commands::notes::toggle_pin,
             commands::notes::move_note_to_folder,
+            commands::notes::move_notes_batch,
+            commands::notes::trash_notes_batch,
+            commands::notes::add_tags_to_notes_batch,
             commands::notes::set_note_hidden,
             commands::notes::list_hidden_notes,
+            // T-007 笔记加密 / Vault
+            commands::vault::vault_status,
+            commands::vault::vault_setup,
+            commands::vault::vault_unlock,
+            commands::vault::vault_lock,
+            commands::vault::encrypt_note,
+            commands::vault::decrypt_note,
+            commands::vault::disable_note_encrypt,
             // 文件夹模块
             commands::folders::create_folder,
             commands::folders::rename_folder,
@@ -431,6 +442,7 @@ pub fn run() {
             commands::folders::list_folders,
             commands::folders::move_folder,
             commands::folders::reorder_folders,
+            commands::folders::ensure_folder_path,
             // 搜索模块
             commands::search::search_notes,
             // 回收站模块
@@ -476,6 +488,7 @@ pub fn run() {
             commands::ai::ai_write_assist,
             commands::ai::cancel_ai_write_assist,
             commands::ai::ai_plan_today,
+            commands::ai::ai_draft_note,
             // 提示词库模块
             commands::prompt::list_prompts,
             commands::prompt::get_prompt,

@@ -2,7 +2,8 @@ use tauri::State;
 use tokio::sync::watch;
 
 use crate::models::{
-    AiConversation, AiMessage, AiModel, AiModelInput, PlanTodayRequest, PlanTodayResponse,
+    AiConversation, AiMessage, AiModel, AiModelInput, DraftNoteRequest, DraftNoteResponse,
+    PlanTodayRequest, PlanTodayResponse,
 };
 use crate::services::ai::AiService;
 use crate::state::AppState;
@@ -270,4 +271,23 @@ pub async fn ai_plan_today(
 ) -> Result<PlanTodayResponse, String> {
     let db = &state.db;
     AiService::plan_today(db, request).await.map_err(|e| e.to_string())
+}
+
+// ─── T-006 AI 写笔记并归档 Commands ─────────
+
+/// AI 生成笔记草稿 + 建议归档目录
+///
+/// 返回 `{title, content, folderPath, reason}`，未落库。前端在 Modal 里让
+/// 用户编辑/确认后，通过现有 `folderApi` + `noteApi` 写入。
+///
+/// 非流式：典型耗时 5~20 秒（比 plan_today 更长，因为正文更长）。
+#[tauri::command]
+pub async fn ai_draft_note(
+    state: State<'_, AppState>,
+    request: DraftNoteRequest,
+) -> Result<DraftNoteResponse, String> {
+    let db = &state.db;
+    AiService::draft_note(db, request)
+        .await
+        .map_err(|e| e.to_string())
 }

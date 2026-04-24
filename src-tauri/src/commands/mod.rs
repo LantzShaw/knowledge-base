@@ -18,3 +18,4 @@ pub mod source_file;
 pub mod sync;
 pub mod tasks;
 pub mod template;
+pub mod vault;

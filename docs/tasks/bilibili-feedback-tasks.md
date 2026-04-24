@@ -157,31 +157,94 @@
 
 #### T-006 · AI 自动撰写笔记并归档（半自动版）
 
-- **状态**：`pending`  · 依赖：T-004
+- **状态**：`in_progress` · 开工 2026-04-24 · 依赖：T-004 ✅ T-005 ✅
 - **来源建议**：喝水小小能手（赞 23）"笔记也是 AI 编写并保存在对应目录"
-- **价值**：⭐⭐⭐  成本：高
-- **初步设想（半自动）**：
-  - AI 生成笔记内容 + **建议目录**（基于现有目录语义 + 已有笔记 embedding）
-  - 弹窗让用户确认：编辑内容 / 改目录 / 添加标签 / 取消
-  - 不做"全自动归档"，误操作成本太高
-- **风险点**：AI 乱归档会严重破坏用户知识组织，必须人工确认
-- **开工前需确认**：是否等 T-004/T-005 完成后、有了 Skills 调用经验再做？
+- **价值**：⭐⭐⭐  成本：中
+- **已确认决策**：
+  - ✅ 侧栏"AI 写笔记"全局按钮 + /notes 列表头按钮（二选一后续再精修）
+  - ✅ 仅新建笔记（v1 不支持追加到现有笔记）
+  - ✅ 输入：主题 / 参考材料（可选）/ 目标长度（简短·中等·长篇）
+  - ✅ AI 拿**扁平化目录路径**（不喂笔记内容，避免过度泄露）→ 返回建议路径
+  - ✅ 保存前三栏 Modal：输入 / Markdown 预览 / 目录 + 标题编辑
+  - ✅ 一次性 JSON 响应：`{title, content, folderPath, reason}`
+  - ✅ 仅 OpenAI 兼容（不支持 Ollama）
+  - ✅ 目录不存在时自动递归创建（ensure_folder_path_str）
+- **子任务进度**：
+  - [x] 后端 models：DraftNoteRequest / DraftNoteResponse / TargetLength
+  - [x] 后端 services/ai.rs::draft_note（扁平化目录 + 非流式 JSON + 两轮兜底；3 单测通过）
+  - [x] 后端 services/folder.rs::ensure_path（"工作/周报" → folder_id 递归创建）
+  - [x] 后端 commands/ai.rs::ai_draft_note + commands/folders.rs::ensure_folder_path + lib.rs 注册
+  - [x] 前端 types（DraftNoteRequest / DraftNoteResponse / TargetLength）+ lib/api（aiPlanApi.draftNote + folderApi.ensurePath）
+  - [x] 前端 components/ai/DraftNoteModal.tsx（idle / loading / review 三阶段；review 为三栏布局 + Markdown 预览）
+  - [x] 前端侧栏全局"✨"按钮入口
+  - [x] cargo check + tsc --noEmit + cargo test draft_note 3/3 全通过
+  - [ ] **待用户手动验证**：
+        1. 侧栏"+ 新建笔记"旁 Sparkles 按钮 → 填主题（如"Rust 所有权"）→ 生成
+        2. Modal 三栏显示预览 + 标题/路径/正文可编辑
+        3. 点"保存并打开" → 自动跳转到新笔记编辑器，目录被自动创建
 
 ---
 
-#### T-007 · 笔记加密（B1 完整版）
+#### T-007 · 笔记加密（完整版）
 
-- **状态**：`pending`  · 依赖：T-003（先跑通"隐藏"的过滤链路）
+- **状态**：`in_progress`（T-007a 后端 + 前端已落地，待用户手动验证）  · 开工：2026-04-23
+- **依赖**：T-003 ✅（过滤链路已跑通可复用）
 - **来源建议**：鹏钧九派 "有些文章需要进行加密"
-- **价值**：⭐⭐⭐⭐  成本：高
-- **关键决策点**：
-  - **FTS5 索引与加密不兼容**——加密内容无法参与全文搜索（除非自研加密可搜索方案）
-  - 需要主密码机制 + 忘记密码的数据丢失告知
-  - 建议先做"敏感笔记夹"：整夹加密 + 单独密码解锁，解锁期间可搜索；锁定时整夹隐身
-- **开工前需确认**：
-  - 加密粒度（单篇 vs 文件夹 vs 整库 second-profile）？
-  - 主密码忘记如何处理（用户自负 vs 恢复码）？
-  - 是否接受"加密内容不可全文搜索"的限制？
+- **价值**：⭐⭐⭐⭐  成本：**高（4~7 天，跨多会话）**，建议按 a/b/c 三段拆分
+
+##### 已拟定决策（等用户确认启动）
+
+| # | 决策 | 推荐 |
+|---|------|------|
+| ① | 加密粒度 | **A2 加密保险库**（一个主密码锁一组笔记，跟 T-003 hidden 的分组思路衔接） |
+| ② | 加密层 | **B1 App 层加密**（`notes.content/title` 密文存 DB；不换 SQLCipher） |
+| ③ | 算法组合 | **Argon2id（KDF）+ XChaCha20-Poly1305（AEAD）** — 两者都有纯 Rust crate |
+| ④ | 忘记密码 | **E1 数据丢失**（UI 强提示 + 首次设置时 3 次二次确认 + 建议导出 Markdown 备份） |
+| ⑤ | 加密笔记的搜索/图谱/反链 | v1 **完全排除**（复用 T-003 过滤链路） |
+
+##### 拆分（3 段）
+
+###### T-007a · 核心加密基础设施（2~3 天） — **已完成，待手动验证**
+- [x] 后端 `services/crypto.rs`：Argon2id KDF（19456 KiB / 2 iter / 1 par） + AES-256-GCM AEAD 封装；5 个单测通过
+  - 注：算法最终落地为 AES-256-GCM（`aes-gcm` crate 已在 WebDAV 流程中使用，减少额外依赖；若后续有审计诉求再切 XChaCha20-Poly1305）
+- [x] 后端 `services/vault.rs`：`VaultState`（`Zeroizing<[u8;32]>` 内存 key，不落盘）+ 状态机 `NotSet/Locked/Unlocked` + 1 个单测通过
+- [x] schema v23：`notes.is_encrypted INTEGER DEFAULT 0` + `notes.encrypted_blob BLOB` + `idx_notes_encrypted`（部分索引）
+- [x] vault 验证器模式：`app_config.vault.salt` + `app_config.vault.verifier`（用常量明文加密的校验串，解锁时再解密验证）
+- [x] DAO 改造：所有 8 处 `Note` 构造点加 `is_encrypted` 字段；新增 `enable/disable_note_encryption` / `get/update_encrypted_blob`
+- [x] Commands：`vault_status / vault_setup / vault_unlock / vault_lock / encrypt_note / decrypt_note / disable_note_encrypt`（共 7 个，已在 lib.rs 注册）
+- [x] 前端 `VaultModal`（setup 三勾选确认 / unlock 单输入）+ `useVaultStatus` hook
+- [x] 前端 `types/index.ts` 加 `is_encrypted` 字段 + `VaultStatus` 类型
+- [x] 前端 `lib/api/index.ts` 加 `vaultApi`
+- [x] 前端编辑器 `editor.tsx` 顶部新增 Lock/Unlock 图标按钮 + `handleToggleEncrypt` 逻辑（vault 未设置 → 拉起 setup Modal；已锁 → 拉起 unlock Modal；已解锁 → 直接加/解密）+ 渲染 `<VaultModal>`
+- [x] `npx tsc --noEmit` + `cargo check` 全绿
+- [ ] 待用户手动验证：(1) 首次点锁 → 主密码设置流程 → 加密 → 主列表占位符显示；(2) 重启应用验证自动锁；(3) 解锁后能编辑加密笔记
+
+###### T-007b · UI 打磨 + 边界（1~2 天）
+- 编辑器顶部"锁/开锁"图标 + 加密状态指示
+- `/hidden` 页对加密笔记的特殊标记
+- 设置页"更换主密码" / "空闲自动锁定时长"配置
+- 导出 Markdown 时对加密笔记的处理（跳过 / 明文导出警告）
+- 批量加密现有笔记的 UI 入口（可选）
+
+###### T-007c · 搜索兼容（v2 可选）
+解锁态下的加密笔记也能参与搜索：检索时在内存里临时解密，不落盘。
+暂缓到 v2，T-007 主版本不做。
+
+##### 风险清单
+
+| 风险 | 缓解 |
+|------|------|
+| 用户忘记主密码 → 数据永久不可读 | 首次设置时 3 次"我确认会记住，忘了数据丢失"+ 建议导出 Markdown 备份 |
+| 内存里的 key 被本地进程扒 | 空闲 N 分钟自动锁定（可配置）；Tauri WebView 隔离一定程度保护 |
+| 老用户的"隐藏笔记"是否一键升级为"加密"？ | v1 **不做**自动升级；用户逐条勾选转化 |
+| Markdown 导出 / WebDAV 同步 | 导出明文会弹警告；WebDAV 同步保持密文形式（不解密） |
+
+##### 依赖 crate
+
+- `argon2 = "0.5"` — Argon2id 密码派生
+- `chacha20poly1305 = "0.10"` — XChaCha20-Poly1305 AEAD
+- `zeroize = "1"` — 主密钥在 drop 时清零内存（敏感数据防 swap）
+- `rand = "0.8"`（项目已有） — 盐/nonce 生成
 
 ---
 

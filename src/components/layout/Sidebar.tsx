@@ -14,7 +14,7 @@ import {
 } from "antd";
 import {
   Home,
-  FileText,
+  NotebookText,
   Search,
   Calendar,
   Tags,
@@ -41,13 +41,14 @@ import { useAppStore } from "@/store";
 import { folderApi, importApi } from "@/lib/api";
 import type { Folder, ScannedFile } from "@/types";
 import { NewNoteButton } from "@/components/NewNoteButton";
+import { DraftNoteModal } from "@/components/ai/DraftNoteModal";
 import { createBlankAndOpen } from "@/lib/noteCreator";
 import { ImportPreviewModal } from "@/components/ImportPreviewModal";
 
 /** 导航菜单项（静态部分，用于路由高亮匹配） */
 const navItems = [
   { key: "/", icon: <Home size={16} />, label: "首页" },
-  { key: "/notes", icon: <FileText size={16} />, label: "笔记" },
+  { key: "/notes", icon: <NotebookText size={16} />, label: "笔记" },
   { key: "/search", icon: <Search size={16} />, label: "搜索" },
   { key: "/daily", icon: <Calendar size={16} />, label: "每日笔记" },
   { key: "/tags", icon: <Tags size={16} />, label: "标签" },
@@ -147,6 +148,7 @@ export function Sidebar() {
   );
 
   const [folders, setFolders] = useState<Folder[]>([]);
+  const [showDraftModal, setShowDraftModal] = useState(false);
   const [folderExpanded, setFolderExpanded] = useState(true);
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
 
@@ -506,7 +508,7 @@ export function Sidebar() {
       },
       {
         key: "new-note",
-        icon: <FileText size={14} />,
+        icon: <NotebookText size={14} />,
         label: "在此新建笔记",
         onClick: () => {
           createBlankAndOpen(Number(key), navigate);
@@ -762,11 +764,21 @@ export function Sidebar() {
           <NewNoteButton block={!collapsed} collapsed={collapsed} />
         </div>
         <Button
+          icon={<Sparkles size={collapsed ? 16 : 14} />}
+          onClick={() => setShowDraftModal(true)}
+          title="AI 写笔记（T-006）"
+        />
+        <Button
           icon={<FolderOpen size={collapsed ? 16 : 14} />}
           onClick={handleOpenMarkdown}
           title="打开本机 .md 文件"
         />
       </div>
+
+      <DraftNoteModal
+        open={showDraftModal}
+        onClose={() => setShowDraftModal(false)}
+      />
 
       {/* 第1段: 导航菜单 */}
       <Menu

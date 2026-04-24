@@ -8,7 +8,6 @@ import {
   Modal,
   Select,
   Spin,
-  Tag as AntTag,
   message,
   theme as antdTheme,
 } from "antd";
@@ -17,8 +16,6 @@ import {
   RefreshCcw,
   CheckCircle2,
   Trash2,
-  ChevronDown,
-  ChevronRight,
 } from "lucide-react";
 import { aiPlanApi, taskApi } from "@/lib/api";
 import type { TaskSuggestion } from "@/types";
@@ -34,7 +31,6 @@ interface DraftTask extends TaskSuggestion {
   /** 本地 UID，给 React key 和勾选状态用 */
   uid: string;
   selected: boolean;
-  showReason: boolean;
 }
 
 const PRIORITY_OPTIONS = [
@@ -59,7 +55,6 @@ function toDraft(s: TaskSuggestion, idx: number): DraftTask {
     dueDate: s.dueDate ?? todayStr(),
     uid: `sug-${Date.now()}-${idx}`,
     selected: true,
-    showReason: false,
   };
 }
 
@@ -386,21 +381,8 @@ function DraftRow({
               placeholder="YYYY-MM-DD"
               style={{ width: 120 }}
             />
-            {draft.reason && (
-              <AntTag
-                style={{
-                  cursor: "pointer",
-                  margin: 0,
-                  background: "transparent",
-                }}
-                onClick={() => onChange({ showReason: !draft.showReason })}
-              >
-                {draft.showReason ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-                <span style={{ marginLeft: 3 }}>推荐理由</span>
-              </AntTag>
-            )}
           </div>
-          {draft.showReason && draft.reason && (
+          {draft.reason && (
             <div
               style={{
                 fontSize: 12,

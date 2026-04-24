@@ -74,6 +74,17 @@ export default function PromptsPage() {
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<PromptTemplate | null>(null);
+  /**
+   * Modal 打开时要填充的初始值。
+   *
+   * 用 initialValues + 递增的 formKey 让 Form 每次"打开"都重新挂载，
+   * 这样 AntD 的 initialValues 首次 mount 生效规则天然对齐"每次打开填
+   * 不同值"。这条路比 setFieldsValue 更稳——不用关心 Modal 懒挂载 +
+   * Form.Item 注册时序，initialValues 随 Form 本次 mount 直接进字段。
+   */
+  const [pendingValues, setPendingValues] = useState<FormValues | null>(null);
+  /** 递增计数：每次 open* 自增，触发 Form 重挂载吃新 initialValues */
+  const [formKey, setFormKey] = useState(0);
   const [form] = Form.useForm<FormValues>();
 
   useEffect(() => {
@@ -94,7 +105,7 @@ export default function PromptsPage() {
 
   function openCreate() {
     setEditing(null);
-    form.setFieldsValue({
+    setPendingValues({
       title: "",
       description: "",
       prompt: "",
@@ -102,12 +113,13 @@ export default function PromptsPage() {
       icon: null,
       enabled: true,
     });
+    setFormKey((k) => k + 1);
     setModalOpen(true);
   }
 
   function openEdit(record: PromptTemplate) {
     setEditing(record);
-    form.setFieldsValue({
+    setPendingValues({
       title: record.title,
       description: record.description,
       prompt: record.prompt,
@@ -115,12 +127,13 @@ export default function PromptsPage() {
       icon: record.icon,
       enabled: record.enabled,
     });
+    setFormKey((k) => k + 1);
     setModalOpen(true);
   }
 
   function openClone(record: PromptTemplate) {
     setEditing(null);
-    form.setFieldsValue({
+    setPendingValues({
       title: `${record.title} 副本`,
       description: record.description,
       prompt: record.prompt,
@@ -128,6 +141,7 @@ export default function PromptsPage() {
       icon: record.icon,
       enabled: true,
     });
+    setFormKey((k) => k + 1);
     setModalOpen(true);
   }
 
@@ -337,14 +351,24 @@ export default function PromptsPage() {
         cancelText="取消"
         width={640}
         centered
-        destroyOnClose
+        // 注：不要用 destroyOnClose。openEdit() 是先 setFieldsValue 再 setModalOpen(true),
+        // 若 Modal 关闭态 Form 被销毁，这一瞬间 setFieldsValue 会丢失全部赋值,导致编辑
+        // 内置模板时所有字段都是空白。保留 Form 实例后，赋值可稳定生效。
         styles={{
           // Prompt 内容 textarea + 变量说明比较长，小屏会超出屏幕导致保存按钮看不见。
           // 用 70vh 限高并让 body 独立滚动，底部 OK/Cancel 行永远可见。
           body: { maxHeight: "70vh", overflowY: "auto", paddingRight: 12 },
         }}
       >
-        <Form form={form} layout="vertical" preserve={false}>
+        <Form
+          form={form}
+          layout="vertical"
+          preserve={false}
+          // 每次打开 Modal 递增 formKey → Form 重新挂载 → initialValues 被读取一次
+          // 吃进字段（避开 setFieldsValue 需要等 Form.Item 注册完成的时序坑）
+          key={formKey}
+          initialValues={pendingValues ?? undefined}
+        >
           <Form.Item
             name="title"
             label="标题"

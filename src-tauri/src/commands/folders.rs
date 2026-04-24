@@ -52,3 +52,15 @@ pub fn reorder_folders(
 ) -> Result<(), String> {
     FolderService::reorder(&state.db, &ordered_ids).map_err(|e| e.to_string())
 }
+
+/// T-006: 按路径字符串（如 "工作/周报"）确保文件夹存在；不存在则递归创建
+///
+/// - 空串 / 纯空白 → 返回 null（根目录）
+/// - 返回最深一级文件夹的 id
+#[tauri::command]
+pub fn ensure_folder_path(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<Option<i64>, String> {
+    FolderService::ensure_path(&state.db, &path).map_err(|e| e.to_string())
+}

@@ -7,7 +7,8 @@ use tokio::sync::watch;
 use crate::database::Database;
 use crate::error::AppError;
 use crate::models::{
-    AiMessage, AiModel, PlanTodayRequest, PlanTodayResponse, SkillCall, TaskQuery,
+    AiMessage, AiModel, DraftNoteRequest, DraftNoteResponse, Folder, PlanTodayRequest,
+    PlanTodayResponse, SkillCall, TaskQuery,
 };
 use crate::services::skills;
 
@@ -1285,7 +1286,8 @@ impl AiService {
              3. dueDate 都填成 {}\n\
              4. title 必须是可执行动作（如『完成 xx』、『写 xx』），不要模糊项如『放松一下』\n\
              5. 不要重复用户『已有任务』列表里的内容\n\
-             6. 用中文。",
+             6. 用中文。\n\
+             7. 🔴 JSON 字符串字段（title / reason / summary）中若需要引用名称或概念，一律使用中文书名号「」或中文单引号 『』，严禁使用英文双引号 \" 或 \\\"（否则会破坏 JSON 结构导致解析失败）。",
             today, today
         );
 
@@ -1302,6 +1304,7 @@ impl AiService {
             "messages": messages,
             "stream": false,
             "response_format": { "type": "json_object" },
+            "max_tokens": 2000,
         });
         // Claude 兼容代理有些不支持 response_format，去掉该字段以防报错
         if model.provider == "claude" {
@@ -1342,13 +1345,230 @@ impl AiService {
             ))
         })
     }
+
+    // ══════════════════════════════════════════════════════════════════
+    // T-006 AI 写笔记并归档
+    // ══════════════════════════════════════════════════════════════════
+
+    /// AI 生成一篇 Markdown 笔记 + 建议归档目录
+    ///
+    /// 输入：主题 / 参考材料 / 目标长度 + 当前所有目录的扁平化路径列表
+    /// 输出：`{title, content, folderPath, reason}`（未写入 DB，由前端弹 Modal 让用户确认）
+    ///
+    /// 设计要点：
+    /// 1. 只把**目录路径字符串**喂给 AI，不喂笔记内容 → 避免大 prompt + 信息泄露
+    /// 2. 非流式 + `response_format: json_object`（Claude 兼容代理会自动去掉该字段）
+    /// 3. 两轮兜底解析（原始 / 剥 markdown ``` ）
+    ///
+    /// 调用方不在这里写库；save 逻辑由前端 `folderApi` + `noteApi` 在 Modal 确认时触发。
+    pub async fn draft_note(
+        db: &Database,
+        req: DraftNoteRequest,
+    ) -> Result<DraftNoteResponse, AppError> {
+        let topic = req.topic.trim();
+        if topic.is_empty() {
+            return Err(AppError::Custom("主题不能为空".to_string()));
+        }
+
+        let model = db.get_default_ai_model()?;
+        if !matches!(
+            model.provider.as_str(),
+            "openai" | "claude" | "deepseek" | "zhipu"
+        ) {
+            return Err(AppError::Custom(format!(
+                "AI 写笔记暂不支持 {} 协议，请切换到 OpenAI / DeepSeek / 智谱 / Claude 兼容模型。",
+                model.provider
+            )));
+        }
+
+        // 扁平化现有目录树为 "父/子/孙" 路径列表，供 AI 参考选择归档
+        let tree = db.list_folders_tree()?;
+        let mut flat_paths: Vec<String> = Vec::new();
+        collect_folder_paths(&tree, "", &mut flat_paths);
+
+        // 构造 prompt
+        let paths_hint = if flat_paths.is_empty() {
+            "（当前还没有任何文件夹，建议创建合适的新目录）".to_string()
+        } else {
+            flat_paths
+                .iter()
+                .map(|p| format!("- {}", p))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let reference_section = req
+            .reference
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| format!("\n\n## 参考材料\n{}", s))
+            .unwrap_or_default();
+
+        let user_content = format!(
+            "请帮我写一篇关于【{}】的 Markdown 笔记，目标长度 {}。{}\n\n\
+             ## 现有目录（供归档参考）\n{}\n\n\
+             请严格以 JSON 对象返回（不要 markdown 代码块、不要解释），格式：\n\
+             {{\n  \
+             \"title\": \"笔记标题（简洁、能检索）\",\n  \
+             \"content\": \"Markdown 正文（不要带外层 H1，因为标题已单独存）\",\n  \
+             \"folderPath\": \"建议的归档路径，如 工作/周报；可填新目录；空串=根目录\",\n  \
+             \"reason\": \"为什么归到这个目录（一句话）\"\n\
+             }}",
+            topic,
+            req.target_length.word_hint(),
+            reference_section,
+            paths_hint,
+        );
+
+        let system_prompt =
+            "你是一个笔记助手。根据用户提供的主题和参考材料，写一篇结构清晰的 Markdown 笔记，\
+             并根据【现有目录】列表建议最合适的归档路径。\n\
+             原则：\n\
+             1. 正文用 Markdown；用合适的小标题、列表、代码块\n\
+             2. 不要在正文开头放重复的 H1 标题（title 字段已单独给出）\n\
+             3. folderPath 优先复用【现有目录】里已有的路径；只有找不到合适目录时才建议新路径\n\
+             4. 用中文写作，除非主题本身是外语";
+
+        let messages = vec![
+            serde_json::json!({ "role": "system", "content": system_prompt }),
+            serde_json::json!({ "role": "user", "content": user_content }),
+        ];
+
+        let client = crate::services::http_client::shared();
+        let url = build_openai_chat_url(&model.api_url);
+        let mut req_body = serde_json::json!({
+            "model": model.model_id,
+            "messages": messages,
+            "stream": false,
+            "response_format": { "type": "json_object" },
+        });
+        if model.provider == "claude" {
+            req_body
+                .as_object_mut()
+                .and_then(|m| m.remove("response_format"));
+        }
+
+        let mut builder = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(&req_body);
+        if let Some(key) = &model.api_key {
+            if !key.is_empty() {
+                builder = builder.header("Authorization", format!("Bearer {}", key));
+            }
+        }
+        let response = builder
+            .send()
+            .await
+            .map_err(|e| AppError::Custom(format!("API 请求失败: {}", e)))?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(AppError::Custom(format_openai_api_error(status, &body)));
+        }
+
+        let resp_json: Value = response
+            .json()
+            .await
+            .map_err(|e| AppError::Custom(format!("解析响应失败: {}", e)))?;
+        let content = resp_json["choices"][0]["message"]["content"]
+            .as_str()
+            .ok_or_else(|| {
+                AppError::Custom(
+                    "AI 返回格式异常：缺少 choices[0].message.content".to_string(),
+                )
+            })?;
+
+        parse_draft_note_response(content).ok_or_else(|| {
+            AppError::Custom(format!(
+                "AI 返回的 JSON 无法解析。原始响应：\n{}",
+                content.chars().take(400).collect::<String>()
+            ))
+        })
+    }
+}
+
+/// 递归扁平化 Folder 树为 "父/子/孙" 路径字符串
+fn collect_folder_paths(tree: &[Folder], prefix: &str, out: &mut Vec<String>) {
+    for f in tree {
+        let path = if prefix.is_empty() {
+            f.name.clone()
+        } else {
+            format!("{}/{}", prefix, f.name)
+        };
+        out.push(path.clone());
+        if !f.children.is_empty() {
+            collect_folder_paths(&f.children, &path, out);
+        }
+    }
+}
+
+/// 解析 AI 返回的 JSON 字符串为 DraftNoteResponse（两轮兜底）
+fn parse_draft_note_response(raw: &str) -> Option<DraftNoteResponse> {
+    if let Ok(r) = serde_json::from_str::<DraftNoteResponse>(raw.trim()) {
+        return Some(r);
+    }
+    let stripped = raw
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+    serde_json::from_str(stripped).ok()
+}
+
+#[cfg(test)]
+mod draft_note_tests {
+    use super::*;
+
+    #[test]
+    fn parse_plain_json() {
+        // 内容里同时含 "# 和 "## 序列，避开 raw string `"##` 闭合歧义，
+        // 这里直接用普通字符串 + 反斜杠转义
+        let raw = "{\"title\":\"Rust 学习笔记\",\"content\":\"## 所有权\",\"folderPath\":\"学习/Rust\",\"reason\":\"与 Rust 主题相关\"}";
+        let r = parse_draft_note_response(raw).unwrap();
+        assert_eq!(r.title, "Rust 学习笔记");
+        assert_eq!(r.folder_path, "学习/Rust");
+    }
+
+    #[test]
+    fn parse_with_fence() {
+        let raw = "```json\n{\"title\":\"x\",\"content\":\"c\",\"folderPath\":\"\",\"reason\":null}\n```";
+        let r = parse_draft_note_response(raw).unwrap();
+        assert_eq!(r.title, "x");
+        assert_eq!(r.folder_path, "");
+    }
+
+    #[test]
+    fn collect_paths_flatten() {
+        let f = Folder {
+            id: 1,
+            name: "工作".to_string(),
+            parent_id: None,
+            sort_order: 0,
+            children: vec![Folder {
+                id: 2,
+                name: "周报".to_string(),
+                parent_id: Some(1),
+                sort_order: 0,
+                children: vec![],
+                note_count: 0,
+            }],
+            note_count: 0,
+        };
+        let mut out = Vec::new();
+        collect_folder_paths(&[f], "", &mut out);
+        assert_eq!(out, vec!["工作".to_string(), "工作/周报".to_string()]);
+    }
 }
 
 /// 解析 AI 返回的 JSON 字符串为 PlanTodayResponse
 ///
-/// 两轮兜底：
+/// 三轮兜底：
 /// 1. 直接 `serde_json::from_str`
 /// 2. 失败则剥 markdown 代码块 (```json ... ```) 再 parse
+/// 3. 仍失败则截取首个 `{` 到最后一个 `}` 的子串再 parse（兜掉 AI 在 JSON
+///    前后夹带解释性文字的情况）
 /// 都失败返回 None，调用方把 None 当作"格式异常"错误。
 fn parse_plan_today_response(raw: &str) -> Option<PlanTodayResponse> {
     if let Ok(r) = serde_json::from_str::<PlanTodayResponse>(raw.trim()) {
@@ -1361,7 +1581,16 @@ fn parse_plan_today_response(raw: &str) -> Option<PlanTodayResponse> {
         .trim_start_matches("```")
         .trim_end_matches("```")
         .trim();
-    serde_json::from_str(stripped).ok()
+    if let Ok(r) = serde_json::from_str::<PlanTodayResponse>(stripped) {
+        return Some(r);
+    }
+    // 截取首个 `{` 到最后一个 `}` 的子串
+    let start = raw.find('{')?;
+    let end = raw.rfind('}')?;
+    if end <= start {
+        return None;
+    }
+    serde_json::from_str(&raw[start..=end]).ok()
 }
 
 #[cfg(test)]
@@ -1387,5 +1616,13 @@ mod plan_today_tests {
     #[test]
     fn parse_fails_on_garbage() {
         assert!(parse_plan_today_response("not json").is_none());
+    }
+
+    #[test]
+    fn parse_with_prefix_and_suffix_text() {
+        // AI 有时会在 JSON 前后夹带解释性文字，靠第三轮兜底截取
+        let raw = "好的，我来为你规划：\n{\"tasks\":[{\"title\":\"写周报\",\"priority\":1}],\"summary\":\"\"}\n希望对你有帮助";
+        let r = parse_plan_today_response(raw).unwrap();
+        assert_eq!(r.tasks.len(), 1);
     }
 }

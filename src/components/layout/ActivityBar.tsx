@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Tooltip, Badge, theme as antdTheme } from "antd";
 import {
   Home,
-  FileText,
+  NotebookText,
   Search,
   Calendar,
   Tags,
@@ -13,6 +13,7 @@ import {
   Sparkles,
   Trash2,
   Info,
+  EyeOff,
 } from "lucide-react";
 import { useAppStore } from "@/store";
 import type { ActiveView } from "@/store";
@@ -40,7 +41,7 @@ interface ActivityItem {
 /** 主视图（上半部分） */
 const MAIN_ITEMS: ActivityItem[] = [
   { view: "home", route: "/", label: "首页", icon: <Home size={18} /> },
-  { view: "notes", route: "/notes", label: "笔记", icon: <FileText size={18} /> },
+  { view: "notes", route: "/notes", label: "笔记", icon: <NotebookText size={18} /> },
   { view: "search", route: "/search", label: "搜索", icon: <Search size={18} /> },
   { view: "daily", route: "/daily", label: "每日笔记", icon: <Calendar size={18} /> },
   { view: "tags", route: "/tags", label: "标签", icon: <Tags size={18} /> },
@@ -52,6 +53,7 @@ const MAIN_ITEMS: ActivityItem[] = [
 
 /** 底部视图（放最下方，视觉上与主视图分组） */
 const BOTTOM_ITEMS: ActivityItem[] = [
+  { view: "hidden", route: "/hidden", label: "隐藏笔记", icon: <EyeOff size={18} /> },
   { view: "trash", route: "/trash", label: "回收站", icon: <Trash2 size={18} /> },
   { view: "about", route: "/about", label: "关于", icon: <Info size={18} /> },
 ];
@@ -66,6 +68,7 @@ const ROUTE_TO_VIEW: Array<[string, ActiveView]> = [
   ["/graph", "graph"],
   ["/ai", "ai"],
   ["/prompts", "prompts"],
+  ["/hidden", "hidden"],
   ["/trash", "trash"],
   ["/about", "about"],
   ["/", "home"], // 放最后：以 startsWith 匹配时 "/" 会错匹所有路径

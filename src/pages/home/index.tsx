@@ -13,7 +13,7 @@ import {
   theme as antdTheme,
 } from "antd";
 import {
-  FileText,
+  NotebookText,
   FolderOpen,
   Tags,
   LetterText,
@@ -81,10 +81,12 @@ export default function HomePage() {
   const handleTodayNote = useCallback(async () => {
     try {
       const today = new Date().toISOString().slice(0, 10);
-      const note = await dailyApi.getOrCreate(today);
-      navigate(`/notes/${note.id}`);
+      // 确保今日的每日笔记已落库（首次访问时创建）
+      await dailyApi.getOrCreate(today);
+      // 跳到每日笔记专属页（带日期参数，可用页内左右箭头切换历史日期）
+      navigate(`/daily?date=${today}`);
     } catch (e) {
-      console.error("创建今日笔记失败:", e);
+      console.error("打开今日笔记失败:", e);
     }
   }, [navigate]);
 
@@ -95,7 +97,7 @@ export default function HomePage() {
         key: "notes",
         title: "笔记",
         value: stats?.total_notes ?? 0,
-        icon: <FileText size={16} style={{ color: token.colorPrimary }} />,
+        icon: <NotebookText size={16} style={{ color: token.colorPrimary }} />,
         onClick: () => navigate("/notes"),
       },
       {

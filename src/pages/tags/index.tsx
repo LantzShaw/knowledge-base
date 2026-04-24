@@ -11,7 +11,7 @@ import {
   Popconfirm,
   message,
 } from "antd";
-import { Tags, FileText, Edit3, Trash2 } from "lucide-react";
+import { Tags, NotebookText, Edit3, Trash2 } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { tagApi } from "@/lib/api";
 import { stripHtml, relativeTime } from "@/lib/utils";
@@ -171,7 +171,7 @@ export default function TagsPage() {
         <Card
           title={
             <span className="flex items-center gap-2">
-              <FileText size={16} />
+              <NotebookText size={16} />
               关联笔记
               <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
                 共 {notes.total} 条

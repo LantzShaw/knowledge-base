@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Modal, Radio, Checkbox, Typography, List, Tag, Collapse, Tooltip } from "antd";
-import { FileText, Folder as FolderIcon, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { NotebookText, Folder as FolderIcon, AlertTriangle, CheckCircle2 } from "lucide-react";
 
 import type { ImportConflictPolicy, ScannedFile } from "@/types";
 
@@ -79,7 +79,7 @@ export function ImportPreviewModal({
             <strong className="ml-auto">{stats.news.length} 篇</strong>
           </div>
           <div className="flex items-center gap-2">
-            <FileText size={14} className="text-sky-500" />
+            <NotebookText size={14} className="text-sky-500" />
             <Tooltip title="这些文件按原路径匹配到了已有笔记（上次导入过）">
               <span>已导入过</span>
             </Tooltip>

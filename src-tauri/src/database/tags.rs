@@ -111,6 +111,34 @@ impl Database {
         Ok(())
     }
 
+    /// 批量关联：给多篇笔记 × 多个标签 一次性打上关联；返回新增的关联条数
+    ///
+    /// - 使用 `INSERT OR IGNORE` 自然去重：已存在的 (note_id, tag_id) 对不重复插入
+    /// - 事务内一次性 batch，避免多次 IPC / 多次锁
+    pub fn add_tags_to_notes_batch(
+        &self,
+        note_ids: &[i64],
+        tag_ids: &[i64],
+    ) -> Result<usize, AppError> {
+        if note_ids.is_empty() || tag_ids.is_empty() {
+            return Ok(0);
+        }
+        let mut conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let tx = conn.transaction()?;
+        let mut inserted = 0usize;
+        {
+            let mut stmt = tx
+                .prepare("INSERT OR IGNORE INTO note_tags (note_id, tag_id) VALUES (?1, ?2)")?;
+            for nid in note_ids {
+                for tid in tag_ids {
+                    inserted += stmt.execute(params![nid, tid])?;
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(inserted)
+    }
+
     /// 移除笔记的标签
     pub fn remove_tag_from_note(&self, note_id: i64, tag_id: i64) -> Result<bool, AppError> {
         let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
@@ -174,7 +202,7 @@ impl Database {
 
         let mut stmt = conn.prepare(
             "SELECT n.id, n.title, n.content, n.folder_id, n.is_daily, n.daily_date,
-                    n.is_pinned, n.is_hidden, n.word_count, n.created_at, n.updated_at, n.source_file_path, n.source_file_type
+                    n.is_pinned, n.is_hidden, n.is_encrypted, n.word_count, n.created_at, n.updated_at, n.source_file_path, n.source_file_type
              FROM notes n
              INNER JOIN note_tags nt ON n.id = nt.note_id
              WHERE nt.tag_id = ?1 AND n.is_deleted = 0 AND n.is_hidden = 0
@@ -193,11 +221,12 @@ impl Database {
                     daily_date: row.get(5)?,
                     is_pinned: row.get::<_, i32>(6)? != 0,
                     is_hidden: row.get::<_, i32>(7)? != 0,
-                    word_count: row.get(8)?,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
-                    source_file_path: row.get(11)?,
-                    source_file_type: row.get(12)?,
+                    is_encrypted: row.get::<_, i32>(8)? != 0,
+                    word_count: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
+                    source_file_path: row.get(12)?,
+                    source_file_type: row.get(13)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

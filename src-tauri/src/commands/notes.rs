@@ -50,6 +50,36 @@ pub fn move_note_to_folder(
     NoteService::move_to_folder(&state.db, note_id, folder_id).map_err(|e| e.to_string())
 }
 
+/// 批量移动笔记到文件夹；返回实际移动的条数
+/// folder_id = None 表示移到根目录
+#[tauri::command]
+pub fn move_notes_batch(
+    state: tauri::State<'_, AppState>,
+    ids: Vec<i64>,
+    folder_id: Option<i64>,
+) -> Result<usize, String> {
+    NoteService::move_batch(&state.db, &ids, folder_id).map_err(|e| e.to_string())
+}
+
+/// 批量软删除（移入回收站）；返回实际删除的条数
+#[tauri::command]
+pub fn trash_notes_batch(
+    state: tauri::State<'_, AppState>,
+    ids: Vec<i64>,
+) -> Result<usize, String> {
+    NoteService::trash_batch(&state.db, &ids).map_err(|e| e.to_string())
+}
+
+/// 批量给笔记追加标签（不清除原有）；返回新增的关联条数
+#[tauri::command]
+pub fn add_tags_to_notes_batch(
+    state: tauri::State<'_, AppState>,
+    note_ids: Vec<i64>,
+    tag_ids: Vec<i64>,
+) -> Result<usize, String> {
+    NoteService::add_tags_batch(&state.db, &note_ids, &tag_ids).map_err(|e| e.to_string())
+}
+
 /// 全部移到回收站（软删）
 #[tauri::command]
 pub fn trash_all_notes(state: tauri::State<'_, AppState>) -> Result<usize, String> {

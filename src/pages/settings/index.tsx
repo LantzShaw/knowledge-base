@@ -958,7 +958,7 @@ export default function SettingsPage() {
           <Alert
             type={exportResult.errors.length > 0 ? "warning" : "success"}
             showIcon
-            message={`导出完成: ${exportResult.exported} 篇笔记`}
+            message={`导出完成: ${exportResult.exported} 篇笔记，附带 ${exportResult.assets_copied} 个资产文件`}
             description={
               exportResult.errors.length > 0 ? (
                 <List
@@ -1398,6 +1398,7 @@ export default function SettingsPage() {
           <Form.Item
             name="provider"
             label="提供商"
+            extra="选 OpenAI 即可接入任何 OpenAI 兼容服务（OpenRouter / SiliconFlow / Moonshot / 字节豆包 / 自建网关等），只需修改下方 API 地址"
             rules={[{ required: true }]}
           >
             <Select
@@ -1409,6 +1410,7 @@ export default function SettingsPage() {
           <Form.Item
             name="api_url"
             label="API 地址"
+            extra="支持任意 OpenAI 兼容服务的 base_url（不含 /chat/completions 后缀）"
             rules={[{ required: true, message: "请输入 API 地址" }]}
           >
             <Input placeholder={DEFAULT_URLS[watchedProvider] || "https://api.openai.com/v1"} />
@@ -1421,7 +1423,7 @@ export default function SettingsPage() {
           <Form.Item
             name="model_id"
             label="模型标识"
-            tooltip="可从下拉选预置模型，也可直接输入任意自定义名称"
+            extra="✏️ 可直接输入任意模型名（如 anthropic/claude-sonnet-4.6、moonshotai/kimi-k2 等），不必限于下拉候选"
             rules={[{ required: true, message: "请输入或选择模型标识" }]}
           >
             <AutoComplete

@@ -149,7 +149,7 @@ export default function HiddenPage() {
         type="info"
         showIcon
         message='这里只显示被标记为"隐藏"的笔记'
-        description="隐藏是弱保护：主界面 / 搜索 / 反链 / 图谱 / AI 问答都不会显示这些笔记，但数据库里仍是明文。需要强保护（加密）等待 T-007。"
+        description="隐藏是弱保护：主界面 / 搜索 / 反链 / 图谱 / AI 问答都不会显示这些笔记，但数据库里仍是明文。需要强保护请到笔记编辑器点右上角锁图标启用加密。"
         style={{ marginBottom: 16 }}
       />
 
