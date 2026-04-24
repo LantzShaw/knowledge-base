@@ -1,7 +1,11 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use walkdir::WalkDir;
+
+/// 进程内递增计数器，保证同一毫秒内多次保存也不会冲突
+static IMAGE_SEQ: AtomicU64 = AtomicU64::new(0);
 
 use crate::database::Database;
 use crate::error::AppError;
@@ -86,12 +90,15 @@ impl ImageService {
             .and_then(|e| e.to_str())
             .unwrap_or("png");
 
-        // 用时间戳 + 纳秒生成唯一文件名
+        // Why: 原版只用 timestamp+纳秒，Windows 系统时钟在极短间隔内可能返回相同值，
+        // 多张图连续保存会互相覆盖 → 前端看起来"只进一张"。加进程内原子计数器彻底消除冲突。
         let now = chrono::Local::now();
+        let seq = IMAGE_SEQ.fetch_add(1, Ordering::Relaxed);
         let unique_name = format!(
-            "{}_{:09}.{}",
+            "{}_{:09}_{:06}.{}",
             now.format("%Y%m%d%H%M%S"),
             now.timestamp_subsec_nanos(),
+            seq,
             ext
         );
 
