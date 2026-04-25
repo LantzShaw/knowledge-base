@@ -323,15 +323,9 @@ impl AiService {
             "ollama" => {
                 Self::stream_ollama_generic(&write_app, &model, &messages, cancel_rx).await?
             }
-            // OpenAI 兼容协议族：OpenAI / Claude 兼容代理 / DeepSeek / 智谱 GLM
-            "openai" | "claude" | "deepseek" | "zhipu" => {
-                Self::stream_openai_generic(&write_app, &model, &messages, cancel_rx).await?
-            }
+            // T-012: 默认走 OpenAI 兼容（含 LM Studio / 自定义 baseUrl）
             _ => {
-                return Err(AppError::Custom(format!(
-                    "不支持的模型提供商: {}",
-                    model.provider
-                )));
+                Self::stream_openai_generic(&write_app, &model, &messages, cancel_rx).await?
             }
         };
 
@@ -547,16 +541,11 @@ impl AiService {
                 "ollama" => {
                     Self::stream_ollama(&app, &model, &messages, cancel_rx.clone()).await
                 }
-                // OpenAI 兼容协议族：OpenAI / Claude 兼容代理 / DeepSeek / 智谱 GLM
-                "openai" | "claude" | "deepseek" | "zhipu" => {
+                // T-012: 默认走 OpenAI 兼容协议（OpenAI / Claude 代理 / DeepSeek / 智谱 /
+                // Minimax / SiliconFlow / LM Studio / 用户自定义 baseUrl）
+                _ => {
                     Self::stream_openai_compatible(&app, &model, &messages, cancel_rx.clone())
                         .await
-                }
-                _ => {
-                    return Err(AppError::Custom(format!(
-                        "不支持的模型提供商: {}",
-                        model.provider
-                    )));
                 }
             };
 
@@ -863,11 +852,13 @@ impl AiService {
         };
         let model = db.get_ai_model(conv_model_id)?;
 
-        if !matches!(model.provider.as_str(), "openai" | "claude" | "deepseek" | "zhipu") {
-            return Err(AppError::Custom(format!(
-                "Skills 功能暂不支持 {} 协议，请切换到 OpenAI / DeepSeek / 智谱 / Claude 兼容模型。",
-                model.provider
-            )));
+        // T-012: Skills 仅在非 ollama 时启用；其他 provider 都按 OpenAI 兼容协议处理
+        // （含 LM Studio / 自定义 baseUrl —— 用户得自己保证模型支持 tool_calls）
+        if model.provider == "ollama" {
+            return Err(AppError::Custom(
+                "Skills 功能暂不支持 Ollama 协议，请切换到 OpenAI 兼容模型（含本地 LM Studio）。"
+                    .into(),
+            ));
         }
 
         // 2. 保存用户消息
@@ -1175,11 +1166,12 @@ impl AiService {
         req: PlanTodayRequest,
     ) -> Result<PlanTodayResponse, AppError> {
         let model = db.get_default_ai_model()?;
-        if !matches!(model.provider.as_str(), "openai" | "claude" | "deepseek" | "zhipu") {
-            return Err(AppError::Custom(format!(
-                "AI 规划功能暂不支持 {} 协议，请切换到 OpenAI / DeepSeek / 智谱 / Claude 兼容模型。",
-                model.provider
-            )));
+        // T-012: 仅 Ollama 不支持（本地 generate API 不返回 JSON 模式）；其他都按 OpenAI 兼容
+        if model.provider == "ollama" {
+            return Err(AppError::Custom(
+                "AI 规划功能暂不支持 Ollama 协议，请切换到 OpenAI 兼容模型（含本地 LM Studio）。"
+                    .into(),
+            ));
         }
 
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
@@ -1371,14 +1363,12 @@ impl AiService {
         }
 
         let model = db.get_default_ai_model()?;
-        if !matches!(
-            model.provider.as_str(),
-            "openai" | "claude" | "deepseek" | "zhipu"
-        ) {
-            return Err(AppError::Custom(format!(
-                "AI 写笔记暂不支持 {} 协议，请切换到 OpenAI / DeepSeek / 智谱 / Claude 兼容模型。",
-                model.provider
-            )));
+        // T-012: 仅 Ollama 不支持（无 JSON 模式）；其他都按 OpenAI 兼容协议
+        if model.provider == "ollama" {
+            return Err(AppError::Custom(
+                "AI 写笔记暂不支持 Ollama 协议，请切换到 OpenAI 兼容模型（含本地 LM Studio）。"
+                    .into(),
+            ));
         }
 
         // 扁平化现有目录树为 "父/子/孙" 路径列表，供 AI 参考选择归档

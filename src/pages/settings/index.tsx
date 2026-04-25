@@ -46,13 +46,27 @@ const BILIBILI_URL = "https://space.bilibili.com/520725002";
 const ZSXQ_NAME = "后端转AI实战派";
 const ZSXQ_ID = "91839984";
 
-/** 模型提供商选项 */
+/** 模型提供商选项
+ *
+ * T-012：除 Ollama 外其他都按 OpenAI 兼容协议处理。这里把"标签"按用途分组，
+ * 用户选哪个值都不影响后端协议；选中时只是自动预填 baseUrl + 模型 ID。
+ *
+ * `lmstudio` / `minimax` / `siliconflow` / `custom` 是新增预设，与已有
+ * `openai` / `claude` / `deepseek` / `zhipu` 同走 OpenAI 兼容协议。
+ */
 const PROVIDERS = [
+  // 本地模型
   { value: "ollama", label: "Ollama (本地)" },
+  { value: "lmstudio", label: "LM Studio (本地 OpenAI 兼容)" },
+  // 云端预设
   { value: "openai", label: "OpenAI" },
   { value: "deepseek", label: "DeepSeek" },
   { value: "zhipu", label: "智谱 AI (GLM)" },
-  { value: "claude", label: "Claude" },
+  { value: "claude", label: "Claude (经 OpenRouter 等代理)" },
+  { value: "minimax", label: "Minimax" },
+  { value: "siliconflow", label: "SiliconFlow (硅基流动)" },
+  // 完全自定义
+  { value: "custom", label: "自定义 (OpenAI 兼容)" },
 ];
 
 /** 提供商默认 API 地址
@@ -60,19 +74,27 @@ const PROVIDERS = [
  */
 const DEFAULT_URLS: Record<string, string> = {
   ollama: "http://localhost:11434",
+  lmstudio: "http://localhost:1234/v1",
   openai: "https://api.openai.com/v1",
   deepseek: "https://api.deepseek.com/v1",
   zhipu: "https://open.bigmodel.cn/api/paas/v4",
   claude: "https://openrouter.ai/api/v1",
+  minimax: "https://api.minimax.chat/v1",
+  siliconflow: "https://api.siliconflow.cn/v1",
+  custom: "",
 };
 
 /** 各 provider 的模型标识占位提示 */
 const MODEL_ID_PLACEHOLDERS: Record<string, string> = {
   ollama: "如: qwen2.5:7b / llama3.2:3b",
+  lmstudio: "看 LM Studio 模型页右上角 Model 标识",
   openai: "如: gpt-4o-mini / gpt-4o",
   deepseek: "如: deepseek-chat / deepseek-reasoner",
   zhipu: "如: glm-4-plus / glm-4-flash / glm-4-air",
   claude: "如: anthropic/claude-sonnet-4.6 (经 OpenRouter 等兼容代理)",
+  minimax: "如: abab6.5s-chat / MiniMax-M1",
+  siliconflow: "如: Qwen/Qwen2.5-72B-Instruct / deepseek-ai/DeepSeek-V3",
+  custom: "填你目标服务的模型标识",
 };
 
 /** 各 provider 的常用模型预置（下拉联想；也可手动输入任意值） */
@@ -125,6 +147,21 @@ const MODEL_PRESETS: Record<string, { value: string; label: string }[]> = {
     { value: "claude-sonnet-4-5-20250929", label: "claude-sonnet-4-5-20250929" },
     { value: "claude-haiku-4-5-20251001", label: "claude-haiku-4-5-20251001" },
   ],
+  // T-012 新增 provider 的模型预设
+  lmstudio: [],
+  minimax: [
+    { value: "abab6.5s-chat", label: "abab6.5s-chat (高速)" },
+    { value: "abab6.5-chat", label: "abab6.5-chat" },
+    { value: "MiniMax-M1", label: "MiniMax-M1" },
+  ],
+  siliconflow: [
+    { value: "Qwen/Qwen2.5-72B-Instruct", label: "Qwen/Qwen2.5-72B-Instruct" },
+    { value: "Qwen/Qwen2.5-Coder-32B-Instruct", label: "Qwen/Qwen2.5-Coder-32B-Instruct" },
+    { value: "deepseek-ai/DeepSeek-V3", label: "deepseek-ai/DeepSeek-V3" },
+    { value: "deepseek-ai/DeepSeek-R1", label: "deepseek-ai/DeepSeek-R1 (推理)" },
+    { value: "Pro/THUDM/glm-4-9b-chat", label: "GLM-4-9B-Chat (Pro)" },
+  ],
+  custom: [],
 };
 
 export default function SettingsPage() {
@@ -1398,7 +1435,7 @@ export default function SettingsPage() {
           <Form.Item
             name="provider"
             label="提供商"
-            extra="选 OpenAI 即可接入任何 OpenAI 兼容服务（OpenRouter / SiliconFlow / Moonshot / 字节豆包 / 自建网关等），只需修改下方 API 地址"
+            extra="除 Ollama 外都按 OpenAI 兼容协议处理。选「自定义」可填任意 baseUrl（OpenRouter / Moonshot / 字节豆包 / 自建网关 / lm studio 等任何 OpenAI 兼容服务）"
             rules={[{ required: true }]}
           >
             <Select
