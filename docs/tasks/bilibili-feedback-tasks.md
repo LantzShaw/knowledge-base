@@ -588,11 +588,18 @@
 
 #### T-B06 · PDF 导入失败
 
-- **状态**：`pending`
+- **状态**：`completed`（待用户手动验证）  · 完成日期：2026-04-25
 - **来源建议**：sunny-cxy#67 "导入 PDF 文件会显示 PDF 导入失败" / EvilE#124 "图片类型的 pdf 是怎么处理的呢？还得外挂 mineru 吗"
-- **影响**：纯文本 PDF 导入是否能稳？图片型（扫描）PDF v1 明确不做 OCR
-- **修复**：拿到具体 PDF 样本才能定位；先改文案——失败时区分"密码加密"/"扫描型 PDF（v1 不支持）"/"未知错误（贴日志路径）"
-- **依赖确认**：CLAUDE.md 提过项目用 PDFium 绑定，需确认 fallback 路径
+- **盘点现状**（已经做得不错，仅缺 1 项）：
+  - ✅ 文件不存在 / xref 损坏（自动修复 + 友好提示）/ 字体编码 panic / 加密都已有友好错误文案
+  - ❌ **图片型 PDF（扫描件）** 抽出空文本时**静默成功**（笔记 content 空），用户不知道是扫描件
+- **修复**（`src-tauri/src/services/pdf.rs::import_one`）：
+  - 在 `extract_text_with_repair` 之后加 `is_likely_scanned_pdf(&text)` 启发式检测（< 50 字符 → 视为扫描件）
+  - 命中则返回 `AppError::Custom("PDF 抽出文字过少（仅 N 字），多半是扫描件 / 图片型 PDF（无文字层）。当前版本不内置 OCR；建议先用 Adobe Acrobat、ABBYY、mineru 等工具把 PDF 转成可搜索文本后再导入。")`
+- **测试**：4 个新 unit test 全过：empty / only-page-number / normal-not-detected / boundary-49-vs-50
+- **未做（v2）**：内置 OCR（mineru / tesseract 子进程） — EvilE 暗示需求但成本高，现在的友好提示已经能引导用户找外部工具
+- **验证**：`cargo test services::pdf` 21/21 通过
+- [ ] **待用户手动验证**：导入一个**扫描件** PDF（用手机拍照转成的 PDF 或 OCR 前的图片型）应当看到"多半是扫描件…建议用 Acrobat 等先 OCR"的友好提示，而不是空内容笔记
 
 ---
 

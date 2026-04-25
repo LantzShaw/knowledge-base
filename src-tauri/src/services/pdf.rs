@@ -83,6 +83,16 @@ impl PdfService {
         let raw_text = extract_text_with_repair(source)?;
         let text = normalize_text(&raw_text);
 
+        // T-B06: 抽出文字过少 → 多半是扫描件 / 图片型 PDF（无文字层）
+        // 默认成功路径里 normalize 后再判断，避免 PDF 只有页码 / 页眉时被误判
+        // 阈值 50 是经验值（空白/几页页码合计也常超 50；扫描件极少超过 50）
+        if is_likely_scanned_pdf(&text) {
+            return Err(AppError::Custom(format!(
+                "PDF 抽出文字过少（仅 {} 字），多半是扫描件 / 图片型 PDF（无文字层）。当前版本不内置 OCR；建议先用 Adobe Acrobat、ABBYY、mineru 等工具把 PDF 转成可搜索文本后再导入。",
+                text.chars().count()
+            )));
+        }
+
         // 2. 标题取源文件名（去后缀）
         let title = source
             .file_stem()
@@ -386,6 +396,18 @@ fn friendly_extract_error(raw: &str) -> String {
     }
 }
 
+/// T-B06: 启发式判定一份 PDF 是否多半是扫描件（无文字层）
+///
+/// 阈值 50 char 是经验值：
+/// - 普通 PDF 即便只有 1 页，正文也常 100+ 字符
+/// - 仅页码 / 页眉的"几乎空"PDF 一般不会被用户用来"导入笔记"
+/// - 扫描件 pdf-extract 几乎必然返回空字符串或纯空白
+///
+/// 仅看 trim 后的 char 数；不分中英文。
+fn is_likely_scanned_pdf(text: &str) -> bool {
+    text.trim().chars().count() < 50
+}
+
 /// 把抽出的纯文本转成简单 HTML（段落分隔），兼容 Tiptap StarterKit 解析
 fn text_to_simple_html(text: &str) -> String {
     if text.trim().is_empty() {
@@ -638,6 +660,42 @@ mod tests {
         let tail = String::from_utf8_lossy(&out);
         assert!(!tail.contains("WebFastLoad"));
         assert!(tail.ends_with("%%EOF\n"));
+    }
+
+    // ─── T-B06 扫描件检测 ─────────────────────────────
+
+    #[test]
+    fn scanned_pdf_empty_text_detected() {
+        assert!(is_likely_scanned_pdf(""));
+        assert!(is_likely_scanned_pdf("   \n  \t  "));
+    }
+
+    #[test]
+    fn scanned_pdf_only_page_number_detected() {
+        // 只有页码 / 页眉的极简 PDF 也算扫描件
+        assert!(is_likely_scanned_pdf("1\n\n2\n\n3"));
+        assert!(is_likely_scanned_pdf("Page 1 of 10"));
+    }
+
+    #[test]
+    fn normal_pdf_not_detected_as_scanned() {
+        // 一段正常正文（>= 50 字符）不应被误判为扫描件
+        let normal_text = "这是一份正常的 PDF 文档，包含了足够多的中英文混合文字内容，
+应该能够顺利被识别为有完整文字层的可导入 PDF 文件，不会被错误判定为扫描件。";
+        assert!(!is_likely_scanned_pdf(normal_text));
+
+        let english =
+            "This is a normal PDF document with enough text content to pass the scanned-PDF detection threshold.";
+        assert!(!is_likely_scanned_pdf(english));
+    }
+
+    #[test]
+    fn boundary_exactly_50_chars_not_scanned() {
+        // 50 字符正好应当通过（阈值是 < 50）
+        let text: String = "a".repeat(50);
+        assert!(!is_likely_scanned_pdf(&text));
+        let text: String = "a".repeat(49);
+        assert!(is_likely_scanned_pdf(&text));
     }
 }
 
