@@ -184,4 +184,30 @@ impl NoteService {
         db.disable_note_encryption(id, &plaintext)?;
         Ok(())
     }
+
+    /// T-014 网页剪藏：抓 URL → markdown → 创建笔记
+    ///
+    /// `folder_id` 优先级：用户传入 > None（根目录）。Service 层只负责调用 web_clip
+    /// + create_note，不做更复杂的去重 / 标签关联（v2 可加）。
+    pub async fn clip_url(
+        db: &Database,
+        url: &str,
+        folder_id: Option<i64>,
+    ) -> Result<Note, AppError> {
+        let clipped = crate::services::web_clip::fetch_via_jina_reader(url).await?;
+
+        // 笔记正文头部加一行 source 元信息，方便用户回溯原文
+        let body = format!(
+            "> 🌐 来源：[{src}]({src})\n\n{content}",
+            src = clipped.source_url,
+            content = clipped.markdown,
+        );
+
+        let input = NoteInput {
+            title: clipped.title,
+            content: body,
+            folder_id,
+        };
+        Self::create(db, &input)
+    }
 }

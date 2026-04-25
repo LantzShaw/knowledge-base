@@ -538,6 +538,8 @@ pub fn run() {
             commands::notes::add_tags_to_notes_batch,
             commands::notes::set_note_hidden,
             commands::notes::list_hidden_notes,
+            // T-014 网页剪藏
+            commands::notes::clip_url_to_note,
             // T-007 笔记加密 / Vault
             commands::vault::vault_status,
             commands::vault::vault_setup,

@@ -160,6 +160,9 @@ export const noteApi = {
   /** T-003: 切换"隐藏"状态；返回切换后的新状态 */
   setHidden: (id: number, hidden: boolean) =>
     invoke<boolean>("set_note_hidden", { id, hidden }),
+  /** T-014: 网页剪藏 — 把 URL 抓成 markdown 笔记；返回新建笔记 */
+  clipUrl: (url: string, folderId?: number | null) =>
+    invoke<Note>("clip_url_to_note", { url, folderId: folderId ?? null }),
 };
 
 /** T-003 隐藏笔记专用 API（/hidden 页面） */

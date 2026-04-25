@@ -118,3 +118,20 @@ pub fn list_hidden_notes(
 ) -> Result<PageResult<Note>, String> {
     NoteService::list_hidden(&state.db, page, page_size).map_err(|e| e.to_string())
 }
+
+// ─── T-014 网页剪藏 ────────────────────────────
+
+/// 把网页 URL 剪藏成笔记（通过 r.jina.ai 转 markdown）
+///
+/// `folder_id` 由前端透传：右键菜单触发时是该文件夹 id；全局入口可传当前选中文件夹
+/// 或 null（落根目录）。返回新建笔记，前端可立即跳转到编辑器。
+#[tauri::command]
+pub async fn clip_url_to_note(
+    state: tauri::State<'_, AppState>,
+    url: String,
+    folder_id: Option<i64>,
+) -> Result<Note, String> {
+    NoteService::clip_url(&state.db, &url, folder_id)
+        .await
+        .map_err(|e| e.to_string())
+}

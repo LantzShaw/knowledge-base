@@ -14,6 +14,7 @@ pub mod tag;
 pub mod trash;
 pub mod import;
 pub mod import_attachments;
+pub mod web_clip;
 pub mod export;
 pub mod markdown;
 pub mod converter;

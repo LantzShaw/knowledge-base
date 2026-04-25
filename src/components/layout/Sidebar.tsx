@@ -33,6 +33,7 @@ import {
   FolderInput,
   Sparkles,
   EyeOff,
+  Globe,
 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { FolderOutlined } from "@ant-design/icons";
@@ -42,6 +43,7 @@ import { folderApi, importApi } from "@/lib/api";
 import type { Folder, ScannedFile } from "@/types";
 import { NewNoteButton } from "@/components/NewNoteButton";
 import { DraftNoteModal } from "@/components/ai/DraftNoteModal";
+import { ClipUrlModal } from "@/components/ClipUrlModal";
 import { createBlankAndOpen } from "@/lib/noteCreator";
 import { ImportPreviewModal } from "@/components/ImportPreviewModal";
 
@@ -149,6 +151,7 @@ export function Sidebar() {
 
   const [folders, setFolders] = useState<Folder[]>([]);
   const [showDraftModal, setShowDraftModal] = useState(false);
+  const [showClipModal, setShowClipModal] = useState(false);
   const [folderExpanded, setFolderExpanded] = useState(true);
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
 
@@ -769,6 +772,11 @@ export function Sidebar() {
           title="AI 写笔记（T-006）"
         />
         <Button
+          icon={<Globe size={collapsed ? 16 : 14} />}
+          onClick={() => setShowClipModal(true)}
+          title="剪藏网页（T-014）"
+        />
+        <Button
           icon={<FolderOpen size={collapsed ? 16 : 14} />}
           onClick={handleOpenMarkdown}
           title="打开本机 .md 文件"
@@ -778,6 +786,10 @@ export function Sidebar() {
       <DraftNoteModal
         open={showDraftModal}
         onClose={() => setShowDraftModal(false)}
+      />
+      <ClipUrlModal
+        open={showClipModal}
+        onClose={() => setShowClipModal(false)}
       />
 
       {/* 第1段: 导航菜单 */}
