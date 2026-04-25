@@ -20,7 +20,7 @@ import {
   Radio,
 } from "antd";
 import { SyncOutlined, PlusOutlined, CheckCircleFilled, CheckCircleOutlined } from "@ant-design/icons";
-import { Trash2, Pencil, FolderInput, FolderOutput, LayoutTemplate, Power, ExternalLink } from "lucide-react";
+import { Trash2, Pencil, FolderInput, FolderOutput, LayoutTemplate, Power, ExternalLink, Type } from "lucide-react";
 import dayjs, { type Dayjs } from "dayjs";
 import { TimePicker } from "antd";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -30,12 +30,20 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Update } from "@tauri-apps/plugin-updater";
 import type { AiModel, AiModelInput, ImportResult, ImportProgress, ImportConflictPolicy, ScannedFile, ExportResult, ExportProgress, NoteTemplate, NoteTemplateInput, OrphanImageScan } from "@/types";
 import { systemApi, updaterApi, aiModelApi, importApi, exportApi, folderApi, templateApi, pdfApi, sourceFileApi, imageMaintApi, autostartApi, configApi } from "@/lib/api";
-import { useAppStore } from "@/store";
+import {
+  useAppStore,
+  EDITOR_FONT_LABELS,
+  EDITOR_FONT_STACKS,
+  EDITOR_FONT_SIZE_OPTIONS,
+  EDITOR_LINE_HEIGHT_OPTIONS,
+  type EditorFontFamily,
+} from "@/store";
 import { importWordFiles } from "@/lib/wordImport";
 import { Checkbox } from "antd";
 import { UpdateModal } from "@/components/ui/UpdateModal";
 import { RecommendCards } from "@/components/ui/RecommendCards";
 import { SyncTabs } from "@/components/settings/SyncTabs";
+import { DataDirSection } from "@/components/settings/DataDirSection";
 import { TiptapEditor } from "@/components/editor";
 import type { Folder } from "@/types";
 
@@ -363,6 +371,15 @@ export default function SettingsPage() {
       message.error(`删除失败: ${e}`);
     }
   }
+
+  // 编辑器字体偏好（实时受控）
+  const editorFontFamily = useAppStore((s) => s.editorFontFamily);
+  const editorFontSize = useAppStore((s) => s.editorFontSize);
+  const editorLineHeight = useAppStore((s) => s.editorLineHeight);
+  const setEditorFontFamily = useAppStore((s) => s.setEditorFontFamily);
+  const setEditorFontSize = useAppStore((s) => s.setEditorFontSize);
+  const setEditorLineHeight = useAppStore((s) => s.setEditorLineHeight);
+  const resetEditorTypography = useAppStore((s) => s.resetEditorTypography);
 
   // 订阅全局 foldersRefreshTick：Sidebar 修改文件夹后自动刷新设置页的文件夹选项
   const foldersRefreshTick = useAppStore((s) => s.foldersRefreshTick);
@@ -847,6 +864,120 @@ export default function SettingsPage() {
         </div>
       </Card>
 
+      <Card
+        title={
+          <span className="flex items-center gap-2">
+            <Type size={16} />
+            编辑器外观
+          </span>
+        }
+      >
+        <div className="flex items-center justify-between py-1">
+          <div>
+            <div>正文字体</div>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              用户系统未装首选字体时自动 fallback 到下一项，不会出错
+            </Text>
+          </div>
+          <Select
+            value={editorFontFamily}
+            onChange={(v) => setEditorFontFamily(v as EditorFontFamily)}
+            style={{ width: 220 }}
+            options={(Object.keys(EDITOR_FONT_LABELS) as EditorFontFamily[]).map(
+              (key) => ({
+                value: key,
+                label: (
+                  <span
+                    style={{
+                      fontFamily: EDITOR_FONT_STACKS[key] || undefined,
+                    }}
+                  >
+                    {EDITOR_FONT_LABELS[key]}
+                  </span>
+                ),
+              }),
+            )}
+          />
+        </div>
+
+        <div
+          className="flex items-center justify-between py-1 mt-2"
+          style={{ borderTop: "1px solid #f0f0f0", paddingTop: 12 }}
+        >
+          <div>
+            <div>正文字号</div>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              标题、代码块按比例缩放
+            </Text>
+          </div>
+          <Select
+            value={editorFontSize}
+            onChange={setEditorFontSize}
+            style={{ width: 120 }}
+            options={EDITOR_FONT_SIZE_OPTIONS.map((s) => ({
+              value: s,
+              label: `${s} px`,
+            }))}
+          />
+        </div>
+
+        <div
+          className="flex items-center justify-between py-1 mt-2"
+          style={{ borderTop: "1px solid #f0f0f0", paddingTop: 12 }}
+        >
+          <div>
+            <div>行距</div>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              段落行间距倍数
+            </Text>
+          </div>
+          <Select
+            value={editorLineHeight}
+            onChange={setEditorLineHeight}
+            style={{ width: 120 }}
+            options={EDITOR_LINE_HEIGHT_OPTIONS.map((h) => ({
+              value: h,
+              label: h.toFixed(1),
+            }))}
+          />
+        </div>
+
+        <div
+          style={{
+            borderTop: "1px solid #f0f0f0",
+            marginTop: 12,
+            paddingTop: 12,
+          }}
+        >
+          <Text
+            type="secondary"
+            style={{ fontSize: 12, display: "block", marginBottom: 6 }}
+          >
+            预览
+          </Text>
+          <div
+            style={{
+              padding: "12px 14px",
+              background: "var(--ant-color-fill-quaternary, #fafafa)",
+              border: "1px solid var(--ant-color-border-secondary, #f0f0f0)",
+              borderRadius: 6,
+              fontFamily: EDITOR_FONT_STACKS[editorFontFamily] || undefined,
+              fontSize: editorFontSize,
+              lineHeight: editorLineHeight,
+            }}
+          >
+            春有百花秋有月，夏有凉风冬有雪。
+            <br />
+            The quick brown fox jumps over the lazy dog. 1234567890
+          </div>
+          <div className="flex justify-end mt-3">
+            <Button size="small" onClick={resetEditorTypography}>
+              恢复默认
+            </Button>
+          </div>
+        </div>
+      </Card>
+
       <Card title="待办提醒">
         <div className="flex items-center justify-between py-1">
           <div>
@@ -1104,6 +1235,8 @@ export default function SettingsPage() {
           size="small"
         />
       </Card>
+
+      <DataDirSection />
 
       <SyncTabs />
 

@@ -2,6 +2,7 @@ pub mod ai;
 pub mod attachment;
 pub mod config;
 pub mod daily;
+pub mod data_dir;
 pub mod folders;
 pub mod links;
 pub mod notes;

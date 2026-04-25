@@ -708,3 +708,20 @@ export interface SyncV1ProgressEvent {
   total: number;
   message: string;
 }
+
+// ─── T-013 自定义数据目录 ──────────────────────
+
+/** 数据目录来源 */
+export type DataDirSource = "env" | "pointer" | "default";
+
+/** 当前数据目录解析结果 */
+export interface ResolvedDataDir {
+  /** 框架默认 app_data_dir（OS 给的固定位置）*/
+  defaultDir: string;
+  /** 当前生效的数据根目录 */
+  currentDir: string;
+  /** 来源（env / pointer / default）*/
+  source: DataDirSource;
+  /** 指针文件里写的路径（可能与 current 不一致：env 临时覆盖时；为 null 表示无指针） */
+  pendingDir: string | null;
+}

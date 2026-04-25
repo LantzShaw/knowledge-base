@@ -264,7 +264,21 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         // ─── 应用初始化 ─────────────────────────────
         .setup(move |app| {
-            let data_dir_root = app.path().app_data_dir()?;
+            // framework 默认 app_data_dir：单实例锁 + 指针文件 永远在这里，跟用户自定义路径无关
+            let framework_app_data_dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&framework_app_data_dir)?;
+
+            // T-013: 解析最终数据根目录（env > 指针文件 > 默认）
+            // 注意 dev 模式旧数据迁移、单实例锁仍在 framework_app_data_dir 上做
+            let resolved_data_dir = services::data_dir::DataDirResolver::resolve(
+                &framework_app_data_dir,
+            )
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+            log::info!(
+                "[data_dir] 当前数据根: {} (source={:?})",
+                resolved_data_dir.current_dir, resolved_data_dir.source
+            );
+            let data_dir_root = std::path::PathBuf::from(&resolved_data_dir.current_dir);
             std::fs::create_dir_all(&data_dir_root)?;
 
             // dev 模式旧数据迁移：仅默认实例需要（多开实例自带独立子目录）
@@ -273,8 +287,10 @@ pub fn run() {
             }
 
             // 拿锁（这次真持有，存活到进程结束）
+            // ⚠️ 锁文件刻意放 framework_app_data_dir（不是 data_dir_root）：
+            //    用户改数据目录不应该突破单例约束
             let (instance_id, lock_file) =
-                acquire_instance_lock(&data_dir_root, explicit_id, lock_prefix);
+                acquire_instance_lock(&framework_app_data_dir, explicit_id, lock_prefix);
             match instance_id {
                 None => log::info!("默认实例模式"),
                 Some(n) => log::info!("多开实例模式: instance-{}", n),
@@ -359,8 +375,13 @@ pub fn run() {
             }
 
             // 默认实例：启动 .md 投递监听，接管其他实例转来的双击打开请求
+            // ⚠️ 投递文件刻意走 framework_app_data_dir（不是 data_dir_root）：
+            //    其他进程不知道当前用户配的自定义路径，必须用 OS 给的固定位置约定
             if instance_id.is_none() {
-                start_md_deliver_watcher(app.handle().clone(), data_dir_root.clone());
+                start_md_deliver_watcher(
+                    app.handle().clone(),
+                    framework_app_data_dir.clone(),
+                );
             }
 
             // 系统托盘（携带实例号供 tooltip 区分）
@@ -435,6 +456,10 @@ pub fn run() {
             commands::vault::encrypt_note,
             commands::vault::decrypt_note,
             commands::vault::disable_note_encrypt,
+            // T-013 自定义数据目录
+            commands::data_dir::get_data_dir_info,
+            commands::data_dir::set_pending_data_dir,
+            commands::data_dir::clear_pending_data_dir,
             // T-024 同步 V1（多端真同步 + 多 backend）
             commands::sync_v1::sync_v1_list_backends,
             commands::sync_v1::sync_v1_get_backend,

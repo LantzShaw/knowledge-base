@@ -2,6 +2,7 @@ pub mod ai;
 pub mod attachment;
 pub mod config;
 pub mod crypto;
+pub mod data_dir;
 pub mod daily;
 pub mod folder;
 pub mod hash;

@@ -61,6 +61,7 @@ import type {
   SyncManifestV1,
   SyncPushResult,
   SyncPullResult,
+  ResolvedDataDir,
 } from "@/types";
 
 /** 系统相关 API */
@@ -509,6 +510,19 @@ export const syncV1Api = {
   pull: (id: number) => invoke<SyncPullResult>("sync_v1_pull", { id }),
   getLocalManifest: () =>
     invoke<SyncManifestV1>("sync_v1_get_local_manifest"),
+};
+
+/**
+ * T-013 自定义数据目录 API
+ *
+ * 修改路径只写指针文件，**重启生效**。当前进程的 db / 资产路径不会变。
+ * 不会自动迁移老数据；UI 强提示用户手动复制旧 `app.db + kb_assets/` 到新目录。
+ */
+export const dataDirApi = {
+  getInfo: () => invoke<ResolvedDataDir>("get_data_dir_info"),
+  setPending: (newPath: string) =>
+    invoke<void>("set_pending_data_dir", { newPath }),
+  clearPending: () => invoke<void>("clear_pending_data_dir"),
 };
 
 /** 待办任务 API */
