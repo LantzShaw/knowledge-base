@@ -420,11 +420,21 @@
 
 #### T-014 · 网页剪藏（粘贴 URL → 抓正文 → 入库）
 
-- **状态**：`pending`
+- **状态**：`completed`（待用户手动验证）  · 完成日期：2026-04-25
 - **来源建议**：B站用户-LUCK#38 "建议增加将网页生成笔记文档功能" / 幻觉概念#75 "浏览器上看见素材图片希望能直接复制粘贴到笔记中，且不会因为网页的消失而损坏"
-- **价值**：⭐⭐⭐  成本：中
-- **建议方案**：v1 不做浏览器扩展（开发量大），先做"粘贴 URL → 后端 reqwest 抓 HTML → readability-rs 提取正文 → html2md 转 markdown → 新建笔记"，已有 html2md 依赖
-- **图片**：抓页面时图片下载到本地 attachments，避免链接失效
+- **决策**：用 Jina Reader (`https://r.jina.ai/<url>`) 代理，**零新依赖**（reqwest 已有）；处理后的 markdown 已剥离侧栏 / 广告，中英文站点效果好
+- **改动**：
+  - 后端 `services/web_clip.rs`（新建，180 行）— `fetch_via_jina_reader` + 头部解析（`Title:` / `URL Source:` / `Markdown Content:`）+ 6 个单测覆盖完整 / 缺 Title fallback H1 / 无头部直接当正文 / 空 body / 仅头无 body / URL 校验
+  - 后端 `services/note.rs::clip_url(db, url, folder_id)` — 调用 web_clip → 在正文头部插入 "🌐 来源: [url](url)" 引用块 → `db.create_note`
+  - 后端 `commands/notes.rs::clip_url_to_note` async Command + `lib.rs` 注册
+  - 前端 `lib/api/index.ts::noteApi.clipUrl(url, folderId?)`
+  - 前端 `components/ClipUrlModal.tsx`（100 行）— 输入框 + Alert 提示"通过 r.jina.ai" + Ctrl/⌘+Enter 提交
+  - 前端 `Sidebar.tsx` 顶部"AI 写笔记"按钮旁加 🌐 Globe 按钮入口
+- **图片处理**：v1 保留外链（Jina 返回的 markdown 里图片是原网站绝对 URL）；v2 复用 T-009 attachment 流程下载到本地（避免原站失效后断图）
+- **隐私**：UI Alert 明示"通过 r.jina.ai 提取"，让用户知情
+- **未做（v2 候选）**：浏览器扩展（一键剪藏当前 tab）；多 URL 批量；图片本地化
+- **验证**：`cargo test web_clip` 6/6 通过；`cargo check` + `npx tsc --noEmit` 干净
+- [ ] **待用户手动验证**：(1) 侧栏顶部点 🌐 → 弹 Modal → 粘贴一个 https URL → 应跳转到新建笔记，正文头部带"来源" 引用 + Jina 提取的 markdown；(2) 输入非 http URL → 报错；(3) 网络断开时优雅报错
 
 ---
 
