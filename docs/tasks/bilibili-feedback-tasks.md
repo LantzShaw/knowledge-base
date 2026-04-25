@@ -481,7 +481,9 @@
 - **状态**：`completed` ✅  · 完成日期：2026-04-25
 - **来源建议**：ちょっとおかしい#54 "我没有将唯一的一个 AI 设成默认配置...才可以正常使用"
 - **影响**：用户删默认配置后整个 AI 模块崩（`get_default_ai_model` 返回 NotFound）
-- **修复**：`database/ai.rs::delete_ai_model` 改成事务——删除前查 was_default → DELETE → 如果删的是默认，按 created_at ASC 选下一条标为默认；零条时不动（前端会显示"请先添加 AI 模型"）；不存在的 id 幂等返回
+- **修复 1（删除侧）**：`database/ai.rs::delete_ai_model` 改成事务——删除前查 was_default → DELETE → 如果删的是默认，按 created_at ASC 选下一条标为默认；零条时不动；不存在的 id 幂等返回
+- **修复 2（创建侧 — 2026-04-25 补充）**：`create_ai_model` 在插入新模型后检查 `COUNT(is_default=1)`；若为 0 自动把新建的这条 mark 为默认。这样首次配置 AI 不需要用户手动勾"默认"
+- **修复 3（读取侧兜底 — 2026-04-25 补充）**：`get_default_ai_model` 找不到 `is_default=1` 时，自动取 `created_at ASC` 第一条 mark 为默认并返回；只有库里完全没模型才报 `NotFound`，前端显示友好文案而非"数据库错误"
 - **测试**：4 个新增单测全过：
   - `delete_default_picks_next_as_default`
   - `delete_non_default_leaves_default_intact`
