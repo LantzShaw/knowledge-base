@@ -982,7 +982,10 @@ export default function NoteEditorPage() {
 
   if (loading) {
     return (
-      <div className="editor-page">
+      <div
+        className="editor-page"
+        style={focusMode ? { margin: 0 } : undefined}
+      >
         <div className="flex items-center justify-center flex-1">
           <Spin size="large" />
         </div>
@@ -991,7 +994,12 @@ export default function NoteEditorPage() {
   }
 
   return (
-    <div className="editor-page">
+    <div
+      className="editor-page"
+      // 专注模式下 AppLayout 的 Content padding=0，editor-page 的 margin:-24px
+      // 也必须抵消为 0，否则会把 topbar 的左右按钮推到视窗外（修 F11 截断 bug）
+      style={focusMode ? { margin: 0 } : undefined}
+    >
       {/* 顶部工具栏 */}
       <div className="editor-topbar">
         <Space align="center">
