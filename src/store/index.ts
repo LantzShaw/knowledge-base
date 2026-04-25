@@ -33,6 +33,39 @@ export const SIDE_PANEL_DEFAULT_WIDTH = 240;
 /** 最近搜索历史保留条数 */
 const RECENT_SEARCHES_MAX = 10;
 
+/**
+ * 编辑器字体族预设。
+ * 值是稳定 ID，写入 store 持久化；实际 CSS font-family 链通过 EDITOR_FONT_STACKS 查表，
+ * 包含若干 fallback，用户系统未装首选字体时自动退回下一项，不会变成"乱码方块"。
+ */
+export type EditorFontFamily = "system" | "sans" | "serif" | "kaiti" | "mono";
+
+export const EDITOR_FONT_LABELS: Record<EditorFontFamily, string> = {
+  system: "系统默认",
+  sans: "无衬线（黑体）",
+  serif: "衬线（宋体）",
+  kaiti: "楷体（霞鹜文楷优先）",
+  mono: "等宽（编程字体）",
+};
+
+export const EDITOR_FONT_STACKS: Record<EditorFontFamily, string> = {
+  // system 留空 → 不写 CSS 变量，编辑器继承全局默认
+  system: "",
+  sans: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "PingFang SC", "Source Han Sans SC", "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
+  serif: '"Source Han Serif SC", "Noto Serif SC", "Songti SC", STSong, SimSun, Georgia, serif',
+  kaiti: '"LXGW WenKai", "LXGW WenKai Screen", KaiTi, STKaiti, "Source Han Serif SC", serif',
+  mono: '"JetBrains Mono", "Fira Code", "Cascadia Code", "Source Code Pro", Consolas, "Courier New", monospace',
+};
+
+export const EDITOR_FONT_SIZE_OPTIONS = [12, 13, 14, 15, 16, 18, 20, 22] as const;
+export const EDITOR_LINE_HEIGHT_OPTIONS = [1.4, 1.5, 1.6, 1.8, 2.0] as const;
+
+export const EDITOR_FONT_DEFAULTS = {
+  family: "system" as EditorFontFamily,
+  size: 15,
+  lineHeight: 1.8,
+};
+
 // 开发/生产数据隔离：dev 用 dev-settings.json，prod 用 settings.json
 // 与后端 cfg!(debug_assertions) 加 dev- 前缀对齐；旧文件由后端 migrate_to_dev_prefix 自动迁移
 const STORE_FILE = import.meta.env.DEV ? "dev-settings.json" : "settings.json";
@@ -70,6 +103,12 @@ interface AppStore {
   sidePanelVisible: boolean;
   /** 搜索视图：最近搜索关键词（最新在前，最多 RECENT_SEARCHES_MAX 条，持久化） */
   recentSearches: string[];
+  /** 编辑器字体族（持久化） */
+  editorFontFamily: EditorFontFamily;
+  /** 编辑器字号 px（持久化） */
+  editorFontSize: number;
+  /** 编辑器行距倍数（持久化） */
+  editorLineHeight: number;
   /**
    * 当前进程的系统信息（含多开实例编号 + 数据目录）。
    * null = 启动时还没拉到；UI 据此渲染实例徽章
@@ -123,6 +162,14 @@ interface AppStore {
   removeRecentSearch: (q: string) => void;
   /** 清空最近搜索 */
   clearRecentSearches: () => void;
+  /** 设置编辑器字体族 */
+  setEditorFontFamily: (family: EditorFontFamily) => void;
+  /** 设置编辑器字号（px） */
+  setEditorFontSize: (size: number) => void;
+  /** 设置编辑器行距倍数 */
+  setEditorLineHeight: (lineHeight: number) => void;
+  /** 重置编辑器字体到默认值 */
+  resetEditorTypography: () => void;
 }
 
 export const useAppStore = create<AppStore>((set, get) => ({
@@ -140,6 +187,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
   sidePanelWidth: SIDE_PANEL_DEFAULT_WIDTH,
   sidePanelVisible: true,
   recentSearches: [],
+  editorFontFamily: EDITOR_FONT_DEFAULTS.family,
+  editorFontSize: EDITOR_FONT_DEFAULTS.size,
+  editorLineHeight: EDITOR_FONT_DEFAULTS.lineHeight,
   instanceInfo: null,
   loadInstanceInfo: async () => {
     try {
@@ -194,6 +244,22 @@ export const useAppStore = create<AppStore>((set, get) => ({
   removeRecentSearch: (q) =>
     set((s) => ({ recentSearches: s.recentSearches.filter((x) => x !== q) })),
   clearRecentSearches: () => set({ recentSearches: [] }),
+  setEditorFontFamily: (family) => set({ editorFontFamily: family }),
+  setEditorFontSize: (size) => {
+    // clamp 到合法预设范围 [12, 22]，防止外部 set 写脏数据
+    const clamped = Math.max(12, Math.min(22, Math.round(size)));
+    set({ editorFontSize: clamped });
+  },
+  setEditorLineHeight: (lineHeight) => {
+    const clamped = Math.max(1.2, Math.min(2.5, Number(lineHeight) || 1.8));
+    set({ editorLineHeight: clamped });
+  },
+  resetEditorTypography: () =>
+    set({
+      editorFontFamily: EDITOR_FONT_DEFAULTS.family,
+      editorFontSize: EDITOR_FONT_DEFAULTS.size,
+      editorLineHeight: EDITOR_FONT_DEFAULTS.lineHeight,
+    }),
   setAlwaysOnTop: async (enabled, opts) => {
     try {
       await getCurrentWindow().setAlwaysOnTop(enabled);
@@ -211,6 +277,29 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
   },
 }));
+
+/**
+ * 把当前编辑器字体偏好同步到 :root 的 CSS 变量上，供 global.css 里的
+ * `.tiptap-content .tiptap` 读取。
+ *
+ * - family=system 时清掉变量，让编辑器继承全局默认字体
+ * - 其余 family 写入完整 fallback 链，避免用户没装首选字体时变成方块
+ */
+export function applyEditorTypography(state: {
+  editorFontFamily: EditorFontFamily;
+  editorFontSize: number;
+  editorLineHeight: number;
+}) {
+  const root = document.documentElement;
+  const stack = EDITOR_FONT_STACKS[state.editorFontFamily];
+  if (stack) {
+    root.style.setProperty("--editor-font-family", stack);
+  } else {
+    root.style.removeProperty("--editor-font-family");
+  }
+  root.style.setProperty("--editor-font-size", `${state.editorFontSize}px`);
+  root.style.setProperty("--editor-line-height", String(state.editorLineHeight));
+}
 
 /** 从 tauri-plugin-store 恢复持久化的偏好（主题 + 窗口置顶） */
 export async function loadThemeFromStore() {
@@ -249,8 +338,26 @@ export async function loadThemeFromStore() {
           .slice(0, RECENT_SEARCHES_MAX),
       });
     }
+
+    // 恢复编辑器字体偏好
+    const ef = await store.get<EditorFontFamily>("editorFontFamily");
+    if (ef && ef in EDITOR_FONT_STACKS) {
+      useAppStore.getState().setEditorFontFamily(ef);
+    }
+    const fs = await store.get<number>("editorFontSize");
+    if (typeof fs === "number" && Number.isFinite(fs)) {
+      useAppStore.getState().setEditorFontSize(fs);
+    }
+    const lh = await store.get<number>("editorLineHeight");
+    if (typeof lh === "number" && Number.isFinite(lh)) {
+      useAppStore.getState().setEditorLineHeight(lh);
+    }
   } catch {
     // 首次启动时 store 可能不存在
+  } finally {
+    // 不论加载成功失败，都把当前 store 值（可能是默认值，也可能是已恢复值）
+    // 同步到 CSS 变量，确保首次渲染就用对字体而不是闪一下默认再切。
+    applyEditorTypography(useAppStore.getState());
   }
 }
 
@@ -265,6 +372,9 @@ export async function saveThemeToStore() {
       sidePanelWidth,
       sidePanelVisible,
       recentSearches,
+      editorFontFamily,
+      editorFontSize,
+      editorLineHeight,
     } = useAppStore.getState();
     const store = await Store.load(STORE_FILE);
     await store.set("lightTheme", lightTheme);
@@ -274,18 +384,31 @@ export async function saveThemeToStore() {
     await store.set("sidePanelWidth", sidePanelWidth);
     await store.set("sidePanelVisible", sidePanelVisible);
     await store.set("recentSearches", recentSearches);
+    await store.set("editorFontFamily", editorFontFamily);
+    await store.set("editorFontSize", editorFontSize);
+    await store.set("editorLineHeight", editorLineHeight);
     await store.save();
   } catch {
     // 静默失败
   }
 }
 
-// 监听主题 + 置顶 + SidePanel 偏好变化自动保存
+// 监听主题 + 置顶 + SidePanel + 编辑器字体偏好变化自动保存
 let _prevPersistKey = "";
 useAppStore.subscribe((state) => {
-  const key = `${state.lightTheme}|${state.darkTheme}|${state.themeCategory}|${state.alwaysOnTop}|${state.sidePanelWidth}|${state.sidePanelVisible}|${state.recentSearches.join(",")}`;
+  const key = `${state.lightTheme}|${state.darkTheme}|${state.themeCategory}|${state.alwaysOnTop}|${state.sidePanelWidth}|${state.sidePanelVisible}|${state.recentSearches.join(",")}|${state.editorFontFamily}|${state.editorFontSize}|${state.editorLineHeight}`;
   if (key !== _prevPersistKey) {
     _prevPersistKey = key;
     saveThemeToStore();
+  }
+});
+
+// 编辑器字体偏好变化时实时同步到 CSS 变量（无需刷新页面）
+let _prevTypographyKey = "";
+useAppStore.subscribe((state) => {
+  const key = `${state.editorFontFamily}|${state.editorFontSize}|${state.editorLineHeight}`;
+  if (key !== _prevTypographyKey) {
+    _prevTypographyKey = key;
+    applyEditorTypography(state);
   }
 });
