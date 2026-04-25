@@ -110,7 +110,11 @@ export function ActivityBar() {
 
   function handleClick(item: ActivityItem) {
     // VS Code 行为：点当前已高亮的图标 = 翻转 SidePanel 可见性
-    if (highlightView === item.view) {
+    // 注意：必须用 URL 真相判断"是否在该视图"，而非 highlightView。
+    // highlightView 在无匹配路由时（如 /settings）会回退到 store.activeView，
+    // 此时点 ActivityBar 项会被误判成"点当前视图 → 仅折叠面板"，导致无法跳转。
+    const onThisView = deriveActiveViewFromPath(location.pathname) === item.view;
+    if (onThisView) {
       toggleSidePanel();
       return;
     }
