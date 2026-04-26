@@ -63,6 +63,39 @@ impl Database {
             .map_err(|e| AppError::Custom(e.to_string()))
     }
 
+    /// 热重载数据库连接：drop 旧 Connection → 重新打开新文件。
+    ///
+    /// **使用场景**：从云端 / 本地 zip 导入快照时，`app.db` 文件被外部覆盖，
+    /// 当前进程持有的旧 Connection 仍指向旧 inode（含 page cache + WAL 状态），
+    /// 后续查询会拿到旧数据。导入完后调本方法热替换连接，无需重启应用。
+    ///
+    /// 实现要点：
+    /// - 整个过程持有 Mutex，序列化所有读写，保证导入瞬间不会有并发查询拿到不一致数据
+    /// - 重建后必须重跑 PRAGMA（init 里那一套）；不跑会丢 WAL/foreign_keys 等设置
+    /// - 不跑 schema::migrate：导入的 db 已经是同版本/更高版本，跑 migrate 反而可能改坏
+    pub fn reopen(&self, db_path: &str) -> Result<(), AppError> {
+        let mut guard = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
+
+        // drop 旧连接（替换前手动 drop 让 OS 释放文件句柄；Mutex 替换语义本身也会 drop）
+        let new_conn = Connection::open(db_path)?;
+
+        // 重跑 PRAGMA（与 init 保持一致）
+        new_conn.pragma_update(None, "journal_mode", "WAL")?;
+        new_conn.pragma_update(None, "foreign_keys", "ON")?;
+        new_conn.pragma_update(None, "synchronous", "NORMAL")?;
+        new_conn.pragma_update(None, "cache_size", -64000)?;
+        new_conn.pragma_update(None, "mmap_size", 33_554_432_i64)?;
+        new_conn.pragma_update(None, "temp_store", "MEMORY")?;
+        new_conn.busy_timeout(std::time::Duration::from_secs(5))?;
+
+        *guard = new_conn;
+        log::info!("[db] 已热重载数据库连接: {}", db_path);
+        Ok(())
+    }
+
     // ─── 配置 DAO ────────────────────────────────────
 
     /// 获取所有配置

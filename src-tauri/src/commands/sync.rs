@@ -40,6 +40,7 @@ pub fn sync_export_to_file(
 #[tauri::command]
 pub fn sync_import_from_file(
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
     source_path: String,
     mode: SyncImportMode,
 ) -> Result<SyncManifest, String> {
@@ -55,6 +56,21 @@ pub fn sync_import_from_file(
         &PathBuf::from(&source_path),
         mode,
     );
+
+    // 导入成功 → 热重载 db 连接 + emit 事件让前端刷新视图。
+    // 失败时不重载（旧连接仍指向未被覆盖的库，正常）
+    if result.is_ok() {
+        let db_path_str = db_path.to_string_lossy().into_owned();
+        if let Err(e) = state.db.reopen(&db_path_str) {
+            log::error!("[sync] 导入后重载 db 失败：{}", e);
+            // 重载失败不阻塞返回（用户能看到导入成功），但日志告警；
+            // 此时旧连接仍持有 → 用户重启就能看到新数据
+        } else {
+            // 重载成功 → 通知前端"DB 已重新打开，刷新所有视图"
+            use tauri::Emitter;
+            let _ = app.emit("db:reloaded", ());
+        }
+    }
 
     record_manifest_history(&state, history_id, &result);
     result.map_err(|e| e.to_string())
