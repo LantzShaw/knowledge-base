@@ -68,6 +68,8 @@ import type {
   SyncPullResult,
   ResolvedDataDir,
   MigrationMarker,
+  WordExportResult,
+  HtmlExportResult,
 } from "@/types";
 
 /** 系统相关 API */
@@ -172,8 +174,47 @@ export const noteApi = {
 
 /** T-003 隐藏笔记专用 API（/hidden 页面） */
 export const hiddenApi = {
-  list: (page?: number, pageSize?: number) =>
-    invoke<PageResult<Note>>("list_hidden_notes", { page, pageSize }),
+  list: (opts?: {
+    page?: number;
+    pageSize?: number;
+    /** 只看某个目录；与 uncategorized 二选一，uncategorized 优先 */
+    folderId?: number | null;
+    /** true = 只看未分类（folder_id IS NULL） */
+    uncategorized?: boolean;
+  }) =>
+    invoke<PageResult<Note>>("list_hidden_notes", {
+      page: opts?.page,
+      pageSize: opts?.pageSize,
+      folderId: opts?.folderId ?? null,
+      uncategorized: opts?.uncategorized ?? false,
+    }),
+  /** 返回有隐藏笔记的 folder_id 列表；含 null 表示有"未分类"的隐藏笔记 */
+  listFolderIds: () =>
+    invoke<(number | null)[]>("list_hidden_folder_ids"),
+};
+
+/**
+ * 隐藏笔记 PIN —— UX 门禁（不是数据加密）
+ *
+ * 与 vaultApi 完全独立：vault 是真加密笔记内容；这里只挡"打开 /hidden 路由"。
+ * 忘记 PIN 时数据无损（隐藏笔记本身仍是明文，可走重置流程）。
+ */
+export const hiddenPinApi = {
+  /** 查询是否已设置 PIN —— 决定 ActivityBar 点"隐藏笔记"是否要弹解锁框 */
+  isSet: () => invoke<boolean>("is_hidden_pin_set"),
+  /**
+   * 设置或修改 PIN（已设过时必须传 oldPin）
+   * - hint = null 表示不动现有提示；hint = "" 表示清空提示
+   * - 后端会校验 hint 不能包含 PIN 本身，否则报错
+   */
+  set: (oldPin: string | null, newPin: string, hint: string | null = null) =>
+    invoke<void>("set_hidden_pin", { oldPin, newPin, hint }),
+  /** 校验 PIN —— 失败次数限制由后端管 */
+  verify: (pin: string) => invoke<void>("verify_hidden_pin", { pin }),
+  /** 清除 PIN（需当前 PIN 校验通过） */
+  clear: (currentPin: string) => invoke<void>("clear_hidden_pin", { currentPin }),
+  /** 获取 PIN 提示（无则 null）—— 解锁框可展示给用户 */
+  getHint: () => invoke<string | null>("get_hidden_pin_hint"),
 };
 
 /**
@@ -414,6 +455,12 @@ export const exportApi = {
    *  实际会在其下创建一层 `{标题}/`，里面放 `{标题}.md` 与 `assets/` */
   exportSingle: (id: number, parentDir: string) =>
     invoke<SingleExportResult>("export_single_note", { id, parentDir }),
+  /** T-020 导出单条笔记为 Word（.docx）；targetPath 是用户在 save dialog 选定的最终路径 */
+  exportSingleToWord: (id: number, targetPath: string) =>
+    invoke<WordExportResult>("export_single_note_to_word", { id, targetPath }),
+  /** T-020 导出单条笔记为 HTML（单文件，图片内嵌 base64） */
+  exportSingleToHtml: (id: number, targetPath: string) =>
+    invoke<HtmlExportResult>("export_single_note_to_html", { id, targetPath }),
 };
 
 /** 附件 API（PDF/Office/ZIP/音视频等非图片非文本文件） */
@@ -449,6 +496,27 @@ export const imageApi = {
     const v = await invoke<number[]>("get_image_blob", { path });
     return new Uint8Array(v);
   },
+};
+
+/** 视频 API
+ *
+ * 与图片 API 对称，但走 Tauri 2.x binary IPC（参数 Uint8Array → Rust Vec<u8>），
+ * 比 base64 省 33% 体积 + 零编解码，100MB 视频也能秒传。
+ *
+ * v1 不支持加密笔记的视频；后端遇到加密笔记会拒绝。
+ */
+export const videoApi = {
+  /** 保存视频字节（Uint8Array 直传，用于粘贴/拖入） */
+  save: (noteId: number, fileName: string, data: Uint8Array) =>
+    invoke<string>("save_video", { noteId, fileName, data }),
+  /** 从本地文件路径保存（工具栏文件选择器 / 大文件回退路径，零拷贝） */
+  saveFromPath: (noteId: number, sourcePath: string) =>
+    invoke<string>("save_video_from_path", { noteId, sourcePath }),
+  /** 删除笔记的所有视频 */
+  deleteNoteVideos: (noteId: number) =>
+    invoke<void>("delete_note_videos", { noteId }),
+  /** 获取视频存储目录（设置页"打开目录"用） */
+  getVideosDir: () => invoke<string>("get_videos_dir"),
 };
 
 /** 模板 API */
@@ -543,6 +611,9 @@ export const syncApi = {
   /** 检查 keyring 中是否有该用户的密码 */
   hasPassword: (username: string) =>
     invoke<boolean>("sync_has_webdav_password", { username }),
+  /** 取出已加密的密码明文（仅供"复用配置"等本地内部流程用） */
+  getPassword: (username: string) =>
+    invoke<string | null>("sync_get_webdav_password", { username }),
   /** 删除 keyring 中的密码 */
   deletePassword: (username: string) =>
     invoke<void>("sync_delete_webdav_password", { username }),
@@ -608,6 +679,12 @@ export const taskApi = {
     invoke<boolean>("update_task", { id, input }),
   toggleStatus: (id: number) => invoke<number>("toggle_task_status", { id }),
   delete: (id: number) => invoke<boolean>("delete_task", { id }),
+  /** 批量删除任务（多选模式用），返回实际删除条数 */
+  deleteBatch: (ids: number[]) =>
+    invoke<number>("delete_tasks_batch", { ids }),
+  /** 批量标记完成（多选模式用），返回实际更新条数 */
+  completeBatch: (ids: number[]) =>
+    invoke<number>("complete_tasks_batch", { ids }),
   addLink: (taskId: number, input: TaskLinkInput) =>
     invoke<number>("add_task_link", { taskId, input }),
   removeLink: (linkId: number) =>

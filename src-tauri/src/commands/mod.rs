@@ -12,6 +12,7 @@ pub mod tags;
 pub mod trash;
 pub mod import;
 pub mod export;
+pub mod hidden_pin;
 pub mod image;
 pub mod pdf;
 pub mod prompt;

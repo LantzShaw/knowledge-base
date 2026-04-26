@@ -538,6 +538,13 @@ pub fn run() {
             commands::notes::add_tags_to_notes_batch,
             commands::notes::set_note_hidden,
             commands::notes::list_hidden_notes,
+            commands::notes::list_hidden_folder_ids,
+            // 隐藏笔记 PIN（UX 门禁，非真加密）
+            commands::hidden_pin::is_hidden_pin_set,
+            commands::hidden_pin::set_hidden_pin,
+            commands::hidden_pin::verify_hidden_pin,
+            commands::hidden_pin::clear_hidden_pin,
+            commands::hidden_pin::get_hidden_pin_hint,
             // T-014 网页剪藏
             commands::notes::clip_url_to_note,
             // T-007 笔记加密 / Vault
@@ -641,6 +648,9 @@ pub fn run() {
             // 导出模块
             commands::export::export_notes,
             commands::export::export_single_note,
+            // T-020 导出 Word / HTML
+            commands::export::export_single_note_to_word,
+            commands::export::export_single_note_to_html,
             // 笔记批量操作
             commands::notes::trash_all_notes,
             // 图片模块
@@ -683,6 +693,7 @@ pub fn run() {
             commands::sync::sync_webdav_list_snapshots,
             commands::sync::sync_save_webdav_password,
             commands::sync::sync_has_webdav_password,
+            commands::sync::sync_get_webdav_password,
             commands::sync::sync_delete_webdav_password,
             commands::sync::sync_list_history,
             commands::sync::sync_scheduler_reload,
@@ -693,6 +704,8 @@ pub fn run() {
             commands::tasks::update_task,
             commands::tasks::toggle_task_status,
             commands::tasks::delete_task,
+            commands::tasks::delete_tasks_batch,
+            commands::tasks::complete_tasks_batch,
             commands::tasks::add_task_link,
             commands::tasks::remove_task_link,
             commands::tasks::get_task_stats,

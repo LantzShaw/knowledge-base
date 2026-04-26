@@ -16,15 +16,16 @@ import {
   Popover,
   Tree,
   Badge,
+  Dropdown,
   App as AntdApp,
   theme as antdTheme,
 } from "antd";
-import { ArrowLeft, Save, Trash2, Pin, FolderOpen, Tags, Link2, Share, Maximize2, Minimize2, FileText as FileTextIcon, ChevronRight, CornerUpLeft, Folder as FolderIcon, Eye, EyeOff, Lock, Unlock, MessageSquare } from "lucide-react";
+import { ArrowLeft, Save, Trash2, Pin, FolderOpen, Tags, Link2, Share, Maximize2, Minimize2, FileText as FileTextIcon, ChevronRight, ChevronDown, CornerUpLeft, Folder as FolderIcon, Eye, EyeOff, Lock, Unlock, MessageSquare } from "lucide-react";
 import { useAppStore } from "@/store";
 import { useTabsStore } from "@/store/tabs";
 import { noteApi, tagApi, folderApi, linkApi, exportApi, sourceFileApi, vaultApi, sourceWritebackApi } from "@/lib/api";
 import { VaultModal } from "@/components/vault/VaultModal";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { relativeTime, stripHtml } from "@/lib/utils";
@@ -962,6 +963,76 @@ export default function NoteEditorPage() {
     }
   }
 
+  /** T-020: 导出为 Word (.docx) — 用 save dialog 选最终文件路径 */
+  async function handleExportWord() {
+    const safeName = title.replace(/[/\\:*?"<>|]/g, "_").trim() || "未命名";
+    const filePath = await save({
+      defaultPath: `${safeName}.docx`,
+      filters: [{ name: "Word", extensions: ["docx"] }],
+    });
+    if (!filePath) return;
+    try {
+      const result = await exportApi.exportSingleToWord(noteId, filePath);
+      Modal.success({
+        title: "导出 Word 成功",
+        content: (
+          <div>
+            <p style={{ marginBottom: 4 }}>
+              {`嵌入图片 ${result.imagesEmbedded} 张` +
+                (result.imagesMissing > 0
+                  ? `（${result.imagesMissing} 张缺失，已用占位符替代）`
+                  : "")}
+              ，文件：
+            </p>
+            <p style={{ fontFamily: "monospace", fontSize: 12, wordBreak: "break-all" }}>
+              {result.filePath}
+            </p>
+          </div>
+        ),
+        okText: "打开所在文件夹",
+        onOk: () => revealItemInDir(result.filePath).catch(() => {}),
+        closable: true,
+      });
+    } catch (e) {
+      message.error(`导出 Word 失败: ${e}`);
+    }
+  }
+
+  /** T-020: 导出为 HTML — 单文件，图片内嵌 base64，可独立分享 */
+  async function handleExportHtml() {
+    const safeName = title.replace(/[/\\:*?"<>|]/g, "_").trim() || "未命名";
+    const filePath = await save({
+      defaultPath: `${safeName}.html`,
+      filters: [{ name: "HTML", extensions: ["html", "htm"] }],
+    });
+    if (!filePath) return;
+    try {
+      const result = await exportApi.exportSingleToHtml(noteId, filePath);
+      Modal.success({
+        title: "导出 HTML 成功",
+        content: (
+          <div>
+            <p style={{ marginBottom: 4 }}>
+              {`内嵌图片 ${result.imagesInlined} 张` +
+                (result.imagesMissing > 0
+                  ? `（${result.imagesMissing} 张缺失）`
+                  : "")}
+              ，文件：
+            </p>
+            <p style={{ fontFamily: "monospace", fontSize: 12, wordBreak: "break-all" }}>
+              {result.filePath}
+            </p>
+          </div>
+        ),
+        okText: "打开所在文件夹",
+        onOk: () => revealItemInDir(result.filePath).catch(() => {}),
+        closable: true,
+      });
+    } catch (e) {
+      message.error(`导出 HTML 失败: ${e}`);
+    }
+  }
+
   async function handleTagsChange(newTagIds: number[]) {
     const currentIds = noteTags.map((t) => t.id);
     const toAdd = newTagIds.filter((id) => !currentIds.includes(id));
@@ -1179,12 +1250,39 @@ export default function NoteEditorPage() {
               </Button>
             </Tooltip>
           )}
-          <Tooltip title="导出为 Markdown">
-            <Button
-              icon={<Share size={16} />}
-              onClick={handleExportNote}
-            />
-          </Tooltip>
+          {/* T-020 导出按钮：默认导出 Markdown；右侧下拉可选 Word / HTML */}
+          <Space.Compact>
+            <Tooltip title="导出为 Markdown">
+              <Button
+                icon={<Share size={16} />}
+                onClick={handleExportNote}
+              />
+            </Tooltip>
+            <Dropdown
+              trigger={["click"]}
+              menu={{
+                items: [
+                  {
+                    key: "md",
+                    label: "导出为 Markdown",
+                    onClick: () => void handleExportNote(),
+                  },
+                  {
+                    key: "docx",
+                    label: "导出为 Word (.docx)",
+                    onClick: () => void handleExportWord(),
+                  },
+                  {
+                    key: "html",
+                    label: "导出为 HTML (单文件)",
+                    onClick: () => void handleExportHtml(),
+                  },
+                ],
+              }}
+            >
+              <Button icon={<ChevronDown size={14} />} title="更多导出格式" />
+            </Dropdown>
+          </Space.Compact>
           <Tooltip title="问 AI">
             <Button
               icon={<MessageSquare size={16} />}

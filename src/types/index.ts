@@ -458,6 +458,20 @@ export interface SingleExportResult {
   assets_copied: number;
 }
 
+/** T-020 Word 导出结果 */
+export interface WordExportResult {
+  filePath: string;
+  imagesEmbedded: number;
+  imagesMissing: number;
+}
+
+/** T-020 HTML 导出结果（单文件，图片内嵌） */
+export interface HtmlExportResult {
+  filePath: string;
+  imagesInlined: number;
+  imagesMissing: number;
+}
+
 /** 导出进度 */
 export interface ExportProgress {
   current: number;
