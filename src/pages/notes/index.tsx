@@ -36,6 +36,7 @@ import {
   Folder as FolderIcon,
   CornerUpLeft,
   Filter as FilterIcon,
+  Bot,
 } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ColumnsType } from "antd/es/table";
@@ -47,6 +48,7 @@ import { stripHtml, relativeTime } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { NewNoteButton } from "@/components/NewNoteButton";
 import { createBlankAndOpen } from "@/lib/noteCreator";
+import { startAiChatWithNotes } from "@/lib/aiAttach";
 // AntD 已有 Tag 组件同名，这里给类型起个别名避免冲突
 import type { Note, PageResult, Folder, Tag as NoteTag } from "@/types";
 
@@ -860,6 +862,22 @@ export default function NoteListPage() {
               删除
             </Button>
           </Popconfirm>
+          <Button
+            size="small"
+            icon={<Bot size={14} />}
+            onClick={async () => {
+              // 找第一篇笔记的标题给新对话用作默认名
+              const firstId = selectedIds[0];
+              const firstTitle = data.items.find((n) => n.id === firstId)?.title;
+              try {
+                await startAiChatWithNotes(selectedIds, firstTitle, navigate);
+              } catch (e) {
+                message.error(`发起 AI 会话失败: ${e}`);
+              }
+            }}
+          >
+            发到 AI
+          </Button>
           <Button size="small" onClick={() => setSelectedIds([])}>
             取消选择
           </Button>

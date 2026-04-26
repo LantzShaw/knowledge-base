@@ -32,7 +32,7 @@ import {
   X,
 } from "lucide-react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { aiChatApi, aiModelApi, noteApi } from "@/lib/api";
 import type { AiConversation, AiMessage, AiModel, Note, SkillCall } from "@/types";
 import { relativeTime } from "@/lib/utils";
@@ -73,6 +73,7 @@ function showAiError(err: unknown) {
 export default function AiChatPage() {
   const { token } = antdTheme.useToken();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [conversations, setConversations] = useState<AiConversation[]>([]);
   const [activeConvId, setActiveConvId] = useState<number | null>(null);
@@ -105,6 +106,19 @@ export default function AiChatPage() {
       unlistenRefs.current.forEach((fn) => fn());
     };
   }, []);
+
+  // 接收外部跳转过来的"激活对话 ID"（笔记列表"发到 AI"入口）
+  // 拿到一次后清掉 state，避免用户后续再切回 AI 页又被自动跳走
+  useEffect(() => {
+    const incomingId = (location.state as { activeConvId?: number } | null)
+      ?.activeConvId;
+    if (incomingId) {
+      setActiveConvId(incomingId);
+      // 触发对话列表刷新让 chip 区拿到 attached_note_ids
+      loadConversations();
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [location.state]);
 
   // 切换对话时加载消息
   useEffect(() => {
