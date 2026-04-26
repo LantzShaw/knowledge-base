@@ -10,6 +10,7 @@ import {
   Modal,
   Select,
   Spin,
+  Tabs,
   message,
   theme as antdTheme,
 } from "antd";
@@ -19,14 +20,18 @@ import {
   CheckCircle2,
   Trash2,
   Target,
+  FileSpreadsheet,
 } from "lucide-react";
 import dayjs, { type Dayjs } from "dayjs";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { aiPlanApi, taskApi } from "@/lib/api";
 import type {
   MilestoneDraft,
   TaskSuggestion,
   PlanFromGoalResponse,
 } from "@/types";
+
+type Mode = "goal" | "excel";
 
 interface Props {
   open: boolean;
@@ -83,17 +88,23 @@ function toDraft(s: TaskSuggestion, idx: number): DraftTask {
 export function PlanFromGoalModal({ open, onClose, onSaved }: Props) {
   const { token } = antdTheme.useToken();
   const [phase, setPhase] = useState<"idle" | "loading" | "review">("idle");
+  const [mode, setMode] = useState<Mode>("goal");
 
-  // idle 表单状态
+  // idle 表单状态（两种模式共用周期/起始日期）
   const [goal, setGoal] = useState("");
   const [horizonDays, setHorizonDays] = useState<number>(30);
   const [startDate, setStartDate] = useState<Dayjs>(dayjs());
   const [profileHint, setProfileHint] = useState("");
 
+  // Excel 模式专属
+  const [excelPath, setExcelPath] = useState<string>("");
+  const [extraGoal, setExtraGoal] = useState("");
+
   // review 状态
   const [drafts, setDrafts] = useState<DraftTask[]>([]);
   const [milestones, setMilestones] = useState<MilestoneDraft[]>([]);
   const [summary, setSummary] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [batchId, setBatchId] = useState<string>("");
   const [errorText, setErrorText] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -103,32 +114,76 @@ export function PlanFromGoalModal({ open, onClose, onSaved }: Props) {
     setDrafts([]);
     setMilestones([]);
     setSummary(null);
+    setWarnings([]);
     setBatchId("");
     setErrorText(null);
   }
 
+  /** 文件名（去掉路径，用于 UI 展示） */
+  const excelFileName = excelPath ? excelPath.split(/[\\/]/).pop() ?? "" : "";
+
+  async function pickExcel() {
+    try {
+      const picked = await openDialog({
+        multiple: false,
+        filters: [
+          {
+            name: "Excel / 电子表格",
+            extensions: ["xlsx", "xls", "xlsm", "xlsb", "ods"],
+          },
+        ],
+      });
+      if (picked && typeof picked === "string") {
+        setExcelPath(picked);
+        setErrorText(null);
+      }
+    } catch (e) {
+      setErrorText(`选择文件失败: ${e}`);
+    }
+  }
+
   async function handleGenerate() {
-    if (goal.trim().length < 4) {
+    // 校验
+    if (mode === "goal" && goal.trim().length < 4) {
       setErrorText("目标至少 4 个字，AI 才能理解你想做什么");
       return;
     }
+    if (mode === "excel" && !excelPath) {
+      setErrorText("请先选择 Excel 文件");
+      return;
+    }
+
     setPhase("loading");
     setErrorText(null);
     try {
-      const resp: PlanFromGoalResponse = await aiPlanApi.planFromGoal({
-        goal: goal.trim(),
-        horizonDays,
-        startDate: startDate.format("YYYY-MM-DD"),
-        profileHint: profileHint.trim() || null,
-      });
+      const resp: PlanFromGoalResponse =
+        mode === "goal"
+          ? await aiPlanApi.planFromGoal({
+              goal: goal.trim(),
+              horizonDays,
+              startDate: startDate.format("YYYY-MM-DD"),
+              profileHint: profileHint.trim() || null,
+            })
+          : await aiPlanApi.planFromExcel({
+              filePath: excelPath,
+              horizonDays,
+              startDate: startDate.format("YYYY-MM-DD"),
+              extraGoal: extraGoal.trim() || null,
+            });
+
       if (!resp.tasks || resp.tasks.length === 0) {
-        setErrorText("AI 没返回任何待办，目标描述可能太抽象了，再具体一点试试");
+        setErrorText(
+          mode === "goal"
+            ? "AI 没返回任何待办，目标描述可能太抽象，再具体一点试试"
+            : "AI 没从 Excel 中提取到待办，可在『额外说明』里指引 AI 关注哪些 Sheet 后重试",
+        );
         setPhase("idle");
         return;
       }
       setDrafts(resp.tasks.map(toDraft));
       setMilestones(resp.milestones ?? []);
       setSummary(resp.summary ?? null);
+      setWarnings(resp.warnings ?? []);
       setBatchId(resp.batchId);
       setPhase("review");
     } catch (e) {
@@ -261,22 +316,142 @@ export function PlanFromGoalModal({ open, onClose, onSaved }: Props) {
             />
           )}
 
-          <div>
-            <div
-              style={{ fontSize: 13, color: token.colorTextSecondary, marginBottom: 6 }}
-            >
-              你的目标 <span style={{ color: token.colorError }}>*</span>
-            </div>
-            <Input.TextArea
-              value={goal}
-              onChange={(e) => setGoal(e.target.value)}
-              placeholder="例：180 天减肥到 55 公斤 / 三个月通过二建考试 / 30 天养成早睡早起习惯"
-              autoSize={{ minRows: 2, maxRows: 5 }}
-              maxLength={300}
-              showCount
-            />
-          </div>
+          <Tabs
+            activeKey={mode}
+            onChange={(k) => setMode(k as Mode)}
+            items={[
+              {
+                key: "goal",
+                label: (
+                  <span className="flex items-center gap-1">
+                    <Target size={13} /> 目标驱动
+                  </span>
+                ),
+                children: (
+                  <div className="flex flex-col gap-3 pt-1">
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          color: token.colorTextSecondary,
+                          marginBottom: 6,
+                        }}
+                      >
+                        你的目标 <span style={{ color: token.colorError }}>*</span>
+                      </div>
+                      <Input.TextArea
+                        value={goal}
+                        onChange={(e) => setGoal(e.target.value)}
+                        placeholder="例：180 天减肥到 55 公斤 / 三个月通过二建考试 / 30 天养成早睡早起习惯"
+                        autoSize={{ minRows: 2, maxRows: 5 }}
+                        maxLength={300}
+                        showCount
+                      />
+                    </div>
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          color: token.colorTextSecondary,
+                          marginBottom: 6,
+                        }}
+                      >
+                        个人信息（可选）
+                      </div>
+                      <Input.TextArea
+                        value={profileHint}
+                        onChange={(e) => setProfileHint(e.target.value)}
+                        placeholder="作息 / 时间约束 / 身体情况 / 兴趣等。例：工作日 19:00 才有空、早上能跑步"
+                        autoSize={{ minRows: 2, maxRows: 4 }}
+                        maxLength={300}
+                      />
+                    </div>
+                  </div>
+                ),
+              },
+              {
+                key: "excel",
+                label: (
+                  <span className="flex items-center gap-1">
+                    <FileSpreadsheet size={13} /> Excel 导入
+                  </span>
+                ),
+                children: (
+                  <div className="flex flex-col gap-3 pt-1">
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          color: token.colorTextSecondary,
+                          marginBottom: 6,
+                        }}
+                      >
+                        选择 Excel 文件 <span style={{ color: token.colorError }}>*</span>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Button
+                          icon={<FileSpreadsheet size={14} />}
+                          onClick={pickExcel}
+                        >
+                          {excelPath ? "重新选择" : "选择文件"}
+                        </Button>
+                        {excelFileName ? (
+                          <span
+                            className="text-xs px-2 py-1 rounded"
+                            style={{
+                              background: token.colorFillTertiary,
+                              color: token.colorText,
+                              maxWidth: 360,
+                            }}
+                            title={excelPath}
+                          >
+                            {excelFileName}
+                          </span>
+                        ) : (
+                          <span
+                            className="text-xs"
+                            style={{ color: token.colorTextTertiary }}
+                          >
+                            支持 .xlsx / .xls / .xlsm / .xlsb / .ods
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          color: token.colorTextSecondary,
+                          marginBottom: 6,
+                        }}
+                      >
+                        额外说明（可选）
+                      </div>
+                      <Input.TextArea
+                        value={extraGoal}
+                        onChange={(e) => setExtraGoal(e.target.value)}
+                        placeholder="告诉 AI 该重点关注 Excel 中的什么。例：『重点提取饮食/运动相关的待办，忽略补剂方案』"
+                        autoSize={{ minRows: 2, maxRows: 4 }}
+                        maxLength={300}
+                      />
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: token.colorTextTertiary,
+                        lineHeight: 1.6,
+                      }}
+                    >
+                      默认读取所有 Sheet 全部行；超过约 6 万字符时会自动截取每个大 Sheet 的代表性内容，
+                      并在生成结果顶部展示提示。AI 不会原样抄录 Excel 行，而是提炼成可执行任务。
+                    </div>
+                  </div>
+                ),
+              },
+            ]}
+          />
 
+          {/* 周期 / 起始日期：两种模式共享 */}
           <div className="flex items-center gap-3 flex-wrap">
             <div>
               <div
@@ -292,7 +467,9 @@ export function PlanFromGoalModal({ open, onClose, onSaved }: Props) {
                 min={1}
                 max={365}
                 value={horizonDays}
-                onChange={(v) => setHorizonDays(Math.max(1, Math.min(365, Number(v) || 30)))}
+                onChange={(v) =>
+                  setHorizonDays(Math.max(1, Math.min(365, Number(v) || 30)))
+                }
                 style={{ width: 100 }}
               />
             </div>
@@ -332,21 +509,6 @@ export function PlanFromGoalModal({ open, onClose, onSaved }: Props) {
             </div>
           </div>
 
-          <div>
-            <div
-              style={{ fontSize: 13, color: token.colorTextSecondary, marginBottom: 6 }}
-            >
-              个人信息（可选）
-            </div>
-            <Input.TextArea
-              value={profileHint}
-              onChange={(e) => setProfileHint(e.target.value)}
-              placeholder="作息 / 时间约束 / 身体情况 / 兴趣等。例：工作日 19:00 才有空、早上能跑步"
-              autoSize={{ minRows: 2, maxRows: 4 }}
-              maxLength={300}
-            />
-          </div>
-
           <div
             style={{
               fontSize: 12,
@@ -354,10 +516,12 @@ export function PlanFromGoalModal({ open, onClose, onSaved }: Props) {
               lineHeight: 1.7,
             }}
           >
-            AI 用艾森豪威尔四象限法则把目标拆成 10~30 条可执行待办 + 2~6 个阶段里程碑。
+            AI 用艾森豪威尔四象限法则拆出 10~30 条可执行待办 + 2~6 个阶段里程碑。
             <br />
-            <strong>仅 OpenAI / DeepSeek / 智谱 / Claude 兼容模型可用；Ollama 不支持。</strong>
-            生成后所有待办默认勾选，你可以逐条编辑或取消。
+            <strong>
+              仅 OpenAI / DeepSeek / 智谱 / Claude 兼容模型可用；Ollama 不支持。
+            </strong>
+            生成后所有待办默认勾选，可逐条编辑或取消。
           </div>
 
           <div className="flex justify-end gap-2 mt-1">
@@ -366,7 +530,9 @@ export function PlanFromGoalModal({ open, onClose, onSaved }: Props) {
               type="primary"
               icon={<Sparkles size={14} />}
               onClick={handleGenerate}
-              disabled={goal.trim().length < 4}
+              disabled={
+                mode === "goal" ? goal.trim().length < 4 : !excelPath
+              }
             >
               生成规划
             </Button>
@@ -400,6 +566,22 @@ export function PlanFromGoalModal({ open, onClose, onSaved }: Props) {
 
       {phase === "review" && (
         <div className="flex flex-col gap-3">
+          {warnings.length > 0 && (
+            <Alert
+              type="warning"
+              showIcon
+              message={
+                <div className="flex flex-col gap-1">
+                  {warnings.map((w, i) => (
+                    <span key={i} className="text-xs">
+                      {w}
+                    </span>
+                  ))}
+                </div>
+              }
+              style={{ marginBottom: 0 }}
+            />
+          )}
           {summary && (
             <Alert type="info" showIcon message={summary} style={{ marginBottom: 0 }} />
           )}
