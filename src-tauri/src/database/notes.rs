@@ -378,49 +378,94 @@ impl Database {
     /// 列出所有隐藏笔记（分页），按 updated_at DESC
     ///
     /// 与 list_notes 刚好相反——只取 is_hidden=1（仍过滤 is_deleted=0）。
+    /// 可按目录过滤：
+    /// - `uncategorized = true` → 只看 folder_id IS NULL
+    /// - `folder_id = Some(n)` → 只看该目录（不递归子目录，与 list_notes 现有语义一致）
+    /// - 两者都不传 → 全部
     pub fn list_hidden_notes(
         &self,
         page: usize,
         page_size: usize,
+        folder_id: Option<i64>,
+        uncategorized: bool,
     ) -> Result<(Vec<Note>, usize), AppError> {
         let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
 
-        let total: usize = conn.query_row(
-            "SELECT COUNT(*) FROM notes WHERE is_deleted = 0 AND is_hidden = 1",
-            [],
-            |row| row.get(0),
-        )?;
+        // 拼 WHERE 子句：uncategorized 优先级高于 folder_id
+        let (extra_where, has_folder_param) = if uncategorized {
+            (" AND folder_id IS NULL", false)
+        } else if folder_id.is_some() {
+            (" AND folder_id = ?1", true)
+        } else {
+            ("", false)
+        };
+
+        let count_sql = format!(
+            "SELECT COUNT(*) FROM notes WHERE is_deleted = 0 AND is_hidden = 1{}",
+            extra_where
+        );
+        let total: usize = if has_folder_param {
+            conn.query_row(&count_sql, params![folder_id.unwrap()], |row| row.get(0))?
+        } else {
+            conn.query_row(&count_sql, [], |row| row.get(0))?
+        };
 
         let offset = (page.saturating_sub(1)) * page_size;
-        let mut stmt = conn.prepare(
+        let select_sql = format!(
             "SELECT id, title, content, folder_id, is_daily, daily_date, is_pinned, is_hidden, is_encrypted,
                     word_count, created_at, updated_at, source_file_path, source_file_type
              FROM notes
-             WHERE is_deleted = 0 AND is_hidden = 1
+             WHERE is_deleted = 0 AND is_hidden = 1{}
              ORDER BY updated_at DESC
-             LIMIT ?1 OFFSET ?2",
-        )?;
-        let notes = stmt
-            .query_map(params![page_size as i64, offset as i64], |row| {
-                Ok(Note {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    content: row.get(2)?,
-                    folder_id: row.get(3)?,
-                    is_daily: row.get::<_, i32>(4)? != 0,
-                    daily_date: row.get(5)?,
-                    is_pinned: row.get::<_, i32>(6)? != 0,
-                    is_hidden: row.get::<_, i32>(7)? != 0,
-                    is_encrypted: row.get::<_, i32>(8)? != 0,
-                    word_count: row.get(9)?,
-                    created_at: row.get(10)?,
-                    updated_at: row.get(11)?,
-                    source_file_path: row.get(12)?,
-                    source_file_type: row.get(13)?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
+             LIMIT ? OFFSET ?",
+            extra_where
+        );
+        let mut stmt = conn.prepare(&select_sql)?;
+        let row_mapper = |row: &rusqlite::Row<'_>| {
+            Ok(Note {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                content: row.get(2)?,
+                folder_id: row.get(3)?,
+                is_daily: row.get::<_, i32>(4)? != 0,
+                daily_date: row.get(5)?,
+                is_pinned: row.get::<_, i32>(6)? != 0,
+                is_hidden: row.get::<_, i32>(7)? != 0,
+                is_encrypted: row.get::<_, i32>(8)? != 0,
+                word_count: row.get(9)?,
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
+                source_file_path: row.get(12)?,
+                source_file_type: row.get(13)?,
+            })
+        };
+        let notes = if has_folder_param {
+            stmt.query_map(
+                params![folder_id.unwrap(), page_size as i64, offset as i64],
+                row_mapper,
+            )?
+            .collect::<Result<Vec<_>, _>>()?
+        } else {
+            stmt.query_map(params![page_size as i64, offset as i64], row_mapper)?
+                .collect::<Result<Vec<_>, _>>()?
+        };
         Ok((notes, total))
+    }
+
+    /// 返回所有"含至少一篇隐藏笔记"的 folder_id（含 None 表示有未分类的隐藏笔记）
+    ///
+    /// 顺序：NULL 在前（"未分类"语义上排首位），其余按 folder_id ASC。
+    pub fn list_hidden_folder_ids(&self) -> Result<Vec<Option<i64>>, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT folder_id FROM notes
+             WHERE is_deleted = 0 AND is_hidden = 1
+             ORDER BY folder_id IS NULL DESC, folder_id ASC",
+        )?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, Option<i64>>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     // ─── 置顶 & 移动 DAO ─────────────────────────

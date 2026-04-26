@@ -5,6 +5,7 @@ import { TagsPanel } from "./panels/TagsPanel";
 import { DailyPanel } from "./panels/DailyPanel";
 import { SearchPanel } from "./panels/SearchPanel";
 import { TasksPanel } from "./panels/TasksPanel";
+import { HiddenPanel } from "./panels/HiddenPanel";
 
 /**
  * SidePanel —— Activity Bar 模式下 ActivityBar 右侧的主面板。
@@ -21,6 +22,7 @@ const VIEWS_WITH_PANEL = new Set<ActiveView>([
   "tasks",
   "search",
   "daily",
+  "hidden",
 ]);
 
 export function viewHasPanel(view: ActiveView): boolean {
@@ -41,6 +43,8 @@ export function SidePanel() {
       return <SearchPanel />;
     case "tasks":
       return <TasksPanel />;
+    case "hidden":
+      return <HiddenPanel />;
     default:
       // 无面板视图（home/daily/graph/ai/prompts/about/trash）
       // AppLayout 会基于 viewHasPanel() 把 SidePanel 宽度置 0

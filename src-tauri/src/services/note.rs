@@ -121,21 +121,33 @@ impl NoteService {
         db.set_note_hidden(id, hidden)
     }
 
-    /// 列出所有隐藏笔记（分页）
+    /// 列出所有隐藏笔记（分页 + 可选目录过滤）
     pub fn list_hidden(
         db: &Database,
         page: Option<usize>,
         page_size: Option<usize>,
+        folder_id: Option<i64>,
+        uncategorized: Option<bool>,
     ) -> Result<PageResult<Note>, AppError> {
         let page = page.unwrap_or(1).max(1);
         let page_size = page_size.unwrap_or(20).clamp(1, 100);
-        let (items, total) = db.list_hidden_notes(page, page_size)?;
+        let (items, total) = db.list_hidden_notes(
+            page,
+            page_size,
+            folder_id,
+            uncategorized.unwrap_or(false),
+        )?;
         Ok(PageResult {
             items,
             total,
             page,
             page_size,
         })
+    }
+
+    /// 列出所有"含至少一篇隐藏笔记"的 folder_id（含 None=未分类）
+    pub fn list_hidden_folder_ids(db: &Database) -> Result<Vec<Option<i64>>, AppError> {
+        db.list_hidden_folder_ids()
     }
 
     // ─── T-007 笔记加密 ────────────────────────────

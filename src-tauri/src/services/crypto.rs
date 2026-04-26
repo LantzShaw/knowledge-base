@@ -154,6 +154,30 @@ pub fn aead_decrypt(key: &[u8; KEY_LEN], blob: &[u8]) -> Result<Vec<u8>, AppErro
         .map_err(|_| AppError::Custom("解密失败：密码错误或数据已损坏".to_string()))
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// 隐藏笔记 PIN 哈希（仅用于"挡随手访问"的 UX 门禁，不是数据加密）
+//
+// 与 Vault 的根本区别：
+// - Vault: derive_user_key 的输出当 AES key 用，加密笔记内容；忘密码=数据丢失
+// - HiddenPin: derive_user_key 的输出当哈希值存，只用于 verify；忘 PIN=可重置
+//
+// 复用 argon2_params() 不引入新依赖；输出 32 字节哈希以 base64 存 app_config。
+// ═══════════════════════════════════════════════════════════════════════
+
+/// 计算 PIN 哈希（Argon2id, 32 字节）
+pub fn hash_pin(pin: &str, salt: &[u8]) -> Result<[u8; KEY_LEN], AppError> {
+    derive_user_key(pin, salt)
+}
+
+/// 常量时间比较 PIN 是否匹配
+///
+/// 用 subtle::ConstantTimeEq 也行，但 derive_user_key 本身耗时 50~200ms
+/// 已经远大于内存比较的纳秒级差异，这里直接 == 即可。
+pub fn verify_pin(pin: &str, salt: &[u8], expected: &[u8; KEY_LEN]) -> Result<bool, AppError> {
+    let actual = derive_user_key(pin, salt)?;
+    Ok(&actual[..] == &expected[..])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

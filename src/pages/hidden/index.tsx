@@ -1,175 +1,312 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  Alert,
   Button,
+  Pagination,
   Popconfirm,
   Space,
   Table,
   Typography,
   message,
+  theme as antdTheme,
 } from "antd";
-import type { ColumnsType, TablePaginationConfig } from "antd/es/table";
-import { Eye, EyeOff } from "lucide-react";
-import { hiddenApi, noteApi } from "@/lib/api";
+import type { ColumnsType } from "antd/es/table";
+import { Eye, EyeOff, Folder as FolderIcon } from "lucide-react";
+import { folderApi, hiddenApi, noteApi } from "@/lib/api";
 import { EmptyState } from "@/components/ui/EmptyState";
-import type { Note, PageResult } from "@/types";
+import { relativeTime } from "@/lib/utils";
+import type { Folder, Note, PageResult } from "@/types";
 
 const { Title, Text } = Typography;
 
-function relativeTime(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 1) return "刚刚";
-  if (diffMin < 60) return `${diffMin}分钟前`;
-  const diffHour = Math.floor(diffMin / 60);
-  if (diffHour < 24) return `${diffHour}小时前`;
-  const diffDay = Math.floor(diffHour / 24);
-  if (diffDay < 7) return `${diffDay}天前`;
-  return dateStr.slice(0, 10);
+/** 把 URL 的 ?folder= 参数解析成 list API 的 opts */
+function parseFolderParam(raw: string | null): {
+  label: string;
+  opts: Parameters<typeof hiddenApi.list>[0];
+} {
+  if (!raw) return { label: "全部隐藏笔记", opts: {} };
+  if (raw === "uncategorized")
+    return { label: "未分类", opts: { uncategorized: true } };
+  const id = Number(raw);
+  if (Number.isFinite(id) && id > 0) {
+    return { label: "", opts: { folderId: id } }; // label 由调用方按 folderMap 反查
+  }
+  return { label: "全部隐藏笔记", opts: {} };
 }
 
 /**
  * 隐藏笔记页（T-003）
  *
- * 语义与 `/trash` 类似，但独立维度：回收站是"已删除"，这里是"主动隐藏"。
- * 主界面（列表 / 搜索 / 反链 / 图谱 / RAG）完全不显示隐藏笔记；
- * 只在这个专用页面能看到、取消隐藏或点击打开。
+ * 筛选状态走 URL ?folder= ：
+ * - 不传 → 全部
+ * - "uncategorized" → 仅未分类
+ * - "<id>" → 仅该目录（不递归子目录）
+ *
+ * 侧边栏 HiddenPanel 写 URL，本页读 URL，两者通过 searchParams 同步。
  */
 export default function HiddenPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const { token } = antdTheme.useToken();
+
   const [data, setData] = useState<PageResult<Note>>({
     items: [],
     total: 0,
     page: 1,
-    page_size: 20,
+    page_size: 12,
   });
   const [loading, setLoading] = useState(false);
+  const [pageSize, setPageSize] = useState(12);
 
-  useEffect(() => {
-    void loadList(1);
-  }, []);
+  // 全文件夹 id→name 映射（用于"目录"列展示 + 当前筛选名）
+  const [folderMap, setFolderMap] = useState<Map<number, string>>(new Map());
 
-  async function loadList(page: number) {
-    setLoading(true);
-    try {
-      const result = await hiddenApi.list(page, 20);
-      setData(result);
-    } catch (e) {
-      message.error(String(e));
-    } finally {
-      setLoading(false);
+  const folderParam = searchParams.get("folder");
+  const parsed = useMemo(() => parseFolderParam(folderParam), [folderParam]);
+
+  /** 当前筛选的展示名 */
+  const currentFilterLabel = useMemo(() => {
+    if (parsed.label) return parsed.label;
+    // 数字 id 走 folderMap 反查
+    if (parsed.opts?.folderId != null) {
+      return folderMap.get(parsed.opts.folderId) ?? `(已删除 #${parsed.opts.folderId})`;
     }
-  }
+    return "全部隐藏笔记";
+  }, [parsed, folderMap]);
+
+  /** 拉列表 */
+  const loadList = useCallback(
+    async (page: number, size: number) => {
+      setLoading(true);
+      try {
+        const result = await hiddenApi.list({
+          page,
+          pageSize: size,
+          ...parsed.opts,
+        });
+        setData(result);
+      } catch (e) {
+        message.error(String(e));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [parsed.opts],
+  );
+
+  // 启动 + URL 变化时重拉到第 1 页
+  useEffect(() => {
+    void loadList(1, pageSize);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folderParam]);
+
+  // 启动加载文件夹映射
+  useEffect(() => {
+    folderApi
+      .list()
+      .then((list: Folder[]) => {
+        const map = new Map<number, string>();
+        function flatten(flist: Folder[]) {
+          for (const f of flist) {
+            map.set(f.id, f.name);
+            if (f.children?.length) flatten(f.children);
+          }
+        }
+        flatten(list);
+        setFolderMap(map);
+      })
+      .catch((e) => console.warn("[hidden] 加载文件夹失败:", e));
+  }, []);
 
   async function handleUnhide(id: number) {
     try {
       await noteApi.setHidden(id, false);
       message.success("已取消隐藏");
-      // 删除当前行即可，保持分页状态
       setData((prev) => ({
         ...prev,
         items: prev.items.filter((n) => n.id !== id),
         total: Math.max(0, prev.total - 1),
       }));
+      // 不主动刷新侧边栏：HiddenPanel 自己监听 URL 变化时会重拉 listFolderIds
+      // 这里若想立即更新，可触发一个 store 信号；目前保持简单
     } catch (e) {
       message.error(String(e));
     }
   }
 
-  function handleTableChange(pagination: TablePaginationConfig) {
-    void loadList(pagination.current ?? 1);
-  }
-
-  const columns: ColumnsType<Note> = [
-    {
-      title: "标题",
-      dataIndex: "title",
-      key: "title",
-      ellipsis: true,
-      render: (val: string, record: Note) => (
-        <a
-          onClick={(e) => {
-            e.preventDefault();
-            navigate(`/notes/${record.id}`);
-          }}
-          style={{ cursor: "pointer" }}
-        >
-          {val}
-        </a>
-      ),
-    },
-    {
-      title: "更新时间",
-      dataIndex: "updated_at",
-      key: "updated_at",
-      width: 120,
-      render: (val: string) => (
-        <Text type="secondary" style={{ fontSize: 13 }}>
-          {relativeTime(val)}
-        </Text>
-      ),
-    },
-    {
-      title: "操作",
-      key: "action",
-      width: 140,
-      render: (_: unknown, record: Note) => (
-        <Space size="small">
-          <Popconfirm
-            title="取消隐藏？"
-            description="这条笔记会重新出现在主列表 / 搜索 / 图谱中"
-            okText="取消隐藏"
-            cancelText="保留隐藏"
-            onConfirm={() => handleUnhide(record.id)}
+  const columns: ColumnsType<Note> = useMemo(
+    () => [
+      {
+        title: "#",
+        key: "index",
+        width: 44,
+        align: "right" as const,
+        render: (_: unknown, __: Note, index: number) => (
+          <span style={{ color: token.colorTextTertiary, fontSize: 12 }}>
+            {(data.page - 1) * data.page_size + index + 1}
+          </span>
+        ),
+      },
+      {
+        title: "标题",
+        dataIndex: "title",
+        key: "title",
+        ellipsis: true,
+        render: (val: string, record: Note) => (
+          <a
+            onClick={(e) => {
+              e.preventDefault();
+              navigate(`/notes/${record.id}`);
+            }}
+            style={{ cursor: "pointer" }}
           >
-            <Button type="link" size="small" icon={<Eye size={14} />}>
-              取消隐藏
-            </Button>
-          </Popconfirm>
-        </Space>
-      ),
-    },
-  ];
+            {val}
+          </a>
+        ),
+      },
+      {
+        title: "目录",
+        dataIndex: "folder_id",
+        key: "folder",
+        width: 130,
+        ellipsis: true,
+        render: (fid: number | null) => {
+          if (fid === null || fid === undefined) {
+            return (
+              <Text type="secondary" style={{ fontSize: 12, fontStyle: "italic" }}>
+                未分类
+              </Text>
+            );
+          }
+          const name = folderMap.get(fid) ?? `(已删除 #${fid})`;
+          return (
+            <span
+              style={{
+                fontSize: 12,
+                color: token.colorTextSecondary,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              <FolderIcon size={12} style={{ opacity: 0.6 }} />
+              {name}
+            </span>
+          );
+        },
+      },
+      {
+        title: "字数",
+        dataIndex: "word_count",
+        key: "word_count",
+        width: 70,
+        render: (val: number) => (
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {val}
+          </Text>
+        ),
+      },
+      {
+        title: "更新时间",
+        dataIndex: "updated_at",
+        key: "updated_at",
+        width: 110,
+        render: (val: string) => (
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {relativeTime(val)}
+          </Text>
+        ),
+      },
+      {
+        title: "操作",
+        key: "action",
+        width: 120,
+        render: (_: unknown, record: Note) => (
+          <Space size="small">
+            <Popconfirm
+              title="取消隐藏？"
+              description="这条笔记会重新出现在主列表 / 搜索 / 图谱中"
+              okText="取消隐藏"
+              cancelText="保留隐藏"
+              onConfirm={() => handleUnhide(record.id)}
+            >
+              <Button type="link" size="small" icon={<Eye size={14} />}>
+                取消隐藏
+              </Button>
+            </Popconfirm>
+          </Space>
+        ),
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data.page, data.page_size, navigate, folderMap, token.colorTextTertiary, token.colorTextSecondary],
+  );
 
   return (
-    <div className="max-w-4xl mx-auto">
-      <div className="flex items-center justify-between mb-4">
+    <div className="max-w-4xl mx-auto h-full flex flex-col min-h-0">
+      <div className="flex items-center justify-between mb-2 flex-shrink-0">
         <Title level={3} style={{ margin: 0, lineHeight: "32px" }}>
           <span className="flex items-center gap-2">
             <EyeOff size={22} />
             隐藏笔记
+            <Text type="secondary" style={{ fontSize: 13, fontWeight: "normal" }}>
+              · {currentFilterLabel}
+            </Text>
           </span>
         </Title>
       </div>
 
-      <Alert
-        type="info"
-        showIcon
-        message='这里只显示被标记为"隐藏"的笔记'
-        description="隐藏是弱保护：主界面 / 搜索 / 反链 / 图谱 / AI 问答都不会显示这些笔记，但数据库里仍是明文。需要强保护请到笔记编辑器点右上角锁图标启用加密。"
-        style={{ marginBottom: 16 }}
-      />
+      <div className="flex-shrink-0" style={{ marginBottom: 12, lineHeight: 1.6 }}>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          只显示被标记为「隐藏」的笔记 —— 主界面 / 搜索 / 反链 / 图谱 / AI
+          问答都不会显示这些笔记。隐藏是弱保护，数据库里仍是明文；需要强保护请到笔记编辑器右上角点锁图标启用加密。
+        </Text>
+      </div>
 
       {data.total > 0 || loading ? (
-        <Table
-          columns={columns}
-          dataSource={data.items}
-          rowKey="id"
-          loading={loading}
-          onChange={handleTableChange}
-          pagination={{
-            current: data.page,
-            pageSize: data.page_size,
-            total: data.total,
-            showTotal: (total) => `共 ${total} 篇`,
-            showSizeChanger: false,
+        <div
+          className="flex-1 flex flex-col min-h-0"
+          style={{
+            background: token.colorBgContainer,
+            borderRadius: 8,
+            overflow: "hidden",
           }}
-        />
+        >
+          <div className="flex-1 min-h-0 overflow-auto">
+            <Table
+              columns={columns}
+              dataSource={data.items}
+              rowKey="id"
+              loading={loading}
+              size="small"
+              pagination={false}
+              sticky
+            />
+          </div>
+          <div className="flex-shrink-0 flex justify-end items-center px-3 py-2">
+            <Pagination
+              current={data.page}
+              pageSize={data.page_size}
+              total={data.total}
+              showTotal={(total) => `共 ${total} 篇`}
+              showSizeChanger
+              pageSizeOptions={["12", "20", "50", "100", "200"]}
+              onChange={(page, size) => {
+                if (size !== pageSize) setPageSize(size);
+                loadList(page, size);
+              }}
+              size="small"
+            />
+          </div>
+        </div>
       ) : (
-        <EmptyState description="还没有被隐藏的笔记" />
+        <EmptyState
+          description={
+            folderParam
+              ? `「${currentFilterLabel}」下没有隐藏笔记`
+              : "还没有被隐藏的笔记"
+          }
+        />
       )}
     </div>
   );

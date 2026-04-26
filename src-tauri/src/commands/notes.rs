@@ -109,14 +109,25 @@ pub fn set_note_hidden(
     NoteService::set_hidden(&state.db, id, hidden).map_err(|e| e.to_string())
 }
 
-/// 列出所有隐藏笔记（分页）—— 用于 /hidden 专用页
+/// 列出所有隐藏笔记（分页 + 可选目录过滤）—— 用于 /hidden 专用页
 #[tauri::command]
 pub fn list_hidden_notes(
     state: tauri::State<'_, AppState>,
     page: Option<usize>,
     page_size: Option<usize>,
+    folder_id: Option<i64>,
+    uncategorized: Option<bool>,
 ) -> Result<PageResult<Note>, String> {
-    NoteService::list_hidden(&state.db, page, page_size).map_err(|e| e.to_string())
+    NoteService::list_hidden(&state.db, page, page_size, folder_id, uncategorized)
+        .map_err(|e| e.to_string())
+}
+
+/// 返回所有"含至少一篇隐藏笔记"的 folder_id；None=未分类
+#[tauri::command]
+pub fn list_hidden_folder_ids(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<Option<i64>>, String> {
+    NoteService::list_hidden_folder_ids(&state.db).map_err(|e| e.to_string())
 }
 
 // ─── T-014 网页剪藏 ────────────────────────────

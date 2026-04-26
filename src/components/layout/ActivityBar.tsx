@@ -1,6 +1,8 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Tooltip, Badge, theme as antdTheme } from "antd";
+import { Tooltip, Badge, theme as antdTheme, message } from "antd";
+import { hiddenPinApi } from "@/lib/api";
+import { HiddenPinUnlockModal } from "@/components/hidden/HiddenPinUnlockModal";
 import {
   Home,
   NotebookText,
@@ -38,17 +40,35 @@ interface ActivityItem {
   icon: React.ReactNode;
 }
 
-/** 主视图（上半部分） */
-const MAIN_ITEMS: ActivityItem[] = [
-  { view: "home", route: "/", label: "首页", icon: <Home size={18} /> },
-  { view: "notes", route: "/notes", label: "笔记", icon: <NotebookText size={18} /> },
-  { view: "search", route: "/search", label: "搜索", icon: <Search size={18} /> },
-  { view: "daily", route: "/daily", label: "每日笔记", icon: <Calendar size={18} /> },
-  { view: "tags", route: "/tags", label: "标签", icon: <Tags size={18} /> },
-  { view: "tasks", route: "/tasks", label: "待办", icon: <CheckSquare size={18} /> },
-  { view: "graph", route: "/graph", label: "知识图谱", icon: <GitBranch size={18} /> },
-  { view: "ai", route: "/ai", label: "AI 问答", icon: <Bot size={18} /> },
-  { view: "prompts", route: "/prompts", label: "提示词", icon: <Sparkles size={18} /> },
+/**
+ * 主视图按"用户意图"分四组，组与组之间渲染分隔线：
+ *   1. 概览：首页（每次启动看一眼）
+ *   2. 创作 / 工作流：笔记 / 每日笔记 / 待办（日常高频写入）
+ *   3. 检索 / 发现：搜索 / 标签 / 知识图谱（找东西）
+ *   4. AI 辅助：AI 问答 / 提示词（创作助手）
+ *
+ * 分组而非平铺的好处：用户扫一眼就能锁定意图所在区，比按使用频率排更省认知。
+ */
+const MAIN_GROUPS: ActivityItem[][] = [
+  // 概览
+  [{ view: "home", route: "/", label: "首页", icon: <Home size={18} /> }],
+  // 创作 / 工作流
+  [
+    { view: "notes", route: "/notes", label: "笔记", icon: <NotebookText size={18} /> },
+    { view: "daily", route: "/daily", label: "每日笔记", icon: <Calendar size={18} /> },
+    { view: "tasks", route: "/tasks", label: "待办", icon: <CheckSquare size={18} /> },
+  ],
+  // 检索 / 发现
+  [
+    { view: "search", route: "/search", label: "搜索", icon: <Search size={18} /> },
+    { view: "tags", route: "/tags", label: "标签", icon: <Tags size={18} /> },
+    { view: "graph", route: "/graph", label: "知识图谱", icon: <GitBranch size={18} /> },
+  ],
+  // AI 辅助
+  [
+    { view: "ai", route: "/ai", label: "AI 问答", icon: <Bot size={18} /> },
+    { view: "prompts", route: "/prompts", label: "提示词", icon: <Sparkles size={18} /> },
+  ],
 ];
 
 /** 底部视图（放最下方，视觉上与主视图分组） */
@@ -95,6 +115,8 @@ export function ActivityBar() {
   const toggleSidePanel = useAppStore((s) => s.toggleSidePanel);
   const urgentTodoCount = useAppStore((s) => s.urgentTodoCount);
   const refreshTaskStats = useAppStore((s) => s.refreshTaskStats);
+  const isHiddenUnlocked = useAppStore((s) => s.isHiddenUnlocked);
+  const [unlockOpen, setUnlockOpen] = useState(false);
 
   // 启动时拉一次紧急任务数，让待办 Badge 在进应用时就显示正确数字
   // （之后由任务页/各操作主动调 refreshTaskStats 维持新鲜）
@@ -108,6 +130,13 @@ export function ActivityBar() {
     [location.pathname, activeView],
   );
 
+  /** 实际跳转视图（被 handleClick 与 PIN 解锁回调共用） */
+  function navigateToView(item: ActivityItem) {
+    setActiveView(item.view);
+    if (!sidePanelVisible) setSidePanelVisible(true);
+    navigate(item.route);
+  }
+
   function handleClick(item: ActivityItem) {
     // VS Code 行为：点当前已高亮的图标 = 翻转 SidePanel 可见性
     // 注意：必须用 URL 真相判断"是否在该视图"，而非 highlightView。
@@ -118,10 +147,27 @@ export function ActivityBar() {
       toggleSidePanel();
       return;
     }
-    // 切换到新视图：更新 store + 跳转路由；若面板之前被折叠，自动展开
-    setActiveView(item.view);
-    if (!sidePanelVisible) setSidePanelVisible(true);
-    navigate(item.route);
+
+    // 隐藏笔记 PIN 拦截：已设过 PIN 且会话未解锁 → 弹解锁框
+    if (item.view === "hidden" && !isHiddenUnlocked()) {
+      void (async () => {
+        try {
+          if (await hiddenPinApi.isSet()) {
+            setUnlockOpen(true);
+            return;
+          }
+          navigateToView(item);
+        } catch (e) {
+          // 后端故障时不锁死入口
+          console.warn("[hidden-pin] isSet 查询失败:", e);
+          message.warning("PIN 状态查询失败，已跳过验证");
+          navigateToView(item);
+        }
+      })();
+      return;
+    }
+
+    navigateToView(item);
   }
 
   function renderItem(item: ActivityItem) {
@@ -141,7 +187,7 @@ export function ActivityBar() {
       );
 
     return (
-      <Tooltip key={item.view} title={item.label} placement="right" mouseEnterDelay={0.35}>
+      <Tooltip key={item.view} title={item.label} placement="right" mouseEnterDelay={0.15}>
         <button
           type="button"
           onClick={() => handleClick(item)}
@@ -201,9 +247,18 @@ export function ActivityBar() {
         borderRight: `1px solid ${token.colorBorderSecondary}`,
       }}
     >
-      {MAIN_ITEMS.map(renderItem)}
+      {MAIN_GROUPS.flat().map(renderItem)}
       <div style={{ flex: 1 }} />
       {BOTTOM_ITEMS.map(renderItem)}
+      <HiddenPinUnlockModal
+        open={unlockOpen}
+        onSuccess={() => {
+          setUnlockOpen(false);
+          const hiddenItem = BOTTOM_ITEMS.find((i) => i.view === "hidden");
+          if (hiddenItem) navigateToView(hiddenItem);
+        }}
+        onCancel={() => setUnlockOpen(false)}
+      />
     </nav>
   );
 }
