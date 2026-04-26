@@ -53,7 +53,8 @@ pub fn vault_lock(state: State<'_, AppState>) -> Result<(), String> {
 /// 把一篇笔记切换到加密态：读明文 content → vault 加密 → 写 blob + 占位
 #[tauri::command]
 pub fn encrypt_note(state: State<'_, AppState>, id: i64) -> Result<(), String> {
-    NoteService::encrypt_note(&state.db, &state.vault, id).map_err(|e| e.to_string())
+    NoteService::encrypt_note(&state.db, &state.vault, &state.data_dir, id)
+        .map_err(|e| e.to_string())
 }
 
 /// 解密一篇加密笔记（不改库，仅读明文给前端展示）
@@ -68,5 +69,6 @@ pub fn disable_note_encrypt(
     state: State<'_, AppState>,
     id: i64,
 ) -> Result<(), String> {
-    NoteService::disable_encrypt(&state.db, &state.vault, id).map_err(|e| e.to_string())
+    NoteService::disable_encrypt(&state.db, &state.vault, &state.data_dir, id)
+        .map_err(|e| e.to_string())
 }

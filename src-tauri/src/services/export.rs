@@ -5,14 +5,17 @@ use tauri::{Emitter, Runtime};
 
 use crate::database::Database;
 use crate::error::AppError;
-use crate::models::{ExportProgress, ExportResult};
+use crate::models::{ExportProgress, ExportResult, SingleExportResult};
 
 pub struct ExportService;
 
 impl ExportService {
     /// 导出笔记为 Markdown 文件
     ///
-    /// - `output_dir`: 导出目标目录
+    /// 行为：在用户选定的 `output_dir` 下自动创建一层 `知识库导出_YYYYMMDD_HHmmss/`
+    /// 作为实际导出根目录，避免散落污染目标目录。
+    ///
+    /// - `output_dir`: 用户选择的父目录
     /// - `instance_data_dir`: 当前实例的数据根目录（用于资产路径校验，防越权拷贝）
     /// - `folder_id`: 可选，仅导出指定文件夹的笔记；None 表示导出全部
     pub fn export_notes<R: Runtime, E: Emitter<R>>(
@@ -22,8 +25,14 @@ impl ExportService {
         folder_id: Option<i64>,
         emitter: &E,
     ) -> Result<ExportResult, AppError> {
-        let output_path = Path::new(output_dir);
-        std::fs::create_dir_all(output_path)?;
+        let parent_path = Path::new(output_dir);
+        std::fs::create_dir_all(parent_path)?;
+
+        // 在父目录下创建带时间戳的导出根目录（包一层），重名时自动加 _1/_2 后缀
+        let stamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
+        let root_name = unique_dir_name(parent_path, &format!("知识库导出_{}", stamp));
+        let output_path = parent_path.join(&root_name);
+        std::fs::create_dir_all(&output_path)?;
 
         // ★ 关键点：把所有需要读的数据一次性拉出来后**立即释放 DB 锁**，
         // 然后再做耗时的文件 I/O。否则整个导出期间（可能数秒～数十秒）
@@ -139,7 +148,9 @@ impl ExportService {
             );
 
             // 拷资产 + 重写 URL（资产目录 = 同级 <basename>.assets/）
-            let (rewritten, copied) = rewrite_assets_for_export(content, &dir, &basename, &canon_root);
+            let assets_subdir = format!("{}.assets", basename);
+            let (rewritten, copied) =
+                rewrite_assets_for_export(content, &dir, &assets_subdir, &canon_root);
             total_assets_copied += copied;
 
             match std::fs::write(&file_path, &rewritten) {
@@ -162,6 +173,7 @@ impl ExportService {
             exported,
             errors,
             output_dir: output_dir.to_string(),
+            root_dir: output_path.to_string_lossy().to_string(),
             assets_copied: total_assets_copied,
         };
 
@@ -171,42 +183,59 @@ impl ExportService {
     }
 
     /// 导出单篇笔记为 Markdown 文件
-    /// 资产同样拷到 `<basename>.assets/`，与 .md 同级
-    /// 返回拷贝的资产数（图片 + 附件，按物理文件去重）
+    ///
+    /// 行为：在用户选择的 `parent_dir` 下创建一层 `{标题}/` 子目录，里面放：
+    /// - `{标题}.md`：正文
+    /// - `assets/`：图片+附件
+    ///
+    /// 重名时自动加 `_1` / `_2` 后缀，避免覆盖已有目录。
     pub fn export_single_note(
         db: &Database,
         instance_data_dir: &Path,
         note_id: i64,
-        file_path: &str,
-    ) -> Result<usize, AppError> {
+        parent_dir: &str,
+    ) -> Result<SingleExportResult, AppError> {
         // 单独 block 让 stmt/conn 在拷贝资产前及时释放 DB 锁
-        let content: String = {
+        let (title, content): (String, String) = {
             let conn = db.conn_lock()?;
             let mut stmt = conn.prepare(
-                "SELECT content FROM notes WHERE id = ?1 AND is_deleted = 0",
+                "SELECT title, content FROM notes WHERE id = ?1 AND is_deleted = 0",
             )?;
-            stmt.query_row([note_id], |row| row.get(0))
+            stmt.query_row([note_id], |row| Ok((row.get(0)?, row.get(1)?)))
                 .map_err(|_| AppError::NotFound(format!("笔记 {} 不存在", note_id)))?
         };
 
-        let target = Path::new(file_path);
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
+        let parent = Path::new(parent_dir);
+        std::fs::create_dir_all(parent)?;
 
-        let dir = target.parent().unwrap_or(Path::new("."));
-        let basename = target
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| format!("note-{}", note_id));
+        let safe_title = sanitize_filename(&title);
+        let basename = if safe_title.is_empty() {
+            format!("note-{}", note_id)
+        } else {
+            safe_title
+        };
+
+        // 包一层目录：{parent_dir}/{basename}/
+        let folder_name = unique_dir_name(parent, &basename);
+        let root_dir = parent.join(&folder_name);
+        std::fs::create_dir_all(&root_dir)?;
+
+        let file_path = root_dir.join(format!("{}.md", basename));
 
         let canon_root = instance_data_dir
             .canonicalize()
             .unwrap_or_else(|_| instance_data_dir.to_path_buf());
 
-        let (rewritten, copied) = rewrite_assets_for_export(&content, dir, &basename, &canon_root);
-        std::fs::write(file_path, rewritten)?;
-        Ok(copied)
+        // 资产目录统一叫 assets/（包了目录后命名可以更简洁）
+        let (rewritten, copied) =
+            rewrite_assets_for_export(&content, &root_dir, "assets", &canon_root);
+        std::fs::write(&file_path, rewritten)?;
+
+        Ok(SingleExportResult {
+            root_dir: root_dir.to_string_lossy().to_string(),
+            file_path: file_path.to_string_lossy().to_string(),
+            assets_copied: copied,
+        })
     }
 }
 
@@ -267,7 +296,7 @@ fn sanitize_filename(name: &str) -> String {
 fn rewrite_assets_for_export(
     content: &str,
     export_dir: &Path,
-    basename: &str,
+    assets_subdir: &str,
     canon_instance_root: &Path,
 ) -> (String, usize) {
     let spans = extract_md_url_spans(content);
@@ -275,8 +304,7 @@ fn rewrite_assets_for_export(
         return (content.to_string(), 0);
     }
 
-    let assets_subdir = format!("{}.assets", basename);
-    let assets_dir = export_dir.join(&assets_subdir);
+    let assets_dir = export_dir.join(assets_subdir);
     let mut copied = 0usize;
     let mut path_to_relative: HashMap<PathBuf, String> = HashMap::new();
     let mut taken_names: HashSet<String> = HashSet::new();
@@ -467,6 +495,20 @@ fn url_to_local_path(url: &str) -> Option<PathBuf> {
     };
 
     Some(PathBuf::from(path_str))
+}
+
+/// 解决目录重名：在 `parent` 下找一个尚未存在的目录名（首选 `base`，否则 `base_1`、`base_2`...）
+fn unique_dir_name(parent: &Path, base: &str) -> String {
+    if !parent.join(base).exists() {
+        return base.to_string();
+    }
+    for n in 1..10_000 {
+        let candidate = format!("{}_{}", base, n);
+        if !parent.join(&candidate).exists() {
+            return candidate;
+        }
+    }
+    base.to_string()
 }
 
 /// 解决文件名重名：第一次直接用，再次出现加 `_1`、`_2` 后缀

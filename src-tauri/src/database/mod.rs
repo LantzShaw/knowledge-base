@@ -10,6 +10,7 @@ pub mod sync_v1;
 pub mod tags;
 pub mod tasks;
 pub mod templates;
+pub mod url_mapping;
 
 use std::sync::Mutex;
 

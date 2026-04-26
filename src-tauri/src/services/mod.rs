@@ -23,6 +23,7 @@ pub mod pdf;
 pub mod prompt;
 pub mod skills;
 pub mod source_file;
+pub mod source_writeback;
 pub mod sync;
 pub mod sync_scheduler;
 pub mod sync_v1;

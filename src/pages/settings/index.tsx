@@ -24,7 +24,8 @@ import { Trash2, Pencil, FolderInput, FolderOutput, LayoutTemplate, Power, Exter
 import dayjs, { type Dayjs } from "dayjs";
 import { TimePicker } from "antd";
 import { open } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { useLocation } from "react-router-dom";
 import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Update } from "@tauri-apps/plugin-updater";
@@ -387,6 +388,25 @@ export default function SettingsPage() {
     loadFolders();
   }, [foldersRefreshTick]);
 
+  // 从其他页面带 state.scrollTo 跳转过来时，滚到目标区块并短暂高亮
+  const location = useLocation();
+  useEffect(() => {
+    const target = (location.state as { scrollTo?: string } | null)?.scrollTo;
+    if (!target) return;
+    const el = document.getElementById(target);
+    if (!el) return;
+    // 等下一帧再滚，避免内容尚未铺满高度时计算偏差
+    const raf = requestAnimationFrame(() => {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      el.classList.add("settings-target-flash");
+    });
+    const t = setTimeout(() => el.classList.remove("settings-target-flash"), 1800);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(t);
+    };
+  }, [location.state]);
+
   useEffect(() => {
     loadModels();
     // loadFolders 已由 foldersRefreshTick useEffect 在首次挂载时触发
@@ -615,6 +635,34 @@ export default function SettingsPage() {
     const selected = await open({ directory: true, title: "选择导出目录" });
     if (!selected) return;
 
+    // 导出前明确告知会包一层目录，避免用户找不到结果
+    const confirmed = await new Promise<boolean>((resolve) => {
+      Modal.confirm({
+        title: "确认导出",
+        content: (
+          <div>
+            <p style={{ marginBottom: 8 }}>将在以下父目录中创建一个新的导出文件夹：</p>
+            <p style={{ fontFamily: "monospace", fontSize: 12, marginBottom: 8 }}>
+              {selected as string}
+            </p>
+            <p style={{ marginBottom: 4 }}>结构如下：</p>
+            <pre style={{ fontSize: 12, background: "var(--ant-color-fill-tertiary)", padding: 8, borderRadius: 4, margin: 0 }}>
+{`📁 知识库导出_YYYYMMDD_HHmmss/
+  ├─ <文件夹>/
+  │   ├─ <笔记>.md
+  │   └─ <笔记>.assets/   (图片+附件)
+  └─ ...`}
+            </pre>
+          </div>
+        ),
+        okText: "开始导出",
+        cancelText: "取消",
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      });
+    });
+    if (!confirmed) return;
+
     setExporting(true);
     setExportProgress(null);
     setExportResult(null);
@@ -630,7 +678,13 @@ export default function SettingsPage() {
       const result = await exportApi.exportNotes(selected as string, exportFolderId ?? null);
       setExportResult(result);
       if (result.exported > 0) {
-        message.success(`成功导出 ${result.exported} 篇笔记到 ${result.output_dir}`);
+        message.success(`成功导出 ${result.exported} 篇笔记`);
+        // 直接在资源管理器/Finder 高亮选中刚创建的导出目录
+        try {
+          await revealItemInDir(result.root_dir);
+        } catch {
+          // reveal 失败不阻塞导出流程
+        }
       }
     } catch (e) {
       message.error(`导出失败: ${e}`);
@@ -987,24 +1041,26 @@ export default function SettingsPage() {
         </div>
       </Card>
 
-      <Card title="待办提醒">
-        <div className="flex items-center justify-between py-1">
-          <div>
-            <div>全天任务的提醒时刻</div>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              不带具体时间的任务，以该时刻为基准触发提醒（对标 Apple 提醒事项 / MS To Do）
-            </Text>
+      <div id="settings-task-reminder">
+        <Card title="待办提醒">
+          <div className="flex items-center justify-between py-1">
+            <div>
+              <div>任务默认提醒时刻</div>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                新建任务时若未指定时间，自动填充此时刻；编辑/创建弹窗里的"默认"也指这个值
+              </Text>
+            </div>
+            <TimePicker
+              value={dayjs(allDayReminderTime, "HH:mm")}
+              onChange={handleAllDayReminderTimeChange}
+              format="HH:mm"
+              minuteStep={5}
+              allowClear={false}
+              style={{ width: 120 }}
+            />
           </div>
-          <TimePicker
-            value={dayjs(allDayReminderTime, "HH:mm")}
-            onChange={handleAllDayReminderTimeChange}
-            format="HH:mm"
-            minuteStep={5}
-            allowClear={false}
-            style={{ width: 120 }}
-          />
-        </div>
-      </Card>
+        </Card>
+      </div>
 
       {/* 导入笔记（Markdown / PDF / Word） */}
       <Card
@@ -1137,17 +1193,31 @@ export default function SettingsPage() {
             showIcon
             message={`导出完成: ${exportResult.exported} 篇笔记，附带 ${exportResult.assets_copied} 个资产文件`}
             description={
-              exportResult.errors.length > 0 ? (
-                <List
-                  size="small"
-                  dataSource={exportResult.errors.slice(0, 10)}
-                  renderItem={(err) => (
-                    <List.Item style={{ padding: "2px 0", fontSize: 12 }}>
-                      <Text type="danger">{err}</Text>
-                    </List.Item>
-                  )}
-                />
-              ) : undefined
+              <div className="space-y-2">
+                <div style={{ fontSize: 12, fontFamily: "monospace", wordBreak: "break-all" }}>
+                  {exportResult.root_dir}
+                </div>
+                <Space size="small">
+                  <Button
+                    size="small"
+                    type="primary"
+                    onClick={() => revealItemInDir(exportResult.root_dir).catch(() => {})}
+                  >
+                    打开所在文件夹
+                  </Button>
+                </Space>
+                {exportResult.errors.length > 0 && (
+                  <List
+                    size="small"
+                    dataSource={exportResult.errors.slice(0, 10)}
+                    renderItem={(err) => (
+                      <List.Item style={{ padding: "2px 0", fontSize: 12 }}>
+                        <Text type="danger">{err}</Text>
+                      </List.Item>
+                    )}
+                  />
+                )}
+              </div>
             }
             closable
             onClose={() => setExportResult(null)}

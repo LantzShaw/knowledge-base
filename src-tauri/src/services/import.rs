@@ -440,7 +440,7 @@ impl ImportService {
             // 外部修改过文件 → 同步最新内容到笔记（含图片处理）
             let was_synced = existing_content != raw_content;
             if was_synced {
-                let processed = process_single_md_images(
+                let (processed, mappings) = process_single_md_images(
                     &raw_content,
                     existing_id,
                     path,
@@ -448,6 +448,14 @@ impl ImportService {
                 )
                 .await;
                 db.update_note_content(existing_id, &processed)?;
+                // 重新打开 = 重置 URL 映射（外部可能换了图床/路径）
+                let _ = db.clear_url_mappings(existing_id);
+                let _ = db.insert_url_mappings(existing_id, &mappings);
+                // 同步到笔记之后，把"上次写回时的 mtime"对齐为外部文件当前 mtime，
+                // 否则下次保存时 mtime 不一致会误报"外部改过"
+                if let Some(mt) = read_file_mtime(path) {
+                    let _ = db.set_writeback_mtime(existing_id, mt);
+                }
                 log::info!(
                     "[open-md] 检测到 {} 内容变化，已同步到笔记 #{}",
                     canonical, existing_id
@@ -470,11 +478,17 @@ impl ImportService {
         let _ = db.set_note_source_file(note.id, Some(&canonical), Some("md"));
 
         // 处理图片：本地相对路径（同级目录） + 外链下载（绕开微信防盗链等）
-        let processed = process_single_md_images(&raw_content, note.id, path, app_data_dir).await;
+        let (processed, mappings) =
+            process_single_md_images(&raw_content, note.id, path, app_data_dir).await;
         if processed != raw_content {
             if let Err(e) = db.update_note_content(note.id, &processed) {
                 log::warn!("[open-md] 笔记 {} 图片重写后回写失败: {}", note.id, e);
             }
+        }
+        let _ = db.insert_url_mappings(note.id, &mappings);
+        // 首次打开就记录 mtime；之后笔记保存时的写回会比对它做冲突检测
+        if let Some(mt) = read_file_mtime(path) {
+            let _ = db.set_writeback_mtime(note.id, mt);
         }
 
         Ok(OpenMarkdownResult {
@@ -484,17 +498,32 @@ impl ImportService {
     }
 }
 
+/// 读取文件 mtime（秒级 unix timestamp）；失败返回 None
+///
+/// 给"打开 .md → 编辑 → 写回"流程做冲突检测：上次写回时记一个 mtime，
+/// 下次写回前再读一次，如果不一致说明外部编辑器（VSCode 等）在期间改过文件。
+pub fn read_file_mtime(path: &Path) -> Option<i64> {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64)
+}
+
 /// 单文件打开场景的图片处理：
 ///  - 本地相对路径（如 `./images/foo.png`）：以 .md 同级目录为锚点解析并复制到 kb_assets
 ///  - http(s):// 外链：下载到本地（含微信公众号防盗链处理）
 ///
 /// 处理失败的引用保留原样，不会让笔记打开流程中断。
+///
+/// 返回 (处理后的 body, 替换映射)：映射 = `Vec<(原始 URL, 内部 asset URL)>`，
+/// 给 open_markdown_file 写入 `note_url_mapping`，写回 .md 时按 internal_url 反查恢复原链接。
 async fn process_single_md_images(
     body: &str,
     note_id: i64,
     md_path: &Path,
     app_data_dir: &Path,
-) -> String {
+) -> (String, Vec<(String, String)>) {
     let note_dir = md_path
         .parent()
         .map(|p| p.to_path_buf())
@@ -504,6 +533,7 @@ async fn process_single_md_images(
     // OB 附件索引为空（`AttachmentIndex::empty()`），仅靠相对路径解析
     let empty_index = crate::services::import_attachments::AttachmentIndex::empty();
     let mut current = body.to_string();
+    let mut all_mappings: Vec<(String, String)> = Vec::new();
     if let Ok(rewrite) = crate::services::import_attachments::rewrite_image_paths(
         &current,
         note_id,
@@ -513,6 +543,7 @@ async fn process_single_md_images(
         app_data_dir,
     ) {
         current = rewrite.new_body;
+        all_mappings.extend(rewrite.mappings);
     }
     if let Ok(rewrite) = crate::services::import_attachments::rewrite_external_images(
         &current,
@@ -522,8 +553,9 @@ async fn process_single_md_images(
     .await
     {
         current = rewrite.new_body;
+        all_mappings.extend(rewrite.mappings);
     }
-    current
+    (current, all_mappings)
 }
 
 /// 计算某文件相对扫描根的父目录（斜杠统一为 '/'，根层为空串）

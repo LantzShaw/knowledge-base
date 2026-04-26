@@ -104,6 +104,12 @@ pub struct RewriteResult {
     pub copied: usize,
     /// 缺失的图片（用户原始引用文本，去重后展示给用户）
     pub missing: Vec<String>,
+    /// 每次成功替换的 `(原始 URL, 内部 asset URL)` 对
+    ///
+    /// 给"打开 .md → 编辑 → 写回原文件"流程用：写回时按 internal_url 反查原 URL，
+    /// 保证原文件链接形态不变（用户的 ./images/foo.png / https://... 不被替换）。
+    /// 单文件 open_markdown_file 会把这里的对入库到 note_url_mapping。
+    pub mappings: Vec<(String, String)>,
 }
 
 impl RewriteResult {
@@ -113,6 +119,7 @@ impl RewriteResult {
             new_body: body,
             copied: 0,
             missing: Vec::new(),
+            mappings: Vec::new(),
         }
     }
 }
@@ -133,6 +140,24 @@ fn ob_wiki_embed_regex() -> &'static Regex {
         // name 不含 `|` 和 `]`
         Regex::new(r"!\[\[([^\]\|]+?)(\|[^\]]*)?\]\]").unwrap()
     })
+}
+
+/// 导入流程专用的图片落盘 helper：读源字节 → 走 `ImageService::save_bytes` 明文版本。
+///
+/// 不直接调 `save_from_path`，因为后者是 routed 版本（按笔记 is_encrypted 自动加密），
+/// 需要 db / vault 引用，而 import 流程上下文没有 vault；又因为 import 总是给新建笔记
+/// （is_encrypted = false 默认），明文落盘是正确语义。
+fn copy_to_image_store(
+    app_data_dir: &Path,
+    note_id: i64,
+    source: &Path,
+) -> Result<String, AppError> {
+    let file_name = source
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("image.png");
+    let data = std::fs::read(source)?;
+    ImageService::save_bytes(app_data_dir, note_id, file_name, &data)
 }
 
 /// 把绝对路径转成 Tauri asset 协议 URL
@@ -171,6 +196,7 @@ pub fn rewrite_image_paths(
 
     let mut copied = 0usize;
     let mut missing: Vec<String> = Vec::new();
+    let mut mappings: Vec<(String, String)> = Vec::new();
 
     // ─── pass 1：替换标准 markdown `![alt](path)` ───
     let md_re = md_image_regex();
@@ -193,14 +219,14 @@ pub fn rewrite_image_paths(
             let resolved = resolve_local_image(&decoded, note_file_dir, vault_root, index);
             match resolved {
                 Some(src) => {
-                    match ImageService::save_from_path(
-                        app_data_dir,
-                        note_id,
-                        &src.to_string_lossy(),
-                    ) {
+                    // 导入流程：笔记是当前 import 新建的，is_encrypted 默认 false，
+                    // 直接走明文 save_bytes，避开 routed 路径对 vault 的依赖
+                    match copy_to_image_store(app_data_dir, note_id, &src) {
                         Ok(new_abs) => {
                             copied += 1;
                             let url = path_to_asset_url(Path::new(&new_abs));
+                            // 记录映射：写回原 .md 时按 internal_url 反查，恢复用户原始链接
+                            mappings.push((raw_url.to_string(), url.clone()));
                             format!("![{}]({})", alt, url)
                         }
                         Err(e) => {
@@ -244,16 +270,15 @@ pub fn rewrite_image_paths(
 
             match index.by_basename.get(&key) {
                 Some(src) => {
-                    match ImageService::save_from_path(
-                        app_data_dir,
-                        note_id,
-                        &src.to_string_lossy(),
-                    ) {
+                    match copy_to_image_store(app_data_dir, note_id, src) {
                         Ok(new_abs) => {
                             copied += 1;
                             let url = path_to_asset_url(Path::new(&new_abs));
                             // 保留 wiki 的 alt（| 之后的第一段），舍弃宽度（v1 不处理）
                             let alt_text = parse_wiki_alt(extra);
+                            // wiki 嵌入也记映射：写回时把 internal URL 还原为 ![[name]] 不太靠谱，
+                            // 这里只记一对到表里，用户在编辑器里把它转成普通 markdown 也能正常反查。
+                            mappings.push((raw_name.to_string(), url.clone()));
                             format!("![{}]({})", alt_text, url)
                         }
                         Err(e) => {
@@ -287,6 +312,7 @@ pub fn rewrite_image_paths(
         new_body: after_wiki,
         copied,
         missing: dedup_missing,
+        mappings,
     })
 }
 
@@ -458,12 +484,15 @@ pub async fn rewrite_external_images(
 
     // 倒序应用替换，避免前面的替换让后面的 start/end 错位
     let mut new_body = body.to_string();
+    let mut mappings: Vec<(String, String)> = Vec::new();
     for (i, repl) in replacements.iter().enumerate().rev() {
         let (start, end, alt, raw_url) = &matches[i];
         match repl {
             Some(new_url) => {
                 let replacement = format!("![{}]({})", alt, new_url);
                 new_body.replace_range(*start..*end, &replacement);
+                // 写回原 .md 时按 internal_url 反查回原始 https://... 链接
+                mappings.push((raw_url.clone(), new_url.clone()));
             }
             None => {
                 missing.push(raw_url.clone());
@@ -482,6 +511,7 @@ pub async fn rewrite_external_images(
         new_body,
         copied,
         missing: dedup_missing,
+        mappings,
     })
 }
 

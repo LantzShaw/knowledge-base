@@ -273,6 +273,21 @@ impl Database {
         Ok(())
     }
 
+    /// 查询笔记是否处于加密态。笔记不存在或已软删返回 NotFound。
+    /// ImageService 落盘 / 渲染前需要先反查这个，决定走加密分支还是明文分支。
+    pub fn get_note_is_encrypted(&self, id: i64) -> Result<bool, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let flag: Option<i32> = conn
+            .query_row(
+                "SELECT is_encrypted FROM notes WHERE id = ?1 AND is_deleted = 0",
+                params![id],
+                |row| row.get(0),
+            )
+            .ok();
+        flag.map(|v| v != 0)
+            .ok_or_else(|| AppError::NotFound(format!("笔记 {} 不存在", id)))
+    }
+
     /// 读取加密笔记的 blob（未解密）。调用方拿到后用 vault 解密
     pub fn get_encrypted_blob(&self, id: i64) -> Result<Option<Vec<u8>>, AppError> {
         let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;

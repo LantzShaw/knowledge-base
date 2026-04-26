@@ -16,6 +16,7 @@ pub mod image;
 pub mod pdf;
 pub mod prompt;
 pub mod source_file;
+pub mod source_writeback;
 pub mod sync;
 pub mod sync_v1;
 pub mod tasks;

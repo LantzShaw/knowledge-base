@@ -15,6 +15,9 @@ impl NoteService {
     }
 
     /// 更新笔记
+    ///
+    /// 仅做 DB 写入。外部 .md 写回由前端在保存成功后**显式调用** `write_back_source_md`，
+    /// 这样冲突状态可以直接返回给调用方，避免事件 + 状态机的复杂度。
     pub fn update(db: &Database, id: i64, input: &NoteInput) -> Result<Note, AppError> {
         if input.title.trim().is_empty() {
             return Err(AppError::InvalidInput("笔记标题不能为空".into()));
@@ -98,6 +101,7 @@ impl NoteService {
             query.keyword.as_deref(),
             page,
             page_size,
+            query.uncategorized.unwrap_or(false),
         )?;
 
         Ok(PageResult {
@@ -134,12 +138,15 @@ impl NoteService {
 
     // ─── T-007 笔记加密 ────────────────────────────
 
-    /// 加密这篇笔记：读 content → vault 加密 → 写入 blob + 占位 content
+    /// 加密这篇笔记：读 content → vault 加密 → 写入 blob + 占位 content；
+    /// 同时立即把 `images/{id}/` 下所有明文图片迁移成 `.enc`。
     ///
     /// 要求 vault 已解锁。调用前自行检查 `VaultService::status`。
+    /// 图片迁移是 best-effort：迁移失败会回滚 DB（取消加密），保证 DB 与磁盘一致。
     pub fn encrypt_note(
         db: &Database,
         vault: &std::sync::RwLock<crate::services::vault::VaultState>,
+        app_data_dir: &std::path::Path,
         id: i64,
     ) -> Result<(), AppError> {
         // 读现有明文 content
@@ -156,6 +163,18 @@ impl NoteService {
         // 占位符不会参与 FTS5 匹配（跟标题分隔开）；前端也用它做"已加密"提示
         const PLACEHOLDER: &str = "🔒 已加密内容——请解锁后查看";
         db.enable_note_encryption(id, PLACEHOLDER, &blob)?;
+
+        // 立即迁移图片到 .enc。失败则回滚 DB，避免出现"DB 已加密但图片仍是明文"的不一致状态
+        if let Err(e) = crate::services::image::ImageService::migrate_note_images(
+            vault,
+            app_data_dir,
+            id,
+            crate::services::image::ImageMigration::Encrypt,
+        ) {
+            log::error!("笔记 {} 图片加密迁移失败，回滚 DB 加密：{}", id, e);
+            db.disable_note_encryption(id, &note.content)?;
+            return Err(AppError::Custom(format!("图片加密迁移失败：{}", e)));
+        }
         Ok(())
     }
 
@@ -174,14 +193,34 @@ impl NoteService {
             .map_err(|e| AppError::Custom(format!("密文解码为 UTF-8 失败: {}", e)))
     }
 
-    /// 取消加密：解密后把明文写回 content + 清 blob
+    /// 取消加密：解密后把明文写回 content + 清 blob；
+    /// 同时立即把 `images/{id}/` 下所有 `.enc` 图片解密回原后缀。
+    ///
+    /// 图片迁移失败回滚 DB（重新加密 placeholder + blob），保证一致性。
     pub fn disable_encrypt(
         db: &Database,
         vault: &std::sync::RwLock<crate::services::vault::VaultState>,
+        app_data_dir: &std::path::Path,
         id: i64,
     ) -> Result<(), AppError> {
         let plaintext = Self::decrypt_note(db, vault, id)?;
+        // 先存一份加密 blob 用于回滚
+        let blob = db
+            .get_encrypted_blob(id)?
+            .ok_or_else(|| AppError::NotFound(format!("笔记 {} 未加密", id)))?;
         db.disable_note_encryption(id, &plaintext)?;
+
+        if let Err(e) = crate::services::image::ImageService::migrate_note_images(
+            vault,
+            app_data_dir,
+            id,
+            crate::services::image::ImageMigration::Decrypt,
+        ) {
+            log::error!("笔记 {} 图片解密迁移失败，回滚 DB 解密：{}", id, e);
+            const PLACEHOLDER: &str = "🔒 已加密内容——请解锁后查看";
+            db.enable_note_encryption(id, PLACEHOLDER, &blob)?;
+            return Err(AppError::Custom(format!("图片解密迁移失败：{}", e)));
+        }
         Ok(())
     }
 
@@ -211,3 +250,4 @@ impl NoteService {
         Self::create(db, &input)
     }
 }
+

@@ -399,6 +399,23 @@ export interface AttachmentInfo {
   mime: string;
 }
 
+// ─── 外部 .md 双向同步（写回原文件） ─────────────
+
+/**
+ * 笔记保存后写回原 .md 文件的结果。
+ *
+ * - `ok`：写回成功；`assets_copied` = 用户在编辑器里新插入的图被复制到 `<basename>.assets/` 的张数
+ * - `skipped`：笔记不是从外部 .md 打开的，没什么可写回（默认情况）
+ * - `conflict`：原文件 mtime 与上次写回时不一致 = 外部编辑器（VSCode 等）改过文件，
+ *   前端应弹 Modal 让用户选「覆盖外部 / 取消」（"覆盖外部" 后端再调一次 `force=true`）
+ * - `missing`：原文件被删/移走/挂网盘断开
+ */
+export type WriteBackResult =
+  | { kind: "ok"; assets_copied: number; file_path: string }
+  | { kind: "skipped"; reason: string }
+  | { kind: "conflict"; external_mtime: number; last_known_mtime: number | null; file_path: string }
+  | { kind: "missing"; file_path: string };
+
 // ─── 导出 ─────────────────────────────────────
 
 /** 导出结果 */

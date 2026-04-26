@@ -31,6 +31,7 @@ import type {
   ScannedFile,
   ExportResult,
   SingleExportResult,
+  WriteBackResult,
   NoteTemplate,
   NoteTemplateInput,
   DailyWritingStat,
@@ -390,6 +391,16 @@ export const imageMaintApi = {
   scanOrphans: () => invoke<OrphanImageScan>("scan_orphan_images"),
   cleanOrphans: (paths: string[]) =>
     invoke<OrphanImageClean>("clean_orphan_images", { paths }),
+};
+
+/** 外部 .md 双向同步 API（保存即写回原文件） */
+export const sourceWritebackApi = {
+  /** 把笔记当前内容写回原 .md 文件。
+   *
+   *  - `force=false`（默认）：mtime 不一致会返回 `kind: "conflict"`，前端据此弹冲突 Modal
+   *  - `force=true`：忽略冲突强制覆盖（冲突 Modal 选"覆盖外部"后调用） */
+  writeBack: (noteId: number, force = false) =>
+    invoke<WriteBackResult>("write_back_source_md", { noteId, force }),
 };
 
 /** 导出 API */
