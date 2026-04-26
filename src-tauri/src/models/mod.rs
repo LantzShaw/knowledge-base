@@ -477,6 +477,17 @@ pub struct PageResult<T: Serialize> {
     pub page_size: usize,
 }
 
+/// 批量恢复笔记的结果
+///
+/// `to_root` = 其中有多少条因原文件夹已不存在而落到了根目录。
+/// 用于前端在 message 里给"X 条恢复到根目录"的提示。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreBatchResult {
+    pub restored: usize,
+    pub to_root: usize,
+}
+
 // ─── 同步 ─────────────────────────────────────
 
 /// 同步范围：控制本次同步包含哪些数据

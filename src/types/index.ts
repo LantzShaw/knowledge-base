@@ -528,6 +528,16 @@ export interface PageResult<T> {
   page_size: number;
 }
 
+/**
+ * 批量恢复笔记的结果（与后端 RestoreBatchResult 对齐，serde camelCase）
+ *
+ * `toRoot` = 其中因原文件夹已被删除而落到根目录的条数
+ */
+export interface RestoreBatchResult {
+  restored: number;
+  toRoot: number;
+}
+
 // ─── 同步 ─────────────────────────────────────
 
 /** 同步范围：控制本次同步包含哪些数据 */

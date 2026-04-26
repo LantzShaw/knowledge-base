@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::database::Database;
 use crate::error::AppError;
-use crate::models::{Note, PageResult};
+use crate::models::{Note, PageResult, RestoreBatchResult};
 use crate::services::attachment::AttachmentService;
 use crate::services::image::ImageService;
 use crate::services::pdf::PdfService;
@@ -54,7 +54,12 @@ impl TrashService {
     }
 
     /// 恢复笔记（从回收站恢复）
-    pub fn restore(db: &Database, id: i64) -> Result<(), AppError> {
+    ///
+    /// 返回值：true = 恢复到原文件夹，false = 落到根目录
+    /// （原文件夹被删时外键 ON DELETE SET NULL 已经把 folder_id 抹了）
+    pub fn restore(db: &Database, id: i64) -> Result<bool, AppError> {
+        // 在 restore 前先 snapshot folder_id（restore 只改 is_deleted，folder_id 不变）
+        let folder_id = db.get_note_folder_id(id)?;
         let restored = db.restore_note(id)?;
         if !restored {
             return Err(AppError::NotFound(format!(
@@ -62,7 +67,7 @@ impl TrashService {
                 id
             )));
         }
-        Ok(())
+        Ok(folder_id.is_some())
     }
 
     /// 永久删除笔记（连带清理图片 + 源文件）
@@ -106,6 +111,53 @@ impl TrashService {
             page,
             page_size,
         })
+    }
+
+    /// 批量恢复
+    ///
+    /// 返回 (restored=实际恢复条数, to_root=其中落到根目录的条数)。
+    /// 不在回收站的 id 静默跳过。
+    pub fn restore_batch(db: &Database, ids: &[i64]) -> Result<RestoreBatchResult, AppError> {
+        if ids.is_empty() {
+            return Ok(RestoreBatchResult {
+                restored: 0,
+                to_root: 0,
+            });
+        }
+        let mut restored = 0usize;
+        let mut to_root = 0usize;
+        for id in ids {
+            // 先记 folder_id；查不到就当无原文件夹处理
+            let folder_id = db.get_note_folder_id(*id).unwrap_or(None);
+            if db.restore_note(*id)? {
+                restored += 1;
+                if folder_id.is_none() {
+                    to_root += 1;
+                }
+            }
+        }
+        Ok(RestoreBatchResult { restored, to_root })
+    }
+
+    /// 批量永久删除（清理资产 + 删 DB 行）；不在回收站的 id 静默跳过
+    pub fn permanent_delete_batch(
+        db: &Database,
+        data_dir: &Path,
+        ids: &[i64],
+    ) -> Result<usize, AppError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let mut count = 0usize;
+        for id in ids {
+            // 先查 source_path（删行后就拿不到了）；查不到就视为无源文件
+            let source = db.get_note_source_path(*id).unwrap_or(None);
+            if db.permanent_delete_note(*id)? {
+                Self::cleanup_note_assets(data_dir, *id, &source);
+                count += 1;
+            }
+        }
+        Ok(count)
     }
 
     /// 清空回收站（连带清理所有关联图片 + 源文件）
