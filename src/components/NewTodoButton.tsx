@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Button, Dropdown, Space, App as AntdApp, type MenuProps } from "antd";
+import type { SizeType } from "antd/es/config-provider/SizeContext";
 import { CheckSquare, ChevronDown, Sparkles, Target } from "lucide-react";
 
 import { CreateTaskModal } from "@/components/tasks/CreateTaskModal";
@@ -15,6 +16,8 @@ interface Props {
   label?: string;
   /** 外层样式扩展 */
   style?: React.CSSProperties;
+  /** 按钮尺寸（透传给内部 Button），默认 middle；首页大按钮用 large */
+  size?: SizeType;
   /** 保存成功后回调（落库后宿主页可刷新列表/统计） */
   onSaved?: () => void;
 }
@@ -29,6 +32,7 @@ export function NewTodoButton({
   block = false,
   label = "添加待办",
   style,
+  size,
   onSaved,
 }: Props) {
   const { message } = AntdApp.useApp();
@@ -91,6 +95,7 @@ export function NewTodoButton({
       <Space.Compact style={block ? { width: "100%", ...style } : style}>
         <Button
           type="default"
+          size={size}
           icon={<CheckSquare size={14} />}
           onClick={() => setCreateOpen(true)}
           title="新建一条待办"
@@ -98,9 +103,14 @@ export function NewTodoButton({
         >
           {label}
         </Button>
-        <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
+        <Dropdown
+          menu={{ items: menuItems }}
+          trigger={["click"]}
+          placement="bottomRight"
+        >
           <Button
             type="default"
+            size={size}
             icon={<ChevronDown size={14} />}
             title="AI 规划入口"
           />

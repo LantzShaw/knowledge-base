@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Button, Dropdown, Space, type MenuProps } from "antd";
+import type { SizeType } from "antd/es/config-provider/SizeContext";
 import { useNavigate } from "react-router-dom";
 import {
   Plus,
@@ -27,6 +28,8 @@ interface Props {
   label?: string;
   /** 外层样式扩展 */
   style?: React.CSSProperties;
+  /** 按钮尺寸（透传给内部 Button），默认 middle；首页大按钮用 large */
+  size?: SizeType;
 }
 
 /**
@@ -42,6 +45,7 @@ export function NewNoteButton({
   block = false,
   label = "新建笔记",
   style,
+  size,
 }: Props) {
   const navigate = useNavigate();
   const [templateOpen, setTemplateOpen] = useState(false);
@@ -101,6 +105,7 @@ export function NewNoteButton({
       <Space.Compact style={block ? { width: "100%", ...style } : style}>
         <Button
           type="primary"
+          size={size}
           icon={<Plus size={14} />}
           onClick={handleCreate}
           title="新建笔记 (Ctrl+N)"
@@ -108,9 +113,14 @@ export function NewNoteButton({
         >
           {label}
         </Button>
-        <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
+        <Dropdown
+          menu={{ items: menuItems }}
+          trigger={["click"]}
+          placement="bottomRight"
+        >
           <Button
             type="primary"
+            size={size}
             icon={<ChevronDown size={14} />}
             title="更多创建方式"
           />

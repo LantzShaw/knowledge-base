@@ -62,7 +62,7 @@ export function HiddenPinSection() {
         </span>
       }
     >
-      <div className="flex items-center justify-between">
+      <div className="flex items-end justify-between">
         <div className="flex flex-col gap-1">
           <Space size={8}>
             <Text>状态</Text>

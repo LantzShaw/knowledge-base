@@ -204,18 +204,22 @@ export default function HomePage() {
         ))}
       </Row>
 
-      {/* 快捷操作 — 4 栏：创建动作（笔记 / 待办）+ 跳转动作（今日 / AI） */}
+      {/* 快捷操作 — 4 栏：创建动作（笔记 / 待办）+ 跳转动作（今日 / AI）
+          统一用 size="large" 让 4 个按钮高度一致（antd large = 40px），
+          避免分段按钮内部 Button 不接 height 导致的对齐错位 */}
       <Row gutter={12}>
         <Col span={6}>
           <NewNoteButton
             block
-            style={{ borderRadius: 8, height: 40 }}
+            size="large"
+            style={{ borderRadius: 8 }}
           />
         </Col>
         <Col span={6}>
           <NewTodoButton
             block
-            style={{ borderRadius: 8, height: 40 }}
+            size="large"
+            style={{ borderRadius: 8 }}
             onSaved={() => {
               loadDashboard();
               refreshTaskStats();
@@ -225,10 +229,11 @@ export default function HomePage() {
         <Col span={6}>
           <Button
             type="default"
+            size="large"
             icon={<Calendar size={15} />}
             onClick={handleTodayNote}
             block
-            style={{ borderRadius: 8, height: 40 }}
+            style={{ borderRadius: 8 }}
           >
             今日笔记
           </Button>
@@ -236,10 +241,11 @@ export default function HomePage() {
         <Col span={6}>
           <Button
             type="default"
+            size="large"
             icon={<Bot size={15} />}
             onClick={() => navigate("/ai")}
             block
-            style={{ borderRadius: 8, height: 40 }}
+            style={{ borderRadius: 8 }}
           >
             AI 问答
           </Button>

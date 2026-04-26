@@ -614,6 +614,48 @@ export default function NoteListPage() {
     }
   }, []);
 
+  /** 批量导出：循环调单条 export，每篇笔记会在父目录下生成 `{标题}/` 子目录 */
+  const handleExportBatch = useCallback(async (ids: number[]) => {
+    if (ids.length === 0) return;
+    const parentDir = await openDialog({
+      directory: true,
+      title: `选择导出目录（共 ${ids.length} 篇）`,
+    });
+    if (!parentDir) return;
+    const hide = message.loading(`正在导出 ${ids.length} 篇…`, 0);
+    let success = 0;
+    let totalAssets = 0;
+    const failed: number[] = [];
+    for (const id of ids) {
+      try {
+        const result = await exportApi.exportSingle(id, parentDir as string);
+        success += 1;
+        totalAssets += result.assets_copied;
+      } catch (e) {
+        failed.push(id);
+        console.warn(`[export] 笔记 ${id} 导出失败:`, e);
+      }
+    }
+    hide();
+    Modal.success({
+      title: failed.length === 0 ? "导出完成" : "导出完成（部分失败）",
+      content: (
+        <div>
+          <p style={{ marginBottom: 4 }}>
+            成功 {success} 篇{failed.length > 0 ? `，失败 ${failed.length} 篇` : ""}；
+            共复制资产 {totalAssets} 个。父目录：
+          </p>
+          <p style={{ fontFamily: "monospace", fontSize: 12, wordBreak: "break-all" }}>
+            {parentDir}
+          </p>
+        </div>
+      ),
+      okText: "打开所在文件夹",
+      onOk: () => revealItemInDir(parentDir as string).catch(() => {}),
+      closable: true,
+    });
+  }, []);
+
   const handleTrashAll = useCallback(() => {
     Modal.confirm({
       title: "全部移到回收站",
@@ -659,8 +701,9 @@ export default function NoteListPage() {
         // 绝对序号：跨页连续（(page-1)*pageSize + 行内索引 + 1），翻页不重置
         title: "#",
         key: "index",
-        width: 44,
+        width: 36,
         align: "right" as const,
+        onCell: () => ({ style: { paddingLeft: 4, paddingRight: 4 } }),
         render: (_: unknown, __: Note, index: number) => (
           <span style={{ color: token.colorTextTertiary, fontSize: 12 }}>
             {(data.page - 1) * data.page_size + index + 1}
@@ -672,6 +715,8 @@ export default function NoteListPage() {
         dataIndex: "title",
         key: "title",
         ellipsis: true,
+        // 标题文字（尤其是被 ellipsis 截断时）会贴到下一列，给单元格右侧留点呼吸空间
+        onCell: () => ({ style: { paddingRight: 24 } }),
         render: (title: string, record: Note) => {
           // 子文件夹笔记标记：当前选中是某文件夹，且这条笔记 folder_id 不等于该选中
           // → 笔记其实在子孙文件夹下；前面加 ↳ 小箭头作为轻量视觉提示
@@ -912,6 +957,13 @@ export default function NoteListPage() {
               删除
             </Button>
           </Popconfirm>
+          <Button
+            size="small"
+            icon={<Share size={14} />}
+            onClick={() => handleExportBatch(selectedIds)}
+          >
+            批量导出
+          </Button>
           <Button
             size="small"
             icon={<Bot size={14} />}

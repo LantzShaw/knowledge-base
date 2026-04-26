@@ -51,8 +51,37 @@ import type { Folder } from "@/types";
 
 const { Title, Text } = Typography;
 
+/**
+ * 把回调推迟到浏览器空闲时段。
+ * Why: 设置页 mount 时一次性发起 6+ 个 invoke 会跟路由 commit / 编辑器 destroy
+ *      抢主线程，造成"点击设置时卡一下"。把这些非首屏关键的 IPC 推到 idle 阶段，
+ *      用户先看到骨架 UI，数据陆续填充。
+ * 兼容：Webview2 / WKWebView 都支持 requestIdleCallback；不支持时回退到 setTimeout(0)。
+ */
+type IdleHandle = { kind: "idle"; id: number } | { kind: "timeout"; id: ReturnType<typeof setTimeout> };
+type IdleWindow = Window & {
+  requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+  cancelIdleCallback?: (id: number) => void;
+};
+function scheduleIdle(fn: () => void): IdleHandle {
+  const w = window as IdleWindow;
+  if (typeof w.requestIdleCallback === "function") {
+    return { kind: "idle", id: w.requestIdleCallback(fn, { timeout: 500 }) };
+  }
+  return { kind: "timeout", id: setTimeout(fn, 0) };
+}
+function cancelIdle(handle: IdleHandle): void {
+  const w = window as IdleWindow;
+  if (handle.kind === "idle" && typeof w.cancelIdleCallback === "function") {
+    w.cancelIdleCallback(handle.id);
+  } else if (handle.kind === "timeout") {
+    clearTimeout(handle.id);
+  }
+}
+
 /** 作者社区信息 */
 const BILIBILI_URL = "https://space.bilibili.com/520725002";
+const BILIBILI_TUTORIAL_URL = "https://www.bilibili.com/video/BV1xvosBREbr";
 const ZSXQ_NAME = "后端转AI实战派";
 const ZSXQ_ID = "91839984";
 
@@ -311,6 +340,12 @@ export default function SettingsPage() {
   const [startMinimized, setStartMinimized] = useState(false);
   const [autostartLoading, setAutostartLoading] = useState(false);
   const [startMinimizedLoading, setStartMinimizedLoading] = useState(false);
+  const [multiInstanceEnabled, setMultiInstanceEnabled] = useState(false);
+  const [multiInstanceLoading, setMultiInstanceLoading] = useState(false);
+  // 关闭按钮行为：ask=每次询问 / minimize=最小化到托盘 / exit=直接退出
+  const [closeAction, setCloseAction] = useState<"ask" | "minimize" | "exit">(
+    "ask",
+  );
 
   // 全天任务提醒基准时刻（HH:mm，默认 09:00）
   const [allDayReminderTime, setAllDayReminderTime] = useState<string>("09:00");
@@ -453,9 +488,14 @@ export default function SettingsPage() {
   const resetEditorTypography = useAppStore((s) => s.resetEditorTypography);
 
   // 订阅全局 foldersRefreshTick：Sidebar 修改文件夹后自动刷新设置页的文件夹选项
+  // 走 idle defer：从笔记页切到设置页瞬间，路由 commit + 编辑器 destroy 已经吃掉一帧时间，
+  // 这里再立即 invoke 会让首屏感知卡顿；推迟到 idle 让 UI 先出现
   const foldersRefreshTick = useAppStore((s) => s.foldersRefreshTick);
   useEffect(() => {
-    loadFolders();
+    const handle = scheduleIdle(() => {
+      loadFolders();
+    });
+    return () => cancelIdle(handle);
   }, [foldersRefreshTick]);
 
   // 从其他页面带 state.scrollTo 跳转过来时，滚到目标区块并短暂高亮
@@ -478,27 +518,46 @@ export default function SettingsPage() {
   }, [location.state]);
 
   useEffect(() => {
-    loadModels();
-    // loadFolders 已由 foldersRefreshTick useEffect 在首次挂载时触发
-    loadTemplates();
-    systemApi
-      .getSystemInfo()
-      .then((info) => setAppVersion(info.appVersion))
-      .catch(() => {});
-    // 读取启动设置：autostart 状态来自系统注册项，start_minimized 存在 app_config 表
-    autostartApi.isEnabled().then(setAutostartEnabled).catch(() => {});
-    configApi
-      .get("start_minimized")
-      .then((v) => setStartMinimized(v === "1"))
-      .catch(() => {});
-    configApi
-      .get("all_day_reminder_time")
-      .then((v) => {
-        if (v && /^\d{2}:\d{2}(:\d{2})?$/.test(v)) {
-          setAllDayReminderTime(v.slice(0, 5));
-        }
-      })
-      .catch(() => {});
+    // 把 6 个并发 invoke 推迟到 idle：从笔记页切过来时主线程要先吃掉一帧的
+    // 路由 commit + Tiptap destroy，立即并发 IPC 会让首屏明显卡顿。
+    // idle 后再跑，用户视觉上"先看到 UI、再陆续填充数据"。
+    const handle = scheduleIdle(() => {
+      loadModels();
+      // loadFolders 已由 foldersRefreshTick useEffect 在首次挂载时触发
+      loadTemplates();
+      systemApi
+        .getSystemInfo()
+        .then((info) => setAppVersion(info.appVersion))
+        .catch(() => {});
+      // 读取启动设置：autostart 状态来自系统注册项，start_minimized 存在 app_config 表
+      autostartApi.isEnabled().then(setAutostartEnabled).catch(() => {});
+      configApi
+        .get("start_minimized")
+        .then((v) => setStartMinimized(v === "1"))
+        .catch(() => {});
+      // 多开开关存在 framework_app_data_dir 下的 flag 文件，启动早期就要读得到
+      systemApi
+        .getMultiInstanceEnabled()
+        .then(setMultiInstanceEnabled)
+        .catch(() => {});
+      configApi
+        .get("window.close_action")
+        .then((v) => {
+          if (v === "minimize" || v === "exit" || v === "ask") {
+            setCloseAction(v);
+          }
+        })
+        .catch(() => {});
+      configApi
+        .get("all_day_reminder_time")
+        .then((v) => {
+          if (v && /^\d{2}:\d{2}(:\d{2})?$/.test(v)) {
+            setAllDayReminderTime(v.slice(0, 5));
+          }
+        })
+        .catch(() => {});
+    });
+    return () => cancelIdle(handle);
   }, []);
 
   async function handleAllDayReminderTimeChange(next: Dayjs | null) {
@@ -535,6 +594,32 @@ export default function SettingsPage() {
       message.error(`保存失败: ${e}`);
     } finally {
       setStartMinimizedLoading(false);
+    }
+  }
+
+  async function handleMultiInstanceToggle(next: boolean) {
+    setMultiInstanceLoading(true);
+    try {
+      await systemApi.setMultiInstanceEnabled(next);
+      setMultiInstanceEnabled(next);
+      message.info(
+        next
+          ? "已允许多开实例，下次启动生效"
+          : "已禁止多开，下次再启动会唤起当前窗口",
+      );
+    } catch (e) {
+      message.error(`设置失败: ${e}`);
+    } finally {
+      setMultiInstanceLoading(false);
+    }
+  }
+
+  async function handleCloseActionChange(next: "ask" | "minimize" | "exit") {
+    try {
+      await configApi.set("window.close_action", next);
+      setCloseAction(next);
+    } catch (e) {
+      message.error(`保存失败: ${e}`);
     }
   }
 
@@ -997,6 +1082,46 @@ export default function SettingsPage() {
             disabled={!autostartEnabled}
             onChange={handleStartMinimizedToggle}
           />
+        </div>
+        <div
+          className="flex items-center justify-between py-1 mt-2"
+          style={{ borderTop: "1px solid #f0f0f0", paddingTop: 12 }}
+        >
+          <div>
+            <div>允许多开实例</div>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              关闭时再次启动会唤起已有窗口（默认）；开启后每次启动都开新窗口，
+              注意多个实例同时写同一份数据库可能导致冲突。下次启动生效。
+            </Text>
+          </div>
+          <Switch
+            checked={multiInstanceEnabled}
+            loading={multiInstanceLoading}
+            onChange={handleMultiInstanceToggle}
+          />
+        </div>
+        <div
+          className="py-1 mt-2"
+          style={{ borderTop: "1px solid #f0f0f0", paddingTop: 12 }}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div style={{ flex: 1 }}>
+              <div>关闭窗口时</div>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                点击右上角关闭按钮的行为。选"每次询问"会弹出三选一对话框。
+              </Text>
+            </div>
+            <Radio.Group
+              value={closeAction}
+              onChange={(e) => handleCloseActionChange(e.target.value)}
+              optionType="button"
+              buttonStyle="solid"
+            >
+              <Radio.Button value="ask">每次询问</Radio.Button>
+              <Radio.Button value="minimize">最小化到托盘</Radio.Button>
+              <Radio.Button value="exit">直接退出</Radio.Button>
+            </Radio.Group>
+          </div>
         </div>
       </Card>
 
@@ -1576,6 +1701,30 @@ export default function SettingsPage() {
             size="small"
             icon={<ExternalLink size={14} />}
             onClick={() => openUrl(BILIBILI_URL)}
+          >
+            打开
+          </Button>
+        </div>
+        <div
+          className="flex items-center justify-between py-1 mt-2"
+          style={{ borderTop: "1px solid #f0f0f0", paddingTop: 12 }}
+        >
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div>
+              <Text strong style={{ fontSize: 13 }}>视频讲解</Text>
+            </div>
+            <Text
+              type="secondary"
+              style={{ fontSize: 12, wordBreak: "break-all" }}
+            >
+              B 站使用教程 / 功能演示
+            </Text>
+          </div>
+          <Button
+            type="link"
+            size="small"
+            icon={<ExternalLink size={14} />}
+            onClick={() => openUrl(BILIBILI_TUTORIAL_URL)}
           >
             打开
           </Button>

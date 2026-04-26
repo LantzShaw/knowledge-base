@@ -12,6 +12,7 @@ import { UpdateModal } from "@/components/ui/UpdateModal";
 
 const OFFICIAL_SITE = "https://kb.ruoyi.plus/";
 const BILIBILI_URL = "https://space.bilibili.com/520725002";
+const BILIBILI_TUTORIAL_URL = "https://www.bilibili.com/video/BV1xvosBREbr";
 const ZSXQ_NAME = "后端转AI实战派";
 const ZSXQ_ID = "91839984";
 
@@ -202,6 +203,19 @@ export default function AboutPage() {
               </Tooltip>
             </div>
           </Descriptions.Item>
+          <Descriptions.Item label="视频讲解">
+            <div className="flex items-center justify-between gap-2">
+              <Text style={{ fontSize: 13 }}>B 站使用教程 / 功能演示</Text>
+              <Tooltip title="在浏览器中打开">
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<ExternalLink size={14} />}
+                  onClick={() => openUrl(BILIBILI_TUTORIAL_URL)}
+                />
+              </Tooltip>
+            </div>
+          </Descriptions.Item>
           <Descriptions.Item label="知识星球">
             <div className="flex items-center gap-2 flex-wrap">
               <Text style={{ fontSize: 13 }}>{ZSXQ_NAME}</Text>
@@ -221,28 +235,68 @@ export default function AboutPage() {
           title="数据迁移说明"
           size="small"
         >
-          <Typography.Paragraph type="secondary" style={{ fontSize: 13, marginBottom: 8 }}>
-            数据按类型分散在应用数据目录下的多个文件/子目录中：
+          <Typography.Paragraph type="secondary" style={{ fontSize: 13, marginBottom: 10 }}>
+            按使用场景从简单到专业，推荐 4 种方式：
           </Typography.Paragraph>
-          <ul style={{ fontSize: 13, paddingLeft: 20, margin: "0 0 8px" }}>
-            <li style={{ marginBottom: 2 }}><code>app.db</code> — 笔记/文件夹/标签/链接/AI 对话等元数据（SQLite）</li>
-            <li style={{ marginBottom: 2 }}><code>kb_assets/</code> — 笔记中插入的图片</li>
+
+          <Typography.Title level={5} style={{ fontSize: 13, marginBottom: 4, marginTop: 0 }}>
+            ① 单台电脑换硬盘 / 搬到 D 盘
+          </Typography.Title>
+          <Typography.Paragraph style={{ fontSize: 13, marginBottom: 12 }}>
+            <Text strong>设置 → 数据目录</Text> 选新路径，勾选「
+            <Text type="success">自动迁移</Text>
+            」即可。应用会启动迁移引导窗口完成搬运，无需手工复制文件。
+          </Typography.Paragraph>
+
+          <Typography.Title level={5} style={{ fontSize: 13, marginBottom: 4, marginTop: 0 }}>
+            ② 一次性整包搬到另一台电脑（离线）
+          </Typography.Title>
+          <Typography.Paragraph style={{ fontSize: 13, marginBottom: 12 }}>
+            旧电脑：<Text strong>设置 → 同步 → 本地 ZIP → 导出</Text>{" "}
+            得到一个 .zip 快照（含全部数据库 + 图片 + PDF + 附件 + 源文件）。
+            新电脑安装应用后到同位置选择 <Text strong>导入 ZIP</Text>，自动解压覆盖。
+          </Typography.Paragraph>
+
+          <Typography.Title level={5} style={{ fontSize: 13, marginBottom: 4, marginTop: 0 }}>
+            ③ 多端实时双向同步（推荐长期用户）
+          </Typography.Title>
+          <Typography.Paragraph style={{ fontSize: 13, marginBottom: 12 }}>
+            <Text strong>设置 → 同步 → 多端同步（V1）</Text>{" "}
+            配置 WebDAV / 坚果云 / NAS 后端；多台电脑都登录同一个账号，应用会按文件级
+            manifest 增量推拉，自动消化双端冲突。也可以只用「
+            <Text>WebDAV 全量快照</Text>」做单向手动备份。
+          </Typography.Paragraph>
+
+          <Typography.Title level={5} style={{ fontSize: 13, marginBottom: 4, marginTop: 0 }}>
+            ④ 手动复制（兜底方案，应急用）
+          </Typography.Title>
+          <Typography.Paragraph
+            type="secondary"
+            style={{ fontSize: 12, marginBottom: 6 }}
+          >
+            数据目录下的核心文件 / 子目录：
+          </Typography.Paragraph>
+          <ul style={{ fontSize: 12, paddingLeft: 20, margin: "0 0 8px", color: token.colorTextSecondary }}>
+            <li style={{ marginBottom: 2 }}><code>app.db</code> — 笔记 / 文件夹 / 标签 / 链接 / AI 对话 / 待办 / 加密数据等全部元数据（SQLite）</li>
+            <li style={{ marginBottom: 2 }}><code>kb_assets/</code> — 笔记内嵌图片（含 <code>kb_assets/videos/</code> 子目录的视频）</li>
             <li style={{ marginBottom: 2 }}><code>pdfs/</code> — 导入的 PDF 原始文件</li>
-            <li style={{ marginBottom: 2 }}><code>sources/</code> — 导入的 Word (.docx/.doc) 原始文件</li>
-            <li><code>settings.json</code> — 应用偏好（主题、窗口状态等）</li>
+            <li style={{ marginBottom: 2 }}><code>sources/</code> — 导入的 Word（.docx/.doc）原始文件</li>
+            <li style={{ marginBottom: 2 }}><code>attachments/</code> — 笔记附件（zip / 音频等通用文件）</li>
+            <li><code>settings.json</code> — 应用偏好（主题、窗口状态、字体等）</li>
           </ul>
-          <Typography.Paragraph type="secondary" style={{ fontSize: 13, marginBottom: 8 }}>
-            迁移步骤：
+          <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 0 }}>
+            步骤：关闭应用 → 整目录复制到新电脑相同路径（点上方「打开数据目录」定位）→
+            启动即可。<Text strong>务必整目录一起搬</Text>，单独复制 <code>app.db</code>{" "}
+            会丢图片 / PDF / 附件。
           </Typography.Paragraph>
-          <ol style={{ fontSize: 13, paddingLeft: 20, margin: 0 }}>
-            <li style={{ marginBottom: 4 }}>关闭应用</li>
-            <li style={{ marginBottom: 4 }}>
-              把上述所有文件/目录整体复制到新电脑的相同路径（点击上方"打开数据目录"定位）
-            </li>
-            <li>启动应用即可</li>
-          </ol>
-          <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 8, marginBottom: 0 }}>
-            也可以使用 <Text strong style={{ fontSize: 12 }}>设置 → 导出 Markdown</Text> 将笔记导出为通用格式，便于导入其他工具。
+
+          <Typography.Paragraph
+            type="warning"
+            style={{ fontSize: 12, marginTop: 12, marginBottom: 0 }}
+          >
+            ⚠ 任何方式都要在迁移前关闭应用；新旧两端版本号差距不要超过一个小版本，避免
+            schema 不兼容。需要给其他工具用，可在
+            <Text strong> 设置 → 导出 Markdown</Text> 单独导出标准 .md 文件。
           </Typography.Paragraph>
         </Card>
       )}
