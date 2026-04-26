@@ -8,8 +8,8 @@ use crate::database::Database;
 use crate::error::AppError;
 use crate::models::{
     AiMessage, AiModel, DraftNoteRequest, DraftNoteResponse, Folder, MilestoneDraft,
-    PlanFromGoalRequest, PlanFromGoalResponse, PlanTodayRequest, PlanTodayResponse, SkillCall,
-    TaskQuery, TaskSuggestion,
+    PlanFromExcelRequest, PlanFromGoalRequest, PlanFromGoalResponse, PlanTodayRequest,
+    PlanTodayResponse, SkillCall, TaskQuery, TaskSuggestion,
 };
 use crate::services::skills;
 
