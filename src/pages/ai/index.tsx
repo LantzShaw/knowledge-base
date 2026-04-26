@@ -27,10 +27,14 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
+  Paperclip,
+  Save,
+  X,
 } from "lucide-react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { aiChatApi, aiModelApi } from "@/lib/api";
-import type { AiConversation, AiMessage, AiModel, SkillCall } from "@/types";
+import { useNavigate } from "react-router-dom";
+import { aiChatApi, aiModelApi, noteApi } from "@/lib/api";
+import type { AiConversation, AiMessage, AiModel, Note, SkillCall } from "@/types";
 import { relativeTime } from "@/lib/utils";
 
 const { TextArea } = Input;
@@ -68,6 +72,7 @@ function showAiError(err: unknown) {
 
 export default function AiChatPage() {
   const { token } = antdTheme.useToken();
+  const navigate = useNavigate();
 
   const [conversations, setConversations] = useState<AiConversation[]>([]);
   const [activeConvId, setActiveConvId] = useState<number | null>(null);
@@ -79,6 +84,13 @@ export default function AiChatPage() {
   const [useSkills, setUseSkills] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState("");
+  // 附加笔记（A 方向）：当前对话的 attached_note_ids 对应的完整笔记对象
+  const [attachedNotes, setAttachedNotes] = useState<Note[]>([]);
+  const [attachOpen, setAttachOpen] = useState(false);
+  // 归档（B 方向）：把对话存为笔记的 Modal
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiveTitle, setArchiveTitle] = useState("");
+  const [archiving, setArchiving] = useState(false);
   // 流式过程中 AI 调用的工具列表（带 running/ok/error 状态）；done 后并入 messages 清空
   const [streamingSkillCalls, setStreamingSkillCalls] = useState<SkillCall[]>([]);
 
@@ -102,6 +114,30 @@ export default function AiChatPage() {
       setMessages([]);
     }
   }, [activeConvId]);
+
+  // 切换对话时同步「附加笔记」chips：从对话的 attached_note_ids 拉对应笔记对象
+  // conversations 列表更新时也跟随（用户在 Modal 里改完会通过 loadConversations 触发重拉）
+  useEffect(() => {
+    const conv = conversations.find((c) => c.id === activeConvId);
+    const ids = conv?.attached_note_ids ?? [];
+    if (ids.length === 0) {
+      setAttachedNotes([]);
+      return;
+    }
+    let cancelled = false;
+    Promise.all(
+      ids.map((id) =>
+        noteApi.get(id).catch(() => null),
+      ),
+    ).then((arr) => {
+      if (cancelled) return;
+      // 过滤掉拉取失败的（笔记被删了）
+      setAttachedNotes(arr.filter((n): n is Note => n !== null));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeConvId, conversations]);
 
   // 自动滚动到底部
   useEffect(() => {
@@ -132,6 +168,55 @@ export default function AiChatPage() {
       setMessages(list);
     } catch (e) {
       message.error(`加载消息失败: ${e}`);
+    }
+  }
+
+  /** A 方向：移除单条挂载笔记（从 chip 区点 × 触发） */
+  async function handleRemoveAttached(noteId: number) {
+    if (!activeConvId) return;
+    const newIds = attachedNotes.filter((n) => n.id !== noteId).map((n) => n.id);
+    try {
+      await aiChatApi.setAttachedNotes(activeConvId, newIds);
+      // 重新拉对话列表让 useEffect 重计算 chips
+      await loadConversations();
+    } catch (e) {
+      message.error(`移除失败: ${e}`);
+    }
+  }
+
+  /** A 方向：Modal 里点确认提交新的挂载列表 */
+  async function handleAttachConfirm(ids: number[]) {
+    if (!activeConvId) return;
+    try {
+      await aiChatApi.setAttachedNotes(activeConvId, ids);
+      await loadConversations();
+      setAttachOpen(false);
+      message.success(
+        ids.length === 0 ? "已清空附加笔记" : `已附加 ${ids.length} 篇笔记`,
+      );
+    } catch (e) {
+      message.error(`保存失败: ${e}`);
+    }
+  }
+
+  /** B 方向：归档当前对话为一篇笔记 */
+  async function handleArchiveConfirm() {
+    if (!activeConvId) return;
+    setArchiving(true);
+    try {
+      const note = await aiChatApi.archiveToNote(
+        activeConvId,
+        archiveTitle.trim() || undefined,
+      );
+      message.success("已归档为笔记");
+      setArchiveOpen(false);
+      setArchiveTitle("");
+      // 顺手跳到新建的笔记编辑器，方便用户立刻整理
+      navigate(`/notes/${note.id}`);
+    } catch (e) {
+      message.error(`归档失败: ${e}`);
+    } finally {
+      setArchiving(false);
     }
   }
 
@@ -425,6 +510,23 @@ export default function AiChatPage() {
                     />
                   </div>
                 </Tooltip>
+                {/* B 方向：把整个对话归档成笔记 */}
+                <Tooltip title="把整个对话归档成一篇笔记">
+                  <Button
+                    size="small"
+                    type="text"
+                    icon={<Save size={14} />}
+                    disabled={messages.length === 0 || streaming}
+                    onClick={() => {
+                      // 默认标题用对话现有 title（首问截短）
+                      const conv = conversations.find((c) => c.id === activeConvId);
+                      setArchiveTitle(conv?.title ?? "");
+                      setArchiveOpen(true);
+                    }}
+                  >
+                    存为笔记
+                  </Button>
+                </Tooltip>
               </div>
             </div>
 
@@ -493,7 +595,7 @@ export default function AiChatPage() {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* 输入区域 */}
+            {/* 输入区域（上方为附加笔记 chip 区，强制塞进上下文） */}
             <div
               className="shrink-0 px-4 py-3"
               style={{
@@ -501,7 +603,49 @@ export default function AiChatPage() {
                 background: token.colorBgContainer,
               }}
             >
+              {/* 附加笔记 chip 区：仅在挂载了笔记时显示 */}
+              {attachedNotes.length > 0 && (
+                <div
+                  className="flex flex-wrap items-center gap-1.5 mb-2 pb-2"
+                  style={{
+                    borderBottom: `1px dashed ${token.colorBorderSecondary}`,
+                  }}
+                >
+                  <span
+                    className="text-xs shrink-0"
+                    style={{ color: token.colorTextSecondary }}
+                  >
+                    📎 已附加：
+                  </span>
+                  {attachedNotes.map((n) => (
+                    <span
+                      key={n.id}
+                      className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full"
+                      style={{
+                        background: token.colorPrimaryBg,
+                        color: token.colorPrimary,
+                        maxWidth: 180,
+                      }}
+                    >
+                      <span className="truncate">{n.title || "未命名"}</span>
+                      <X
+                        size={11}
+                        style={{ cursor: "pointer", flexShrink: 0 }}
+                        onClick={() => handleRemoveAttached(n.id)}
+                      />
+                    </span>
+                  ))}
+                </div>
+              )}
+
               <div className="flex gap-2 items-end">
+                <Tooltip title="附加笔记到本对话上下文（整对话共享）">
+                  <Button
+                    icon={<Paperclip size={16} />}
+                    onClick={() => setAttachOpen(true)}
+                    disabled={streaming}
+                  />
+                </Tooltip>
                 <TextArea
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
@@ -534,7 +678,108 @@ export default function AiChatPage() {
           </>
         )}
       </div>
+
+      {/* A 方向：附加笔记选择 Modal */}
+      <AttachNotesModal
+        open={attachOpen}
+        currentIds={attachedNotes.map((n) => n.id)}
+        onClose={() => setAttachOpen(false)}
+        onConfirm={handleAttachConfirm}
+      />
+
+      {/* B 方向：归档对话 Modal */}
+      <Modal
+        title="把对话归档为笔记"
+        open={archiveOpen}
+        onCancel={() => setArchiveOpen(false)}
+        onOk={handleArchiveConfirm}
+        confirmLoading={archiving}
+        okText="归档并打开"
+        cancelText="取消"
+        destroyOnHidden
+      >
+        <div className="flex flex-col gap-3">
+          <div className="text-sm" style={{ color: token.colorTextSecondary }}>
+            会把本对话所有消息按 Q/A 顺序拼成 markdown 存为一篇新笔记，并跳到编辑器。
+          </div>
+          <Input
+            value={archiveTitle}
+            onChange={(e) => setArchiveTitle(e.target.value)}
+            placeholder="笔记标题（留空则用对话标题）"
+            maxLength={120}
+          />
+        </div>
+      </Modal>
     </div>
+  );
+}
+
+/** A 方向：附加笔记多选 Modal — 复用 noteApi.list 拉全部，前端 Select multiple 多选搜索 */
+function AttachNotesModal({
+  open,
+  currentIds,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  currentIds: number[];
+  onClose: () => void;
+  onConfirm: (ids: number[]) => void;
+}) {
+  const [allNotes, setAllNotes] = useState<Note[]>([]);
+  const [selected, setSelected] = useState<number[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  // 打开时拉全部笔记 + 把当前已挂载的 ID 同步到选择器
+  useEffect(() => {
+    if (!open) return;
+    setSelected(currentIds);
+    setLoading(true);
+    noteApi
+      .list({ page: 1, page_size: 500 })
+      .then((res) => setAllNotes(res.items))
+      .catch((e) => message.error(`加载笔记失败: ${e}`))
+      .finally(() => setLoading(false));
+  }, [open, currentIds]);
+
+  return (
+    <Modal
+      title="附加笔记到对话上下文"
+      open={open}
+      onCancel={onClose}
+      onOk={() => onConfirm(selected)}
+      okText={`确认（已选 ${selected.length}）`}
+      cancelText="取消"
+      width={560}
+      destroyOnHidden
+    >
+      <div className="flex flex-col gap-2">
+        <div className="text-xs" style={{ color: "#888" }}>
+          被选中的笔记会作为本对话的强制上下文（整个对话共享）。
+          每篇按 60% 模型上下文的均分预算自动截断。
+        </div>
+        <Select
+          mode="multiple"
+          showSearch
+          value={selected}
+          onChange={setSelected}
+          loading={loading}
+          placeholder="搜索 / 选择笔记…"
+          style={{ width: "100%" }}
+          maxTagCount={5}
+          maxTagPlaceholder={(omitted) => `+${omitted.length}`}
+          filterOption={(input, option) =>
+            String(option?.label ?? "")
+              .toLowerCase()
+              .includes(input.toLowerCase())
+          }
+          options={allNotes.map((n) => ({
+            value: n.id,
+            label: n.title || `笔记 #${n.id}`,
+          }))}
+        />
+      </div>
+    </Modal>
   );
 }
 

@@ -676,6 +676,7 @@ export default function SettingsPage() {
       api_url: model.api_url,
       api_key: model.api_key,
       model_id: model.model_id,
+      max_context: model.max_context,
     });
     setModelModalOpen(true);
   }
@@ -683,11 +684,19 @@ export default function SettingsPage() {
   async function handleModelSave() {
     try {
       const values = await form.validateFields();
+      // Input type="number" 提交的是字符串，规范化为整数；缺省时给 32000 兜底
+      const max_context_num = values.max_context
+        ? parseInt(String(values.max_context), 10)
+        : 32000;
+      const payload = {
+        ...values,
+        max_context: Number.isFinite(max_context_num) ? max_context_num : 32000,
+      };
       if (editingModel) {
-        await aiModelApi.update(editingModel.id, values);
+        await aiModelApi.update(editingModel.id, payload);
         message.success("模型已更新");
       } else {
-        await aiModelApi.create(values);
+        await aiModelApi.create(payload);
         message.success("模型已添加");
       }
       setModelModalOpen(false);
@@ -1608,6 +1617,22 @@ export default function SettingsPage() {
                   .includes(input.toLowerCase())
               }
               allowClear
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="max_context"
+            label="最大上下文 token"
+            extra="不知道填多少？保留默认 32000；DeepSeek/GPT-4o/智谱填 128000；Claude 填 200000；GLM-Long/MiniMax-M1 填 1000000。AI 页挂载笔记时按这个值动态算每篇的截断阈值。"
+            initialValue={32000}
+          >
+            <Input
+              type="number"
+              min={1000}
+              max={2000000}
+              step={1000}
+              placeholder="32000"
+              addonAfter="tokens"
             />
           </Form.Item>
         </Form>

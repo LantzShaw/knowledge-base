@@ -729,6 +729,25 @@ impl Database {
         Ok(())
     }
 
+    /// 标记笔记的 AI 对话归档来源（B 方向：AI 对话 → 笔记）
+    ///
+    /// 给"从笔记跳回原 AI 对话"的反向追溯能力用。设为 None 解除关联。
+    pub fn set_note_from_ai_conversation(
+        &self,
+        note_id: i64,
+        conversation_id: Option<i64>,
+    ) -> Result<(), AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let affected = conn.execute(
+            "UPDATE notes SET from_ai_conversation_id = ?1 WHERE id = ?2",
+            params![conversation_id, note_id],
+        )?;
+        if affected == 0 {
+            return Err(AppError::NotFound(format!("笔记 {} 不存在", note_id)));
+        }
+        Ok(())
+    }
+
     /// 按 source_file_path 查找未被删除的笔记，返回 (id, content)
     ///
     /// 用于 .md 文件重复打开去重：若已有导入过的同路径笔记，直接跳过去而不是新建。

@@ -176,6 +176,8 @@ export interface AiModel {
   /** 模型标识 (如 gpt-4o-mini, claude-sonnet-4-20250514, llama3) */
   model_id: string;
   is_default: boolean;
+  /** 模型支持的最大上下文 token 数（默认 32000，AI 页拼附加笔记按这个算预算） */
+  max_context: number;
   created_at: string;
 }
 
@@ -186,6 +188,8 @@ export interface AiModelInput {
   api_url: string;
   api_key?: string | null;
   model_id: string;
+  /** 可选：缺省时后端按 32000 入库 */
+  max_context?: number;
 }
 
 /** AI 对话 */
@@ -193,6 +197,8 @@ export interface AiConversation {
   id: number;
   title: string;
   model_id: number;
+  /** 附加给本对话的笔记 ID 列表，整个对话共享 */
+  attached_note_ids: number[];
   created_at: string;
   updated_at: string;
 }

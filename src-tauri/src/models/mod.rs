@@ -193,6 +193,9 @@ pub struct AiModel {
     pub model_id: String,
     /// 是否为默认模型
     pub is_default: bool,
+    /// 模型支持的最大上下文 token 数（用户填，默认 32000）
+    /// 用于在 send_message 拼附加笔记时动态算每篇截断阈值
+    pub max_context: i64,
     pub created_at: String,
 }
 
@@ -204,6 +207,8 @@ pub struct AiModelInput {
     pub api_url: String,
     pub api_key: Option<String>,
     pub model_id: String,
+    /// 可选：缺省时按 32000 入库（覆盖大多数中端模型）
+    pub max_context: Option<i64>,
 }
 
 /// AI 对话
@@ -212,6 +217,9 @@ pub struct AiConversation {
     pub id: i64,
     pub title: String,
     pub model_id: i64,
+    /// 附加给本对话的笔记 ID 列表（JSON 数组反序列化后）
+    /// 整个对话共享，类比 ChatGPT 项目里的 attached files
+    pub attached_note_ids: Vec<i64>,
     pub created_at: String,
     pub updated_at: String,
 }

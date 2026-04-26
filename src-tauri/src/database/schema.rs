@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use crate::error::AppError;
 
 /// 当前 Schema 版本
-pub const SCHEMA_VERSION: i32 = 24;
+pub const SCHEMA_VERSION: i32 = 25;
 
 /// 获取数据库版本
 pub fn get_version(conn: &Connection) -> Result<i32, AppError> {
@@ -54,6 +54,7 @@ pub fn migrate(conn: &Connection) -> Result<(), AppError> {
             21 => migrate_v21_to_v22(conn)?,
             22 => migrate_v22_to_v23(conn)?,
             23 => migrate_v23_to_v24(conn)?,
+            24 => migrate_v24_to_v25(conn)?,
             _ => {
                 return Err(AppError::Custom(format!(
                     "未知的数据库版本: {}",
@@ -995,5 +996,35 @@ fn migrate_v23_to_v24(conn: &Connection) -> Result<(), AppError> {
     )?;
 
     set_version(conn, 24)?;
+    Ok(())
+}
+
+/// v24 -> v25: AI 双向打通笔记
+///   1. ai_models 加 max_context（用户可在设置页填模型上下文窗口大小，
+///      默认 32000，给前端动态计算附加笔记的截断阈值用）
+///   2. ai_conversations 加 attached_note_ids（JSON 数组字符串，挂在对话级，
+///      整个对话共享一组附加笔记，类比 ChatGPT 项目）
+///   3. notes 加 from_ai_conversation_id（归档来源追溯，给 B 方向"AI → 笔记"用）
+fn migrate_v24_to_v25(conn: &Connection) -> Result<(), AppError> {
+    log::info!("数据库迁移: v24 -> v25");
+
+    conn.execute_batch(
+        r#"
+        ALTER TABLE ai_models
+            ADD COLUMN max_context INTEGER NOT NULL DEFAULT 32000;
+
+        ALTER TABLE ai_conversations
+            ADD COLUMN attached_note_ids TEXT NOT NULL DEFAULT '[]';
+
+        ALTER TABLE notes
+            ADD COLUMN from_ai_conversation_id INTEGER REFERENCES ai_conversations(id) ON DELETE SET NULL;
+
+        CREATE INDEX IF NOT EXISTS idx_notes_from_ai_conv
+            ON notes(from_ai_conversation_id)
+            WHERE from_ai_conversation_id IS NOT NULL;
+        "#,
+    )?;
+
+    set_version(conn, 25)?;
     Ok(())
 }

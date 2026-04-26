@@ -3,6 +3,48 @@ use crate::models::{AiConversation, AiMessage, AiModel, AiModelInput};
 
 use super::Database;
 
+/// 把一行 ai_models 查询结果转成 AiModel
+///
+/// 列顺序约定（v25 起 9 列）：
+///   id, name, provider, api_url, api_key, model_id, is_default, max_context, created_at
+fn row_to_ai_model(row: &rusqlite::Row) -> rusqlite::Result<AiModel> {
+    Ok(AiModel {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        provider: row.get(2)?,
+        api_url: row.get(3)?,
+        api_key: row.get(4)?,
+        model_id: row.get(5)?,
+        is_default: row.get::<_, i32>(6)? != 0,
+        max_context: row.get(7)?,
+        created_at: row.get(8)?,
+    })
+}
+
+/// 标准 ai_models 查询列表达式（与 row_to_ai_model 对齐）
+const AI_MODEL_COLS: &str = "id, name, provider, api_url, api_key, model_id, is_default, max_context, created_at";
+
+/// 把一行 ai_conversations 查询结果转成 AiConversation
+///
+/// 列顺序约定（v25 起 6 列）：
+///   id, title, model_id, attached_note_ids, created_at, updated_at
+fn row_to_ai_conversation(row: &rusqlite::Row) -> rusqlite::Result<AiConversation> {
+    let attached_json: String = row.get(3)?;
+    // 反序列化失败回退空数组（防御性：旧数据 / 手动改坏的情况下不让查询炸）
+    let attached_note_ids: Vec<i64> =
+        serde_json::from_str(&attached_json).unwrap_or_default();
+    Ok(AiConversation {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        model_id: row.get(2)?,
+        attached_note_ids,
+        created_at: row.get(4)?,
+        updated_at: row.get(5)?,
+    })
+}
+
+const AI_CONV_COLS: &str = "id, title, model_id, attached_note_ids, created_at, updated_at";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,23 +148,13 @@ impl Database {
     /// 获取所有 AI 模型
     pub fn list_ai_models(&self) -> Result<Vec<AiModel>, AppError> {
         let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
-        let mut stmt = conn.prepare(
-            "SELECT id, name, provider, api_url, api_key, model_id, is_default, created_at
-             FROM ai_models ORDER BY is_default DESC, created_at",
-        )?;
+        let sql = format!(
+            "SELECT {} FROM ai_models ORDER BY is_default DESC, created_at",
+            AI_MODEL_COLS
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let models = stmt
-            .query_map([], |row| {
-                Ok(AiModel {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    provider: row.get(2)?,
-                    api_url: row.get(3)?,
-                    api_key: row.get(4)?,
-                    model_id: row.get(5)?,
-                    is_default: row.get::<_, i32>(6)? != 0,
-                    created_at: row.get(7)?,
-                })
-            })?
+            .query_map([], row_to_ai_model)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(models)
     }
@@ -130,23 +162,8 @@ impl Database {
     /// 获取单个 AI 模型
     pub fn get_ai_model(&self, id: i64) -> Result<AiModel, AppError> {
         let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
-        let model = conn.query_row(
-            "SELECT id, name, provider, api_url, api_key, model_id, is_default, created_at
-             FROM ai_models WHERE id = ?1",
-            [id],
-            |row| {
-                Ok(AiModel {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    provider: row.get(2)?,
-                    api_url: row.get(3)?,
-                    api_key: row.get(4)?,
-                    model_id: row.get(5)?,
-                    is_default: row.get::<_, i32>(6)? != 0,
-                    created_at: row.get(7)?,
-                })
-            },
-        )?;
+        let sql = format!("SELECT {} FROM ai_models WHERE id = ?1", AI_MODEL_COLS);
+        let model = conn.query_row(&sql, [id], row_to_ai_model)?;
         Ok(model)
     }
 
@@ -154,37 +171,23 @@ impl Database {
     pub fn get_default_ai_model(&self) -> Result<AiModel, AppError> {
         let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
         // 1) 优先查 is_default=1
-        let row_to_model = |row: &rusqlite::Row| {
-            Ok(AiModel {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                provider: row.get(2)?,
-                api_url: row.get(3)?,
-                api_key: row.get(4)?,
-                model_id: row.get(5)?,
-                is_default: row.get::<_, i32>(6)? != 0,
-                created_at: row.get(7)?,
-            })
-        };
-        let primary = conn.query_row(
-            "SELECT id, name, provider, api_url, api_key, model_id, is_default, created_at
-             FROM ai_models WHERE is_default = 1 LIMIT 1",
-            [],
-            row_to_model,
+        let sql_default = format!(
+            "SELECT {} FROM ai_models WHERE is_default = 1 LIMIT 1",
+            AI_MODEL_COLS
         );
+        let primary = conn.query_row(&sql_default, [], row_to_ai_model);
         if let Ok(m) = primary {
             return Ok(m);
         }
 
         // 2) T-B02 兜底：库里有模型但没有任何默认（历史脏数据 / 多端同步遗留），
         //    取最早一条做默认 + 顺手 promote 它，避免下次再走兜底
+        let sql_fallback = format!(
+            "SELECT {} FROM ai_models ORDER BY created_at ASC, id ASC LIMIT 1",
+            AI_MODEL_COLS
+        );
         let fallback: AiModel = conn
-            .query_row(
-                "SELECT id, name, provider, api_url, api_key, model_id, is_default, created_at
-                 FROM ai_models ORDER BY created_at ASC, id ASC LIMIT 1",
-                [],
-                row_to_model,
-            )
+            .query_row(&sql_fallback, [], row_to_ai_model)
             .map_err(|_| AppError::NotFound(
                 "尚未配置任何 AI 模型，请到设置页添加".into(),
             ))?;
@@ -202,15 +205,18 @@ impl Database {
     /// 创建 AI 模型
     pub fn create_ai_model(&self, input: &AiModelInput) -> Result<AiModel, AppError> {
         let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        // max_context 缺省时走表 DEFAULT 32000
+        let max_ctx = input.max_context.unwrap_or(32000).max(1000);
         conn.execute(
-            "INSERT INTO ai_models (name, provider, api_url, api_key, model_id)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO ai_models (name, provider, api_url, api_key, model_id, max_context)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             rusqlite::params![
                 input.name,
                 input.provider,
                 input.api_url,
                 input.api_key,
                 input.model_id,
+                max_ctx,
             ],
         )?;
         let id = conn.last_insert_rowid();
@@ -242,10 +248,16 @@ impl Database {
     /// 更新 AI 模型
     pub fn update_ai_model(&self, id: i64, input: &AiModelInput) -> Result<AiModel, AppError> {
         let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        // 用户没传 max_context 时保持原值，避免覆盖成默认 32000
+        let max_ctx = input.max_context.unwrap_or(32000).max(1000);
         conn.execute(
-            "UPDATE ai_models SET name = ?1, provider = ?2, api_url = ?3, api_key = ?4, model_id = ?5
-             WHERE id = ?6",
-            rusqlite::params![input.name, input.provider, input.api_url, input.api_key, input.model_id, id],
+            "UPDATE ai_models SET name = ?1, provider = ?2, api_url = ?3, api_key = ?4,
+                 model_id = ?5, max_context = ?6
+             WHERE id = ?7",
+            rusqlite::params![
+                input.name, input.provider, input.api_url, input.api_key,
+                input.model_id, max_ctx, id
+            ],
         )?;
         drop(conn);
         self.get_ai_model(id)
@@ -319,22 +331,26 @@ impl Database {
     /// 获取所有对话列表
     pub fn list_ai_conversations(&self) -> Result<Vec<AiConversation>, AppError> {
         let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
-        let mut stmt = conn.prepare(
-            "SELECT id, title, model_id, created_at, updated_at
-             FROM ai_conversations ORDER BY updated_at DESC",
-        )?;
+        let sql = format!(
+            "SELECT {} FROM ai_conversations ORDER BY updated_at DESC",
+            AI_CONV_COLS
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let convs = stmt
-            .query_map([], |row| {
-                Ok(AiConversation {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    model_id: row.get(2)?,
-                    created_at: row.get(3)?,
-                    updated_at: row.get(4)?,
-                })
-            })?
+            .query_map([], row_to_ai_conversation)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(convs)
+    }
+
+    /// 单条对话查询（给"挂载笔记"等需要读取附加列表的场景）
+    pub fn get_ai_conversation(&self, id: i64) -> Result<AiConversation, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let sql = format!(
+            "SELECT {} FROM ai_conversations WHERE id = ?1",
+            AI_CONV_COLS
+        );
+        let conv = conn.query_row(&sql, [id], row_to_ai_conversation)?;
+        Ok(conv)
     }
 
     /// 创建对话
@@ -345,20 +361,40 @@ impl Database {
             rusqlite::params![title, model_id],
         )?;
         let id = conn.last_insert_rowid();
-        let conv = conn.query_row(
-            "SELECT id, title, model_id, created_at, updated_at FROM ai_conversations WHERE id = ?1",
-            [id],
-            |row| {
-                Ok(AiConversation {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    model_id: row.get(2)?,
-                    created_at: row.get(3)?,
-                    updated_at: row.get(4)?,
-                })
-            },
-        )?;
+        let sql = format!(
+            "SELECT {} FROM ai_conversations WHERE id = ?1",
+            AI_CONV_COLS
+        );
+        let conv = conn.query_row(&sql, [id], row_to_ai_conversation)?;
         Ok(conv)
+    }
+
+    /// 更新对话的附加笔记列表（A 方向：笔记 → AI 上下文）
+    ///
+    /// note_ids 序列化成 JSON 字符串存 attached_note_ids 列；同时 touch updated_at
+    /// 让前端会话列表重排到顶部。
+    pub fn set_conversation_attached_notes(
+        &self,
+        conversation_id: i64,
+        note_ids: &[i64],
+    ) -> Result<(), AppError> {
+        let json = serde_json::to_string(note_ids)
+            .map_err(|e| AppError::Custom(format!("序列化 note_ids 失败: {}", e)))?;
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let affected = conn.execute(
+            "UPDATE ai_conversations
+                 SET attached_note_ids = ?1,
+                     updated_at = datetime('now', 'localtime')
+             WHERE id = ?2",
+            rusqlite::params![json, conversation_id],
+        )?;
+        if affected == 0 {
+            return Err(AppError::NotFound(format!(
+                "对话 {} 不存在",
+                conversation_id
+            )));
+        }
+        Ok(())
     }
 
     /// 删除对话

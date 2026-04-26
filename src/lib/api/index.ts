@@ -316,6 +316,29 @@ export const aiChatApi = {
     }),
   cancelGeneration: (conversationId: number) =>
     invoke<void>("cancel_ai_generation", { conversationId }),
+  /**
+   * 设置对话挂载的笔记列表（A 方向）。整对话共享，全量覆盖；
+   * 后续每次 sendMessage 时，后端按这个列表拉笔记拼成 system prompt 前缀。
+   */
+  setAttachedNotes: (conversationId: number, noteIds: number[]) =>
+    invoke<void>("set_ai_conversation_attached_notes", {
+      conversationId,
+      noteIds,
+    }),
+  /**
+   * B 方向：把整个对话归档成笔记。title 为空时取对话当前标题；
+   * folder_id 为空时落到根。返回新建的 Note。
+   */
+  archiveToNote: (
+    conversationId: number,
+    title?: string,
+    folderId?: number,
+  ) =>
+    invoke<Note>("archive_ai_conversation_to_note", {
+      conversationId,
+      title,
+      folderId,
+    }),
 };
 
 /** 导入 API */

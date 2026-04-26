@@ -3,7 +3,7 @@ use tokio::sync::watch;
 
 use crate::models::{
     AiConversation, AiMessage, AiModel, AiModelInput, DraftNoteRequest, DraftNoteResponse,
-    PlanTodayRequest, PlanTodayResponse,
+    Note, NoteInput, PlanTodayRequest, PlanTodayResponse,
 };
 use crate::services::ai::AiService;
 use crate::state::AppState;
@@ -123,6 +123,22 @@ pub fn update_ai_conversation_model(
     state
         .db
         .update_ai_conversation_model(id, model_id)
+        .map_err(|e| e.to_string())
+}
+
+/// 设置对话挂载的笔记列表（A 方向：选 N 篇笔记 → 强制塞进对话上下文）
+///
+/// 注意：每次调用都是**全量覆盖**，前端需要把"完整的最新选中列表"传过来；
+/// 撤销某篇只挂载就是重新发一次去掉它的列表。
+#[tauri::command]
+pub fn set_ai_conversation_attached_notes(
+    state: State<'_, AppState>,
+    conversation_id: i64,
+    note_ids: Vec<i64>,
+) -> Result<(), String> {
+    state
+        .db
+        .set_conversation_attached_notes(conversation_id, &note_ids)
         .map_err(|e| e.to_string())
 }
 
@@ -290,4 +306,74 @@ pub async fn ai_draft_note(
     AiService::draft_note(db, request)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// B 方向：把整个 AI 对话归档为一篇笔记
+///
+/// 对话内所有消息按用户/AI 顺序拼成 markdown，落库到 `notes` 表，
+/// `from_ai_conversation_id` 字段记下来源以便日后双向追溯。
+/// 标题：用户传 None 时取对话当前 title（"新对话"或自动总结的首问标题）。
+#[tauri::command]
+pub fn archive_ai_conversation_to_note(
+    state: State<'_, AppState>,
+    conversation_id: i64,
+    title: Option<String>,
+    folder_id: Option<i64>,
+) -> Result<Note, String> {
+    let db = &state.db;
+    let conv = db
+        .get_ai_conversation(conversation_id)
+        .map_err(|e| e.to_string())?;
+    let messages = db
+        .list_ai_messages(conversation_id)
+        .map_err(|e| e.to_string())?;
+
+    if messages.is_empty() {
+        return Err("对话还没有任何消息，无法归档".to_string());
+    }
+
+    // 拼 markdown：> 元信息行 + 每轮 Q/A 块
+    let mut md = String::new();
+    md.push_str(&format!(
+        "> 由 AI 对话归档于 {}\n\n",
+        chrono::Local::now().format("%Y-%m-%d %H:%M")
+    ));
+    for msg in &messages {
+        let label = match msg.role.as_str() {
+            "user" => "## 我",
+            "assistant" => "## AI",
+            other => {
+                // system / tool 消息归档成普通 markdown 引用块（很少见但兼容）
+                md.push_str(&format!("> [{}]\n{}\n\n", other, msg.content));
+                continue;
+            }
+        };
+        md.push_str(label);
+        md.push_str("\n\n");
+        md.push_str(&msg.content);
+        md.push_str("\n\n");
+    }
+
+    let final_title = title
+        .map(|t| t.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(conv.title);
+
+    // markdown 包成 <p>…</p> 简单 HTML 让 Tiptap 显示出来；编辑器开 Markdown 解析后会自动渲染
+    let html = format!("<p>{}</p>", md.replace('\n', "<br/>"));
+
+    let note = db
+        .create_note(&NoteInput {
+            title: final_title,
+            content: html,
+            folder_id,
+        })
+        .map_err(|e| e.to_string())?;
+    db.set_note_from_ai_conversation(note.id, Some(conversation_id))
+        .map_err(|e| e.to_string())?;
+
+    // 重新拉一次拿带 from_ai_conversation_id 的完整 Note
+    db.get_note(note.id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "归档后查询笔记失败".to_string())
 }

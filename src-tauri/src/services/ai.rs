@@ -182,6 +182,64 @@ fn derive_conversation_title(user_message: &str) -> String {
 /// 改为：复用 `Database::extract_keywords` 得到和检索一致的关键词集合，取**最早命中位置**
 /// 居中的 `window` 字符窗口；未命中则降级为从头取 `window` 字符；首尾被裁剪用 `…` 标记，
 /// 提示 AI 这是片段而非整篇。
+/// 把对话挂载的 N 篇笔记拼成 system prompt 前缀字符串。
+///
+/// **预算计算**：模型 max_context 的 60% 留给附加笔记（剩 ~40% 给历史消息+输出+其它 system）。
+/// 每篇平均分配；标题不截断，正文按 `(预算 / 笔记数 / 1.5)` 截断（中文 1.5 字符≈1 token）。
+///
+/// **失败容忍**：单篇笔记 `get_note` 失败时跳过该篇，不让单条坏数据搞挂整个对话。
+/// 笔记列表为空时返回空串，调用方按需跳过。
+fn build_attached_notes_context(
+    db: &Database,
+    note_ids: &[i64],
+    model: &AiModel,
+) -> String {
+    if note_ids.is_empty() {
+        return String::new();
+    }
+    // 拉笔记（失败的跳过；空数组直接返回空串）
+    let notes: Vec<(String, String)> = note_ids
+        .iter()
+        .filter_map(|id| {
+            db.get_note(*id)
+                .ok()
+                .flatten()
+                .map(|n| (n.title, strip_html(&n.content)))
+        })
+        .collect();
+    if notes.is_empty() {
+        return String::new();
+    }
+
+    // 60% max_context 字符预算（粗略：1 token ≈ 1.5 字符 for CJK）
+    let total_budget_chars = ((model.max_context as f64) * 0.6) as usize;
+    let per_note_chars = (total_budget_chars / notes.len()).max(500);
+
+    let mut out = String::with_capacity(total_budget_chars);
+    out.push_str(&format!(
+        "用户为本次对话主动挂载了以下 {} 篇笔记作为强制上下文，请优先基于这些笔记内容回答；\
+         如果用户问题与挂载笔记完全无关，再考虑用一般知识回答。\n\n",
+        notes.len()
+    ));
+    for (i, (title, plain)) in notes.iter().enumerate() {
+        let truncated: String = plain.chars().take(per_note_chars).collect();
+        let suffix = if plain.chars().count() > per_note_chars {
+            "\n…（已截断）"
+        } else {
+            ""
+        };
+        out.push_str(&format!(
+            "── 挂载笔记 {} / {} ──\n标题: {}\n内容:\n{}{}\n\n",
+            i + 1,
+            notes.len(),
+            title,
+            truncated,
+            suffix
+        ));
+    }
+    out
+}
+
 fn extract_window_for_rag(content: &str, query: &str, window: usize) -> String {
     let chars: Vec<char> = content.chars().collect();
     if chars.len() <= window {
@@ -480,19 +538,19 @@ impl AiService {
         use_rag: bool,
         cancel_rx: watch::Receiver<bool>,
     ) -> Result<(), AppError> {
-        // 1. 获取对话使用的模型
-        let conv_model_id = {
-            let conn_guard = db.conn_lock()?;
-            let model_id: i64 = conn_guard.query_row(
-                "SELECT model_id FROM ai_conversations WHERE id = ?1",
-                [conversation_id],
-                |row| row.get(0),
-            )?;
-            model_id
-        };
-        let model = db.get_ai_model(conv_model_id)?;
+        // 1. 获取对话（含附加笔记 IDs）和使用的模型
+        let conv = db.get_ai_conversation(conversation_id)?;
+        let model = db.get_ai_model(conv.model_id)?;
 
-        // 2. RAG: 检索相关笔记
+        // 2. 附加笔记上下文（A 方向：用户在 AI 页用 chip 选了 N 篇笔记作为强制上下文）
+        //    跟 RAG 独立：附加 = 必含；RAG = 智能补全；可叠加
+        let attached_context = build_attached_notes_context(
+            db,
+            &conv.attached_note_ids,
+            &model,
+        );
+
+        // 3. RAG: 检索相关笔记
         let mut rag_context = String::new();
         let mut ref_ids: Vec<i64> = Vec::new();
         if use_rag {
@@ -532,7 +590,13 @@ impl AiService {
         let mut last_error = None;
 
         for &max_hist in &max_history_attempts {
-            let messages = Self::build_messages(&model, &history, &rag_context, max_hist);
+            let messages = Self::build_messages(
+                &model,
+                &history,
+                &rag_context,
+                &attached_context,
+                max_hist,
+            );
 
             log::info!("AI Request: model={}, messages={}, max_history={}",
                 model.model_id, messages.len(), max_hist);
@@ -597,6 +661,7 @@ impl AiService {
         model: &AiModel,
         history: &[AiMessage],
         rag_context: &str,
+        attached_context: &str,
         max_history: usize,
     ) -> Vec<Value> {
         let mut messages = Vec::new();
@@ -608,6 +673,11 @@ impl AiService {
              1. 只根据已知信息作答，不要编造事实。\n\
              2. 不确定或信息不足时，请明确说明，不要强行给出结论。",
         );
+        // 附加笔记（用户主动挂载的强制上下文）放在最前面，权重最高
+        if !attached_context.is_empty() {
+            system_prompt.push_str("\n\n");
+            system_prompt.push_str(attached_context);
+        }
         if !rag_context.is_empty() {
             system_prompt.push_str(
                 "\n\n接下来会提供检索到的笔记片段。请先判断这些笔记是否真的与用户问题相关：\n\
