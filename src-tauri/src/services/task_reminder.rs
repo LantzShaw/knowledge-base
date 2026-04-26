@@ -91,10 +91,40 @@ fn tick_once(app: &AppHandle) -> Result<(), AppError> {
             log::warn!("[reminder] 系统通知发送失败: {}", e);
         }
 
-        // 推事件给前端。前端若窗口可见则弹应用内 Modal，否则仅托盘角标
-        if let Err(e) = app.emit("task:reminder", &task) {
-            log::warn!("[reminder] emit 事件失败: {}", e);
+        // 分级派发：
+        // - priority == 0 紧急：开全屏接管窗口（前端自带循环铃声 + 抢焦点），
+        //   主窗 Modal 不再弹同一条，避免双重打扰；窗口创建失败自动 fallback
+        //   到主窗 Modal 流程，保证用户不会漏提醒
+        // - 其它优先级：闪烁主窗任务栏 + 主窗内 Modal（前端自带短促一声"叮"）
+        if task.priority == 0 {
+            match crate::services::emergency_window::open_for_task(app, task.id) {
+                Ok(_) => {
+                    log::info!("[reminder] 紧急任务 {} 已打开全屏窗口", task.id);
+                }
+                Err(e) => {
+                    log::warn!(
+                        "[reminder] 紧急窗口创建失败，回退主窗 Modal: {}",
+                        e
+                    );
+                    flash_main_taskbar(app);
+                    if let Err(e) = app.emit("task:reminder", &task) {
+                        log::warn!("[reminder] emit 事件失败: {}", e);
+                    }
+                }
+            }
+        } else {
+            flash_main_taskbar(app);
+            if let Err(e) = app.emit("task:reminder", &task) {
+                log::warn!("[reminder] emit 事件失败: {}", e);
+            }
         }
     }
     Ok(())
+}
+
+/// 闪烁主窗口任务栏抢用户注意（强烈级）
+fn flash_main_taskbar(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.request_user_attention(Some(tauri::UserAttentionType::Critical));
+    }
 }

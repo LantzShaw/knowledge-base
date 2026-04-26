@@ -15,10 +15,13 @@ import TasksPage from "@/pages/tasks";
 import PromptsPage from "@/pages/prompts";
 import HiddenPage from "@/pages/hidden";
 import MigrationSplash from "@/pages/migration-splash";
+import EmergencyReminderPage from "@/pages/emergency-reminder";
 
 const router = createHashRouter([
   // T-013 完整版：迁移 splash 独立 URL，不走 AppLayout（启动期 db 还没初始化）
   { path: "/migration-splash", element: <MigrationSplash /> },
+  // 紧急待办接管窗口：独立 URL，不挂 AppLayout，避免 Sider/Header 跑出来
+  { path: "/emergency-reminder/:id", element: <EmergencyReminderPage /> },
   {
     path: "/",
     element: <AppLayout />,

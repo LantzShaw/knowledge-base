@@ -3,6 +3,7 @@ import { App as AntdApp, Button, Modal, Space, Tag, Typography } from "antd";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { taskApi } from "@/lib/api";
 import type { Task } from "@/types";
+import { beepOnce } from "@/lib/audio/beep";
 
 const { Text, Paragraph } = Typography;
 
@@ -20,11 +21,17 @@ export function TaskReminderListener() {
     let unlisten: UnlistenFn | null = null;
     // 后端 reminded_at 已保证不会重复 emit 同一个提醒周期，前端直接入队即可。
     // snooze 会把 reminded_at 清空，下一轮到点仍会重新入队弹窗。
+    //
+    // 注意：priority==0 的紧急任务由后端直接打开「全屏接管窗口」处理，不会再
+    // emit task:reminder 给主窗（避免双重打扰）；这里收到的都是强烈/普通级。
     listen<Task>("task:reminder", (e) => {
-      setQueue((prev) =>
+      setQueue((prev) => {
         // 防御性兜底：若当前队列里已排着同一 id，就不重复塞
-        prev.some((t) => t.id === e.payload.id) ? prev : [...prev, e.payload],
-      );
+        if (prev.some((t) => t.id === e.payload.id)) return prev;
+        // 强烈级提示：弹 Modal 时叮一声（任务栏闪烁已由后端 request_user_attention 触发）
+        beepOnce();
+        return [...prev, e.payload];
+      });
     }).then((fn) => {
       unlisten = fn;
     });

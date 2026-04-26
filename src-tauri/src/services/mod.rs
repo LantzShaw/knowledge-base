@@ -4,6 +4,7 @@ pub mod config;
 pub mod crypto;
 pub mod data_dir;
 pub mod daily;
+pub mod emergency_window;
 pub mod folder;
 pub mod hash;
 pub mod hidden_pin;

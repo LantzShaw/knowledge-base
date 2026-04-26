@@ -2,11 +2,23 @@ import { useEffect } from "react";
 import { ConfigProvider, theme, App as AntdApp, message } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { useAppStore } from "@/store";
 import { AppRouter } from "@/Router";
 import { getAntdTokens } from "@/theme/tokens";
 import { TaskReminderListener } from "@/components/tasks/TaskReminderListener";
+
+// 紧急提醒窗口 / 迁移 splash 等子窗口共用同一个 React bundle，
+// 但只有 main 窗口才需要挂全局提醒监听器，否则子窗口也会响应 task:reminder
+// 重复弹 Modal，且子窗口没有 antd App context 会异常
+const IS_MAIN_WINDOW = (() => {
+  try {
+    return getCurrentWindow().label === "main";
+  } catch {
+    return true;
+  }
+})();
 
 function App() {
   const themeCategory = useAppStore((s) => s.themeCategory);
@@ -25,6 +37,7 @@ function App() {
   // 前端收到后批量 bump 各 refresh tick，让所有视图（笔记列表 / 文件夹 / 标签 / 任务）
   // 自动重拉数据。无需重启应用。
   useEffect(() => {
+    if (!IS_MAIN_WINDOW) return;
     let unlisten: (() => void) | undefined;
     listen("db:reloaded", () => {
       const s = useAppStore.getState();
@@ -53,7 +66,7 @@ function App() {
       <AntdApp style={{ height: "100%" }}>
         <ErrorBoundary>
           <AppRouter />
-          <TaskReminderListener />
+          {IS_MAIN_WINDOW && <TaskReminderListener />}
         </ErrorBoundary>
       </AntdApp>
     </ConfigProvider>
