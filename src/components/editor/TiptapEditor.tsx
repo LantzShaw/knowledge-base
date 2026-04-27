@@ -16,7 +16,11 @@ import { TableHeader } from "@tiptap/extension-table-header";
 import { Fragment } from "@tiptap/pm/model";
 import { getHTMLFromFragment, mergeAttributes } from "@tiptap/core";
 import { TextAlign } from "@tiptap/extension-text-align";
+import { Color } from "@tiptap/extension-color";
+import Superscript from "@tiptap/extension-superscript";
+import Subscript from "@tiptap/extension-subscript";
 import ImageResize from "tiptap-extension-resize-image";
+import { FontSize, LineHeight, Indent } from "./TextStyleExtras";
 // tiptap-markdown 未提供 TS 声明，用 import 后以 any 访问
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 import { Markdown } from "tiptap-markdown";
@@ -495,6 +499,36 @@ function fileUrlToPath(url: string): string {
 }
 
 /** 将 File 对象转为 base64（不含 data URL 前缀） */
+/**
+ * 判断 HTML 是否只是包裹图片（浏览器复制图片场景）。
+ *
+ * 浏览器复制图片时 HTML 通常长这样：`<meta charset='utf-8'><img src='https://...'>`，
+ * 所有可见内容只是 img；而 Excel/Word 复制表格 HTML 含 <table>/文本/样式。
+ *
+ * 启发式：strip 掉所有 <img> 后看 body 是否还有实质内容（非空白文本 / 表格 / 列表等）。
+ * 任何 strip 后仍有 textContent 或 <table>/<ul>/<ol>/<pre> 节点 → 视为富文本。
+ */
+function isImageOnlyHtml(html: string): boolean {
+  if (!html.trim()) return false;
+  try {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const body = doc.body;
+    if (!body) return false;
+    const imgs = body.querySelectorAll("img");
+    if (imgs.length === 0) return false;
+    imgs.forEach((img) => img.remove());
+    // 富文本结构标签存在 → 不是纯图片粘贴
+    if (body.querySelector("table, ul, ol, pre, blockquote, h1, h2, h3, h4, h5, h6")) {
+      return false;
+    }
+    // 剩余可见文本去空白后非空 → 富文本
+    const text = (body.textContent ?? "").replace(/\s+/g, "");
+    return text.length === 0;
+  } catch {
+    return false;
+  }
+}
+
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -871,6 +905,13 @@ export function TiptapEditor({
         HTMLAttributes: { class: "tiptap-link" },
       }),
       Underline,
+      Superscript,
+      Subscript,
+      // FontSize 已基于 TextStyle 扩展，无需再单独引入 TextStyle
+      FontSize,
+      Color.configure({ types: ["textStyle", "textStyleFontSize"] }),
+      LineHeight,
+      Indent,
       CodeBlockEnhanced.configure({ lowlight }),
       // T-011: LaTeX 公式渲染（行内 $...$、块级 $$...$$，KaTeX 后端）
       Mathematics,
@@ -945,25 +986,40 @@ export function TiptapEditor({
     },
     editorProps: {
       handlePaste: (_view, event) => {
-        // Excel / Word / WPS 复制时剪贴板会同时包含 text/html、text/plain 和 image/png
-        // （Excel 自动生成的表格位图截图）。若无条件走图片分支，表格会变成一张图。
-        // 所以只在「剪贴板里没有任何文本/HTML，纯图片」时才当作图片处理；
-        // 有文本/HTML 时返回 false 让 ProseMirror 走默认 HTML/纯文本解析（表格可被 Tiptap Table 扩展接住）。
+        // 三种主要场景：
+        //   A. 浏览器复制图片：剪贴板同时有 text/html (<meta><img src=https://...>)
+        //      和 image/png bytes。直接走默认 HTML 路径会渲染远程 src（Tauri WebView
+        //      加载失败 → 破图）；要优先保存 bytes 到本地。
+        //   B. Excel/Word/WPS 复制单元格：剪贴板同时有 HTML（<table>...）和 image/png
+        //      （表格位图截图）。要保留 HTML 让 Tiptap Table 接住，不能走图片分支。
+        //   C. 系统截图工具（如 Snipaste）：纯 image/png 无文本。直接图片分支。
+        //
+        // 区分 A vs B 的启发式：HTML strip 掉所有 <img> 后剩余文本/标签是否仍有"实质"内容
         const dt = event.clipboardData;
         const types = Array.from(dt?.types ?? []);
         const hasText = types.includes("text/html") || types.includes("text/plain");
-        if (!hasText) {
-          // 视频优先于图片：避免 video 文件被某些系统误标为 image MIME
-          const videos = collectVideoFiles(dt);
-          if (videos.length > 0) {
-            handleVideoFiles(videos, editor, VIDEO_MAX_PASTE_BYTES);
-            return true;
-          }
-          const images = collectImageFiles(dt);
-          if (images.length > 0) {
+        const html = dt?.getData("text/html") ?? "";
+
+        // 视频永远优先（视频文件不会和富文本混合）
+        const videos = collectVideoFiles(dt);
+        if (videos.length > 0) {
+          handleVideoFiles(videos, editor, VIDEO_MAX_PASTE_BYTES);
+          return true;
+        }
+
+        const images = collectImageFiles(dt);
+        if (images.length > 0) {
+          // 场景 C：纯图片
+          if (!hasText) {
             handleImageFiles(images, editor);
             return true;
           }
+          // 场景 A：HTML 实际只是包裹一个/多个 img（浏览器复制图片）
+          if (isImageOnlyHtml(html)) {
+            handleImageFiles(images, editor);
+            return true;
+          }
+          // 场景 B：富文本 + 图片（Excel 表格等）→ 让 ProseMirror 走 HTML 路径
         }
         return false;
       },

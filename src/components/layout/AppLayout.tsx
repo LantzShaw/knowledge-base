@@ -440,7 +440,10 @@ export function AppLayout() {
           // 主区让出 SidePanel 的宽度，避免被浮层遮挡。
           // 浮层只做出现/消失的动画，主区用 transition 平滑过渡 margin，
           // 二者解耦：sider 宽度永远不变（无 reflow 卡顿），只有这个 margin 在变化。
-          marginLeft: panelShown ? sidePanelWidth : 0,
+          //
+          // 专注模式下 SidePanel 浮层本身被隐藏，但若仍套用旧 margin 会在主区
+          // 左侧留出 ~280px 空白，所以这里用 focusMode 一并清掉
+          marginLeft: !focusMode && panelShown ? sidePanelWidth : 0,
           transition: "margin-left 180ms cubic-bezier(0.2, 0.8, 0.2, 1)",
         }}
       >
