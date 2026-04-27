@@ -119,6 +119,8 @@ interface AppStore {
   editorFontSize: number;
   /** 编辑器行距倍数（持久化） */
   editorLineHeight: number;
+  /** 笔记编辑页：右侧大纲面板是否显示（持久化）。标题数 < 2 时由组件自动隐藏，与此独立 */
+  outlineVisible: boolean;
   /**
    * 当前进程的系统信息（含多开实例编号 + 数据目录）。
    * null = 启动时还没拉到；UI 据此渲染实例徽章
@@ -182,6 +184,10 @@ interface AppStore {
   setEditorLineHeight: (lineHeight: number) => void;
   /** 重置编辑器字体到默认值 */
   resetEditorTypography: () => void;
+  /** 切换大纲面板可见性（persist） */
+  toggleOutline: () => void;
+  /** 设置大纲面板可见性（persist） */
+  setOutlineVisible: (visible: boolean) => void;
   /**
    * 启动时预取的文件夹树缓存。
    * 让 NotesPanel 第一次 mount 时立即拿到种子数据，避免"点笔记 → 等 invoke"的空白闪烁。
@@ -223,6 +229,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   editorFontFamily: EDITOR_FONT_DEFAULTS.family,
   editorFontSize: EDITOR_FONT_DEFAULTS.size,
   editorLineHeight: EDITOR_FONT_DEFAULTS.lineHeight,
+  outlineVisible: true,
   instanceInfo: null,
   loadInstanceInfo: async () => {
     try {
@@ -314,6 +321,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
       editorFontSize: EDITOR_FONT_DEFAULTS.size,
       editorLineHeight: EDITOR_FONT_DEFAULTS.lineHeight,
     }),
+  toggleOutline: () => set((s) => ({ outlineVisible: !s.outlineVisible })),
+  setOutlineVisible: (visible) => set({ outlineVisible: visible }),
   prefetchedFolders: null,
   prefetchFolders: async () => {
     try {
@@ -422,6 +431,10 @@ export async function loadThemeFromStore() {
     if (typeof lh === "number" && Number.isFinite(lh)) {
       useAppStore.getState().setEditorLineHeight(lh);
     }
+    const ov = await store.get<boolean>("outlineVisible");
+    if (typeof ov === "boolean") {
+      useAppStore.getState().setOutlineVisible(ov);
+    }
   } catch {
     // 首次启动时 store 可能不存在
   } finally {
@@ -445,6 +458,7 @@ export async function saveThemeToStore() {
       editorFontFamily,
       editorFontSize,
       editorLineHeight,
+      outlineVisible,
     } = useAppStore.getState();
     const store = await Store.load(STORE_FILE);
     await store.set("lightTheme", lightTheme);
@@ -457,6 +471,7 @@ export async function saveThemeToStore() {
     await store.set("editorFontFamily", editorFontFamily);
     await store.set("editorFontSize", editorFontSize);
     await store.set("editorLineHeight", editorLineHeight);
+    await store.set("outlineVisible", outlineVisible);
     await store.save();
   } catch {
     // 静默失败
@@ -466,7 +481,7 @@ export async function saveThemeToStore() {
 // 监听主题 + 置顶 + SidePanel + 编辑器字体偏好变化自动保存
 let _prevPersistKey = "";
 useAppStore.subscribe((state) => {
-  const key = `${state.lightTheme}|${state.darkTheme}|${state.themeCategory}|${state.alwaysOnTop}|${state.sidePanelWidth}|${state.sidePanelVisible}|${state.recentSearches.join(",")}|${state.editorFontFamily}|${state.editorFontSize}|${state.editorLineHeight}`;
+  const key = `${state.lightTheme}|${state.darkTheme}|${state.themeCategory}|${state.alwaysOnTop}|${state.sidePanelWidth}|${state.sidePanelVisible}|${state.recentSearches.join(",")}|${state.editorFontFamily}|${state.editorFontSize}|${state.editorLineHeight}|${state.outlineVisible}`;
   if (key !== _prevPersistKey) {
     _prevPersistKey = key;
     saveThemeToStore();

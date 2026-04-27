@@ -4,8 +4,8 @@
     "windows": [
       {
         "title": "知识库",
-        "width": 1200,
-        "height": 800,
+        "width": 1230,
+        "height": 830,
         "minWidth": 900,
         "minHeight": 600,
         "center": true,

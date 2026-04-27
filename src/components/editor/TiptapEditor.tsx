@@ -14,7 +14,7 @@ import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { Fragment } from "@tiptap/pm/model";
-import { getHTMLFromFragment } from "@tiptap/core";
+import { getHTMLFromFragment, mergeAttributes } from "@tiptap/core";
 import { TextAlign } from "@tiptap/extension-text-align";
 import ImageResize from "tiptap-extension-resize-image";
 // tiptap-markdown 未提供 TS 声明，用 import 后以 any 访问
@@ -165,7 +165,7 @@ const TableWithMarkdown = Table.extend({
 });
 import { common, createLowlight } from "lowlight";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { openPath } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useRef, useCallback, useState } from "react";
 import { message } from "antd";
 import { theme as antdTheme } from "antd";
@@ -175,6 +175,8 @@ import { AiWriteMenu } from "./AiWriteMenu";
 import { WikiLinkDecoration } from "./WikiLinkDecoration";
 import { WikiLinkSuggestion } from "./WikiLinkSuggestion";
 import { Video as VideoNode } from "./VideoNode";
+import { VideoTimestamp } from "./VideoTimestamp";
+import { AllowFileLink } from "./AllowFileLink";
 import "tippy.js/dist/tippy.css";
 
 const lowlight = createLowlight(common);
@@ -324,6 +326,38 @@ function migrateOpenMathStrings(editor: import("@tiptap/react").Editor): void {
   }
 
   if (tr.docChanged) {
+    tr.setMeta("addToHistory", false);
+    editor.view.dispatch(tr);
+  }
+}
+
+/**
+ * 给老文档里没有 id 的 video 节点 backfill 一个稳定 ID。
+ *
+ * Why: VideoTimestamp 节点通过 [data-video-id="<id>"] 选择器定位视频跳转。
+ *      之前插入的 video 节点没有 id attr，老笔记打开后无法做时间戳关联。
+ *      此处遍历 doc，对所有 video.attrs.id == null 的节点 setNodeAttribute 补齐。
+ *
+ * 不写入 history（迁移不应被撤销到原始状态）。
+ */
+function backfillVideoIds(editor: import("@tiptap/react").Editor): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const schema: any = editor.schema;
+  const videoType = schema.nodes.video;
+  if (!videoType) return;
+
+  const tr = editor.state.tr;
+  let changed = false;
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type !== videoType) return true;
+    if (node.attrs.id) return true;
+    const newId = Math.random().toString(36).slice(2, 10);
+    tr.setNodeAttribute(pos, "id", newId);
+    changed = true;
+    return true;
+  });
+
+  if (changed) {
     tr.setMeta("addToHistory", false);
     editor.view.dispatch(tr);
   }
@@ -497,6 +531,12 @@ interface TiptapEditorProps {
    * 不传则不显示该按钮。
    */
   onAskAi?: (selectedText: string) => void;
+  /**
+   * 编辑器实例就绪时回调（含 destroy 时传 null）。
+   * 用于父组件订阅 doc 变化，例如外挂大纲面板根据 heading 节点渲染。
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onEditorReady?: (editor: any | null) => void;
 }
 
 export function TiptapEditor({
@@ -507,6 +547,7 @@ export function TiptapEditor({
   ensureNoteId,
   onWikiLinkClick,
   onAskAi,
+  onEditorReady,
 }: TiptapEditorProps) {
   const isExternalUpdate = useRef(false);
 
@@ -663,12 +704,13 @@ export function TiptapEditor({
         }),
       );
 
-      const nodes: { type: string; attrs: { src: string } }[] = [];
+      const nodes: { type: string; attrs: { src: string; id: string } }[] = [];
       for (const r of results) {
         if (r.ok) {
           nodes.push({
             type: "video",
-            attrs: { src: convertFileSrc(r.filePath) },
+            // 给每个视频生成稳定 id，VideoTimestamp 通过此 id 锚定跳转
+            attrs: { src: convertFileSrc(r.filePath), id: Math.random().toString(36).slice(2, 10) },
           });
         } else {
           message.error(`视频插入失败(${r.name}): ${r.err}`);
@@ -787,7 +829,44 @@ export function TiptapEditor({
       Highlight.configure({ multicolor: true }),
       TaskList,
       TaskItem.configure({ nested: true }),
-      Link.configure({
+      // SafeLink：渲染成 <span data-href="..." role="link"> 而非 <a href>，
+      // 彻底避开 Tauri WebView 对 anchor 的 navigation 旁路（preventDefault 拦不住）。
+      // markdown 序列化由 prosemirror-markdown 直接读 mark.attrs.href，不读 DOM，
+      // 所以输出仍是 [label](url) 标准 markdown link，往返不丢失。
+      //
+      // ⚠ 必须同时改 parseHTML：从 DOM 反向解析时（复制粘贴/HMR 重挂载等路径）
+      //   要识别 span[data-href]，否则 label 会被当纯文本入 doc，下次保存就会
+      //   出现 "label[label](url)" 的双重 bug（已踩过坑）。
+      Link.extend({
+        parseHTML() {
+          return [
+            // 兼容外部 markdown 导入的标准 anchor
+            { tag: "a[href]:not([href *= 'javascript:' i])" },
+            // SafeLink 自己渲染的 span
+            {
+              tag: "span[data-href]",
+              getAttrs: (el) => ({
+                href: (el as HTMLElement).getAttribute("data-href"),
+              }),
+            },
+          ];
+        },
+        renderHTML({ HTMLAttributes }) {
+          const realHref = (HTMLAttributes as { href?: string }).href ?? "";
+          const { href: _ignored, target: _t, rel: _r, ...rest } =
+            HTMLAttributes as Record<string, unknown>;
+          void _ignored; void _t; void _r;
+          return [
+            "span",
+            mergeAttributes(this.options.HTMLAttributes, rest, {
+              "data-href": realHref,
+              role: "link",
+              tabindex: "0",
+            }),
+            0,
+          ];
+        },
+      }).configure({
         openOnClick: false,
         HTMLAttributes: { class: "tiptap-link" },
       }),
@@ -812,6 +891,7 @@ export function TiptapEditor({
         maxWidth: 1200,
       }),
       VideoNode,
+      VideoTimestamp,
       WikiLinkDecoration.configure({
         onClick: (title: string) => wikiClickRef.current?.(title),
       }),
@@ -826,6 +906,8 @@ export function TiptapEditor({
         transformPastedText: true,
         transformCopiedText: false,
       }),
+      // 必须放在 Markdown 之后：onBeforeCreate 时依赖 markdown.parser 已初始化
+      AllowFileLink,
     ],
     content,
     onCreate: ({ editor }) => {
@@ -836,6 +918,12 @@ export function TiptapEditor({
         migrateOpenMathStrings(editor);
       } catch (e) {
         console.warn("[math] initial migrate failed:", e);
+      }
+      // 给老的没有 id 的 video 节点补 ID（时间戳跳转依赖此 ID 定位视频）
+      try {
+        backfillVideoIds(editor);
+      } catch (e) {
+        console.warn("[video] backfill ids failed:", e);
       }
     },
     onUpdate: ({ editor }) => {
@@ -1011,27 +1099,50 @@ export function TiptapEditor({
     };
   }, [editor]);
 
-  // 拦截编辑器内 file:// 链接的点击，交给 opener 用系统默认程序打开。
-  // Why: Link 扩展配置 openOnClick=false，默认点击无效；附件链接靠 DOM 事件代理开。
-  //      普通 http(s) 链接此处不介入，由外层页面其他逻辑处理。
+  // 拦截编辑器内链接点击 → 分发给系统对应程序：
+  //   file:// / 本地绝对路径 → openPath（系统默认程序打开 PDF/DOC/视频等）
+  //   http(s) / mailto      → openUrl（系统默认浏览器/邮箱）
+  //
+  // SafeLink 把 link mark 渲染成 <span data-href="..." role="link"> 而非 <a>，
+  // 完全避开 Tauri WebView 对 anchor 的 navigation 旁路（tauri-apps/tauri#2791）。
+  // 这里通过 [data-href] 选择器拿到真实 URL 再分发。
   useEffect(() => {
     if (!editor) return;
     const dom = editor.view.dom as HTMLElement;
     const handler = (ev: MouseEvent) => {
+      if (ev.type === "auxclick" && ev.button !== 1) return;
       const target = ev.target as HTMLElement | null;
-      const anchor = target?.closest("a") as HTMLAnchorElement | null;
-      if (!anchor) return;
-      const href = anchor.getAttribute("href") ?? "";
-      if (!href.startsWith("file://")) return;
+      // 优先 SafeLink 渲染的 [data-href]；兜底 anchor[href]（兼容旧节点 / wikilink）
+      const linkEl = target?.closest("[data-href], a[href]") as HTMLElement | null;
+      if (!linkEl) return;
+      const href =
+        linkEl.getAttribute("data-href") || linkEl.getAttribute("href") || "";
+      if (!href || href.startsWith("#") || href === "javascript:void(0)") return;
+
       ev.preventDefault();
       ev.stopPropagation();
-      const path = fileUrlToPath(href);
-      void openPath(path).catch((e) => {
-        message.error(`打开附件失败: ${e}`);
-      });
+
+      if (href.startsWith("file://")) {
+        const path = fileUrlToPath(href);
+        void openPath(path).catch((e) => {
+          message.error(`打开附件失败: ${e}`);
+        });
+      } else if (/^https?:\/\//i.test(href) || href.startsWith("mailto:") || href.startsWith("tel:")) {
+        void openUrl(href).catch((e) => {
+          message.error(`打开链接失败: ${e}`);
+        });
+      } else {
+        void openPath(href).catch((e) => {
+          message.error(`打开失败: ${e}`);
+        });
+      }
     };
-    dom.addEventListener("click", handler);
-    return () => dom.removeEventListener("click", handler);
+    dom.addEventListener("click", handler, true);
+    dom.addEventListener("auxclick", handler, true);
+    return () => {
+      dom.removeEventListener("click", handler, true);
+      dom.removeEventListener("auxclick", handler, true);
+    };
   }, [editor]);
 
   // 外部 content 变化时同步（如初次加载）
@@ -1090,6 +1201,13 @@ export function TiptapEditor({
     // 依赖 content prop：父组件在 onChange 后会更新 content，
     // 这反过来表示编辑器内容刚刚变过，此时触发一次 debounced 重算即可。
   }, [editor, content]);
+
+  // 上抛 editor 实例给父组件（外挂大纲面板、调试用），unmount 时传 null 让父侧能解绑
+  useEffect(() => {
+    if (!onEditorReady) return;
+    onEditorReady(editor);
+    return () => onEditorReady(null);
+  }, [editor, onEditorReady]);
 
   if (!editor) return null;
 

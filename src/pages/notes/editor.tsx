@@ -20,7 +20,7 @@ import {
   App as AntdApp,
   theme as antdTheme,
 } from "antd";
-import { ArrowLeft, Save, Trash2, Pin, FolderOpen, Tags, Link2, Share, Maximize2, Minimize2, FileText as FileTextIcon, ChevronRight, ChevronDown, CornerUpLeft, Folder as FolderIcon, Eye, EyeOff, Lock, Unlock, MessageSquare } from "lucide-react";
+import { ArrowLeft, Save, Trash2, Pin, FolderOpen, Tags, Link2, Share, Maximize2, Minimize2, FileText as FileTextIcon, ChevronRight, ChevronDown, CornerUpLeft, Folder as FolderIcon, Eye, EyeOff, Lock, Unlock, MessageSquare, ListTree } from "lucide-react";
 import { useAppStore } from "@/store";
 import { useTabsStore } from "@/store/tabs";
 import { noteApi, tagApi, folderApi, linkApi, exportApi, sourceFileApi, vaultApi, sourceWritebackApi } from "@/lib/api";
@@ -30,6 +30,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { relativeTime, stripHtml } from "@/lib/utils";
 import { TiptapEditor } from "@/components/editor";
+import { EditorOutline } from "@/components/editor/EditorOutline";
 import { TagColorPicker } from "@/components/TagColorPicker";
 import { NoteAiDrawer } from "@/components/ai/NoteAiDrawer";
 import type { Note, Tag, Folder, NoteLink } from "@/types";
@@ -467,6 +468,13 @@ export default function NoteEditorPage() {
 
   // 反向链接状态
   const [backlinks, setBacklinks] = useState<NoteLink[]>([]);
+
+  // 大纲：editor 实例（来自 TiptapEditor 的 onEditorReady 回调）+ 滚动容器 ref
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [editorInstance, setEditorInstance] = useState<any | null>(null);
+  const editorBodyRef = useRef<HTMLDivElement | null>(null);
+  const outlineVisible = useAppStore((s) => s.outlineVisible);
+  const toggleOutline = useAppStore((s) => s.toggleOutline);
 
   // 同名消歧 Modal 状态
   const [disambigOpen, setDisambigOpen] = useState(false);
@@ -1201,6 +1209,13 @@ export default function NoteEditorPage() {
               onClick={handleToggleEncrypt}
             />
           </Tooltip>
+          <Tooltip title={outlineVisible ? "隐藏大纲" : "显示大纲"}>
+            <Button
+              type={outlineVisible ? "primary" : "default"}
+              icon={<ListTree size={16} />}
+              onClick={toggleOutline}
+            />
+          </Tooltip>
           <Tooltip
             title={
               backlinks.length > 0
@@ -1304,7 +1319,11 @@ export default function NoteEditorPage() {
       </div>
 
       {/* 可滚动的编辑主体 */}
-      <div className="editor-body">
+      <div
+        className="editor-body"
+        ref={editorBodyRef}
+        data-outline={outlineVisible ? "on" : undefined}
+      >
         <div className="editor-content-area">
           {/* 标题 */}
           <Input
@@ -1341,6 +1360,7 @@ export default function NoteEditorPage() {
               setAiSelection(selected);
               setAiDrawerOpen(true);
             }}
+            onEditorReady={setEditorInstance}
           />
 
           {/* 反向链接 */}
@@ -1352,6 +1372,13 @@ export default function NoteEditorPage() {
             }}
           />
         </div>
+
+        {/* 右侧大纲面板：sticky 跟随滚动；用户偏好关闭 / heading < 2 时自隐 */}
+        {outlineVisible && (
+          <aside className="editor-outline-aside">
+            <EditorOutline editor={editorInstance} scrollRoot={editorBodyRef.current} />
+          </aside>
+        )}
       </div>
 
       {/* PDF 原文件预览 */}
