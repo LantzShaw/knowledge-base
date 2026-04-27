@@ -122,13 +122,18 @@ export default function AiChatPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const unlistenRefs = useRef<UnlistenFn[]>([]);
+  // 跟踪组件挂载状态：handleSend 内每个 await listen 之后检查，
+  // 若 unmounted 则立即 unlisten 避免泄漏 + 后续 setState 报警告
+  const mountedRef = useRef(true);
 
   // 初始化
   useEffect(() => {
     loadConversations();
     loadModels();
     return () => {
+      mountedRef.current = false;
       unlistenRefs.current.forEach((fn) => fn());
+      unlistenRefs.current = [];
     };
   }, []);
 
@@ -372,10 +377,25 @@ export default function AiChatPage() {
     };
     await cleanup();
 
-    const tokenUnlisten = await listen<string>("ai:token", (event) => {
+    // 每个 listen 注册后立即 push 到 unlistenRefs，避免一次性赋值时
+    // 中间 await 期间 unmount 导致前面 listener 泄漏。
+    // 同时检查 mountedRef，unmounted 后立即 unlisten 不再 push。
+    const safeRegister = async <T,>(
+      event: string,
+      handler: (e: { payload: T }) => void,
+    ) => {
+      const fn = await listen<T>(event, handler);
+      if (mountedRef.current) {
+        unlistenRefs.current.push(fn);
+      } else {
+        fn(); // 已 unmount → 立即解绑
+      }
+    };
+
+    await safeRegister<string>("ai:token", (event) => {
       setStreamingText((prev) => prev + event.payload);
     });
-    const doneUnlisten = await listen("ai:done", async () => {
+    await safeRegister<unknown>("ai:done", async () => {
       setStreaming(false);
       await cleanup();
       // 重新加载消息获取完整数据
@@ -386,7 +406,7 @@ export default function AiChatPage() {
       setStreamingText("");
       setStreamingSkillCalls([]);
     });
-    const errorUnlisten = await listen<string>("ai:error", async (event) => {
+    await safeRegister<string>("ai:error", async (event) => {
       setStreaming(false);
       await cleanup();
       setStreamingText("");
@@ -394,7 +414,7 @@ export default function AiChatPage() {
       message.error(`AI 错误: ${event.payload}`);
     });
     // T-004: tool_call 事件可能多次触发（running → ok/error）
-    const toolCallUnlisten = await listen<SkillCall>("ai:tool_call", (event) => {
+    await safeRegister<SkillCall>("ai:tool_call", (event) => {
       const incoming = event.payload;
       setStreamingSkillCalls((prev) => {
         const idx = prev.findIndex((c) => c.id === incoming.id);
@@ -406,13 +426,6 @@ export default function AiChatPage() {
         return [...prev, incoming];
       });
     });
-
-    unlistenRefs.current = [
-      tokenUnlisten,
-      doneUnlisten,
-      errorUnlisten,
-      toolCallUnlisten,
-    ];
 
     try {
       await aiChatApi.sendMessage(activeConvId, text, useRag, useSkills);

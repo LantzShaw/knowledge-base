@@ -74,10 +74,16 @@ pub fn setup_tray(
 
     // 监听前端发来的置顶状态变化，同步 CheckMenuItem 勾选
     // （右上角按钮点击 → Zustand → emit 此事件）
+    // ⚠️ macOS：NSStatusItem 的写操作必须在 main thread；listen 回调跑在 IPC worker
+    // 线程，直接调 set_checked 在 mac 上有崩溃风险。用 run_on_main_thread 投递到主线程。
     let always_on_top_for_sync = always_on_top.clone();
+    let app_for_sync = app.handle().clone();
     app.listen("ui:always-on-top-changed", move |event| {
         if let Ok(enabled) = serde_json::from_str::<bool>(event.payload()) {
-            let _ = always_on_top_for_sync.set_checked(enabled);
+            let item = always_on_top_for_sync.clone();
+            let _ = app_for_sync.run_on_main_thread(move || {
+                let _ = item.set_checked(enabled);
+            });
         }
     });
 

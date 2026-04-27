@@ -378,6 +378,16 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         // ─── 应用初始化 ─────────────────────────────
         .setup(move |app| {
+            // ⚠️ 第一步：立即显示主窗口，不依赖任何后续初始化成败。
+            // 历史教训：tauri.conf.json 的 visible:false 启动隐藏窗口，靠 setup 末尾的
+            // window.show() 显示。但 setup 闭包前面有 ~10 个 ? 错误传播点（fs/db/tray/...），
+            // 任意一个失败都会让 setup 提前 Err return，window.show() 永远不调 → mac 白屏。
+            // 改为 setup 第一行就 show，setup 中段失败也只是功能退化，不会黑屏。
+            // 唯一例外：autostart --start-minimized 模式下面会重新 hide。
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+            }
+
             // framework 默认 app_data_dir：单实例锁 + 指针文件 + 迁移 marker 永远在这里
             let framework_app_data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&framework_app_data_dir)?;
@@ -448,15 +458,22 @@ pub fn run() {
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
             log::info!("PDF 存储目录: {}", pdfs_dir.display());
 
-            // 绑定 PDFium 动态库（资源目录与实例无关）
-            match app.path().resolve(
-                "resources/pdfium/pdfium.dll",
-                tauri::path::BaseDirectory::Resource,
-            ) {
-                Ok(dll_path) => match services::pdf::init_pdfium(&dll_path) {
-                    Ok(()) => log::info!("PDFium 绑定成功: {}", dll_path.display()),
+            // 绑定 PDFium 动态库（资源目录与实例无关）。各平台用各自的动态库格式：
+            //   Windows: pdfium.dll  / macOS: libpdfium.dylib  / Linux: libpdfium.so
+            // 如果 resources/pdfium/ 下缺对应平台的库文件，仅 log warn —— pdf-extract
+            // 主路径仍可工作，只是失去 PDFium fallback 这条防扫描件兜底。
+            #[cfg(target_os = "windows")]
+            const PDFIUM_LIB: &str = "resources/pdfium/pdfium.dll";
+            #[cfg(target_os = "macos")]
+            const PDFIUM_LIB: &str = "resources/pdfium/libpdfium.dylib";
+            #[cfg(target_os = "linux")]
+            const PDFIUM_LIB: &str = "resources/pdfium/libpdfium.so";
+
+            match app.path().resolve(PDFIUM_LIB, tauri::path::BaseDirectory::Resource) {
+                Ok(lib_path) => match services::pdf::init_pdfium(&lib_path) {
+                    Ok(()) => log::info!("PDFium 绑定成功: {}", lib_path.display()),
                     Err(e) => log::warn!(
-                        "PDFium 绑定失败（fallback 不可用，将只能走 pdf-extract）: {}",
+                        "PDFium 绑定失败（fallback 不可用，仅 pdf-extract 路径可用）: {}",
                         e
                     ),
                 },
@@ -508,8 +525,14 @@ pub fn run() {
             }
 
             // 系统托盘（携带实例号供 tooltip 区分）
-            tray::setup_tray(app, instance_id)?;
-            log::info!("系统托盘初始化完成");
+            // 用 if let Err 兜底而非 ?：tray 是辅助功能，失败不该让整个应用启动崩。
+            // 历史教训：tray::setup_tray 在 mac 上失败（如 default_window_icon 返回 None）
+            // 会让 setup 闭包提前 Err return，主窗永远 visible:false 导致白屏。
+            if let Err(e) = tray::setup_tray(app, instance_id) {
+                log::error!("[tray] 初始化失败（不影响主窗运行）: {}", e);
+            } else {
+                log::info!("系统托盘初始化完成");
+            }
 
             // 开机启动时若带 --start-minimized 参数 且 用户在设置里开启了"启动最小化到托盘"，
             // 则隐藏主窗口到托盘
@@ -549,8 +572,10 @@ pub fn run() {
                 services::task_reminder::run_reminder_loop(app_handle_reminder).await;
             });
 
-            // 主窗口 visible:false 默认，setup 完成后显示（迁移期间会被 splash 顶住）
-            // 注意：autostart 的 --start-minimized 处理已经按需 hide 了；这里只 show 一次
+            // setup 末尾再 show + set_focus 抢焦点：
+            // - 主窗已在 setup 第一步 show 过，这里 show 是幂等的
+            // - 真正作用是 set_focus：迁移 splash 关闭后 / 多窗口创建后把焦点拉回主窗
+            // - autostart --start-minimized 模式下用户已选择隐藏到托盘，跳过此步
             let did_start_minimized = std::env::args().any(|a| a == "--start-minimized")
                 && app
                     .state::<AppState>()
