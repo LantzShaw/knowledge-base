@@ -8,7 +8,10 @@
  * - securityLevel: "strict" 阻断标签里的 <script>，符合 Tauri WebView 安全模式
  */
 import { useEffect, useState } from "react";
+import { Tooltip } from "antd";
+import { Maximize2 } from "lucide-react";
 import { useAppStore } from "@/store";
+import { MermaidFullscreenModal } from "./MermaidFullscreenModal";
 
 type MermaidApi = {
   initialize: (config: Record<string, unknown>) => void;
@@ -35,6 +38,7 @@ export function MermaidPreview({
 }) {
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [fullscreenOpen, setFullscreenOpen] = useState(false);
   const themeCategory = useAppStore((s) => s.themeCategory);
 
   useEffect(() => {
@@ -125,16 +129,45 @@ export function MermaidPreview({
   return (
     <div
       className="mermaid-preview"
-      onClick={onClick}
-      // 渲染产物来自 mermaid 库（securityLevel: strict 已过滤 <script>），
-      // 这里直接吐 SVG；mermaid 内部用了 dompurify
-      dangerouslySetInnerHTML={{ __html: svg }}
       style={{
+        position: "relative",
         padding: "12px 16px",
         textAlign: "center",
-        cursor: onClick ? "pointer" : "default",
         overflow: "auto",
       }}
-    />
+    >
+      {/* 渲染产物来自 mermaid 库（securityLevel: strict 已过滤 <script>），
+          这里直接吐 SVG；mermaid 内部用了 dompurify */}
+      <div
+        onClick={onClick}
+        dangerouslySetInnerHTML={{ __html: svg }}
+        style={{ cursor: onClick ? "pointer" : "default" }}
+      />
+      {/* 右上角"全屏"按钮：hover 显形，点开 panzoom Modal 看复杂图。
+          关键：必须 stopPropagation onMouseDown —— ProseMirror 用 mousedown
+          移光标到代码块内部，会把 cursorInBlock=true，把整个预览（含 Modal）卸载，
+          看起来"点全屏 = 进编辑"。click 也阻塞做双保险，且 contenteditable=false
+          告诉 PM 这是非编辑区。 */}
+      <Tooltip title="全屏查看（滚轮缩放 / 拖拽平移）">
+        <button
+          type="button"
+          aria-label="全屏查看"
+          className="mermaid-preview__fullscreen-btn"
+          contentEditable={false}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            setFullscreenOpen(true);
+          }}
+        >
+          <Maximize2 size={14} />
+        </button>
+      </Tooltip>
+      <MermaidFullscreenModal
+        open={fullscreenOpen}
+        onClose={() => setFullscreenOpen(false)}
+        svgHtml={svg}
+      />
+    </div>
   );
 }

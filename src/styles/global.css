@@ -201,6 +201,35 @@ body,
   min-height: 100%;
 }
 
+/* Mermaid 预览块：右上角"全屏"按钮，hover preview 时显形 */
+.mermaid-preview .mermaid-preview__fullscreen-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--ant-color-text, #000) 10%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ant-color-bg-container, #fff) 92%, transparent);
+  color: var(--ant-color-text-secondary, #666);
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.18s, transform 0.18s, background 0.12s;
+  z-index: 2;
+}
+.mermaid-preview:hover .mermaid-preview__fullscreen-btn {
+  opacity: 1;
+  transform: translateY(0);
+}
+.mermaid-preview__fullscreen-btn:hover {
+  background: color-mix(in srgb, var(--ant-color-text, #000) 5%, var(--ant-color-bg-container, #fff));
+  color: var(--ant-color-text);
+}
+
 /* 图片 + 图注（FigureExtension 渲染的 <figure> 块） */
 .tiptap-figure {
   margin: 12px 0;
