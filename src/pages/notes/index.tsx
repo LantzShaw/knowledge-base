@@ -1064,7 +1064,7 @@ export default function NoteListPage() {
           }}
         >
           <span style={{ fontSize: 13 }}>已选 {selectedIds.length} 条</span>
-          <Divider type="vertical" />
+          <Divider orientation="vertical" />
           <BatchMoveButton
             folders={folders}
             open={batchMoveOpen}

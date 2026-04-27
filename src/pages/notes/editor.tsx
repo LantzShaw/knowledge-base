@@ -330,7 +330,7 @@ function MetaBar({
         onChange={onFolderChange}
       />
 
-      <Divider type="vertical" style={{ height: 20 }} />
+      <Divider orientation="vertical" style={{ height: 20 }} />
 
       {/* 标签管理 */}
       <div className="flex items-center gap-1 flex-1 min-w-0">
@@ -404,7 +404,7 @@ function MetaBar({
                 setTagSearch("");
               }
             }}
-            dropdownRender={(menu) => (
+            popupRender={(menu) => (
               <>
                 {menu}
                 {showCreate && (
@@ -548,8 +548,10 @@ export default function NoteEditorPage() {
   // 无需关闭重开 tab。用 ref 跳过首次渲染，避免与 loadData 重复请求。
   const foldersTick = useAppStore((s) => s.foldersRefreshTick);
   const tagsTick = useAppStore((s) => s.tagsRefreshTick);
+  const notesTick = useAppStore((s) => s.notesRefreshTick);
   const skipFoldersInit = useRef(true);
   const skipTagsInit = useRef(true);
+  const skipNotesInit = useRef(true);
   useEffect(() => {
     if (skipFoldersInit.current) {
       skipFoldersInit.current = false;
@@ -569,6 +571,35 @@ export default function NoteEditorPage() {
     }
     tagApi.list().then(setAllTags).catch(() => {});
   }, [tagsTick]);
+
+  // 笔记自身 tick：侧边栏改名 / 外部更新时同步 title 输入框 + meta，
+  // 但用户在编辑（dirty）时不动 title 字段，避免冲掉未保存的修改。
+  // 用 ref 跳首次（与 loadData 重复）+ ref 读 dirty/title 避免循环依赖。
+  const dirtyRef = useRef(dirty);
+  useEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
+  useEffect(() => {
+    if (skipNotesInit.current) {
+      skipNotesInit.current = false;
+      return;
+    }
+    if (!noteId) return;
+    let cancelled = false;
+    noteApi
+      .get(noteId)
+      .then((fresh) => {
+        if (cancelled) return;
+        setNote(fresh);
+        if (!dirtyRef.current) {
+          setTitle(fresh.title);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [notesTick, noteId]);
 
   /**
    * 保存当前笔记。

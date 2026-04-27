@@ -29,6 +29,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { FolderFilled } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
 import { useAppStore } from "@/store";
+import { useTabsStore } from "@/store/tabs";
 import { folderApi, importApi, noteApi } from "@/lib/api";
 import type { Folder, Note, ScannedFile } from "@/types";
 import { parseEmojiPrefix } from "@/lib/treeIcons";
@@ -489,6 +490,9 @@ export function NotesPanel() {
         setEditingKey(null);
         setEditingName("");
         useAppStore.getState().bumpNotesRefresh();
+        // 同步 TabBar：编辑器只在自己改 title 时调 updateTabTitle，从这里
+        // 改名要主动通知 tabs store，否则顶部标签栏还在显示旧标题
+        useTabsStore.getState().updateTabTitle(id, name);
       } catch (e) {
         message.error(String(e));
       }
@@ -961,8 +965,11 @@ export function NotesPanel() {
           }}
           onBlur={submitCreateChild}
           autoFocus
-          style={{ width: 160 }}
+          style={{ width: "100%", minWidth: 0 }}
           onClick={(e) => e.stopPropagation()}
+          // 阻止 mousedown 冒泡到 Tree node：在输入框拖选文本时不让 HTML5 drag 启动
+          onMouseDown={(e) => e.stopPropagation()}
+          draggable={false}
         />
       );
     }
@@ -984,8 +991,10 @@ export function NotesPanel() {
           onBlur={submitRename}
           autoFocus
           onFocus={(e) => e.target.select()}
-          style={{ width: 160 }}
+          style={{ width: "100%", minWidth: 0 }}
           onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          draggable={false}
         />
       );
     }
@@ -1210,7 +1219,17 @@ export function NotesPanel() {
                 className="sidebar-folder-tree"
                 treeData={treeData}
                 blockNode
-                draggable={{ icon: false }}
+                draggable={{
+                  icon: false,
+                  // 编辑态（重命名/新建子文件夹）的节点禁拖：在 input 里拖选文本
+                  // 时不应触发 antd Tree 的 HTML5 drag，否则光标改不动反而把节点拖走
+                  nodeDraggable: (node) => {
+                    const k = String(node.key);
+                    if (editingKey === k) return false;
+                    if (creatingUnderKey && k.startsWith(NEW_NODE_PREFIX)) return false;
+                    return true;
+                  },
+                }}
                 onDrop={handleDrop}
                 selectedKeys={selectedKey ? [selectedKey] : []}
                 expandedKeys={expandedKeys}
