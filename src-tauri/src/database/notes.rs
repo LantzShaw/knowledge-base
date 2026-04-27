@@ -642,13 +642,35 @@ impl Database {
         Ok(fid.flatten())
     }
 
-    /// 列出所有活跃（未删除）笔记的 content，用于孤儿图片扫描
-    ///
-    /// 扫描流程会把所有 content 拼成一个字符串，逐个图片文件名检查是否被引用。
-    pub fn list_all_active_contents(&self) -> Result<Vec<String>, AppError> {
+    /// 列出所有笔记的 (id, is_encrypted, content) —— 含回收站。
+    /// 加密笔记的 content 是密文占位符，孤儿扫描里调用方应跳过其 content
+    /// 但保留 id 用于"该笔记目录下的素材整体放过"判定。
+    pub fn list_all_contents_for_orphan_scan(
+        &self,
+    ) -> Result<Vec<(i64, bool, Option<String>)>, AppError> {
         let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
         let mut stmt = conn.prepare(
-            "SELECT content FROM notes WHERE is_deleted = 0 AND content IS NOT NULL",
+            "SELECT id, is_encrypted, content FROM notes",
+        )?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i32>(1)? != 0,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// 列出所有笔记的 source_file_path（非空），用于孤儿 PDF/源文件扫描。
+    /// 含回收站笔记 —— 回收站撤回时还要用。
+    pub fn list_all_source_file_paths(&self) -> Result<Vec<String>, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let mut stmt = conn.prepare(
+            "SELECT source_file_path FROM notes
+             WHERE source_file_path IS NOT NULL AND source_file_path <> ''",
         )?;
         let rows = stmt
             .query_map([], |row| row.get::<_, String>(0))?

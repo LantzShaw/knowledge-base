@@ -381,29 +381,56 @@ pub struct AttachmentInfo {
     pub mime: String,
 }
 
-/// 孤儿图片扫描结果（只扫不删）
-#[derive(Debug, Clone, Serialize)]
+// ─── 孤儿素材（统一）─────────────────────────────
+//
+// 五类素材：images / videos / attachments / pdfs / sources
+// 每类独立扫描器；UI 用 Tabs 分组展示。
+
+/// 单条孤儿素材
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OrphanImageScan {
-    /// 孤儿数量
+pub struct OrphanItem {
+    /// 素材类型：image / video / attachment / pdf / source
+    pub kind: String,
+    /// 绝对路径
+    pub path: String,
+    /// 按 note_id 分目录的素材有；纯平铺的 images 没有
+    pub note_id: Option<i64>,
+    pub size: u64,
+    /// 孤儿原因：notePurged / unreferenced
+    pub reason: String,
+}
+
+/// 单类素材的孤儿组（用于 UI Tab 内）
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct OrphanGroup {
+    /// 实际孤儿数（不含截断）
     pub count: usize,
-    /// 总字节数
     pub total_bytes: u64,
-    /// 孤儿文件绝对路径列表（上限 500 条避免过大）
-    pub paths: Vec<String>,
-    /// 实际发现的孤儿是否被截断显示
+    /// 孤儿明细（最多 500 条）
+    pub items: Vec<OrphanItem>,
+    /// items 是否被截断显示
     pub truncated: bool,
 }
 
-/// 孤儿图片清理结果
+/// 全量孤儿扫描结果
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct OrphanAssetScan {
+    pub images: OrphanGroup,
+    pub videos: OrphanGroup,
+    pub attachments: OrphanGroup,
+    pub pdfs: OrphanGroup,
+    pub sources: OrphanGroup,
+}
+
+/// 孤儿素材清理结果
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OrphanImageClean {
-    /// 成功删除数量
+pub struct OrphanAssetClean {
     pub deleted: usize,
-    /// 释放字节数
     pub freed_bytes: u64,
-    /// 删除失败的文件（路径 + 错误消息）
     pub failed: Vec<String>,
 }
 

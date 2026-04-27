@@ -27,10 +27,9 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useLocation } from "react-router-dom";
 import { listen } from "@tauri-apps/api/event";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Update } from "@tauri-apps/plugin-updater";
-import type { AiModel, AiModelInput, ImportResult, ImportProgress, ImportConflictPolicy, ScannedFile, ExportResult, ExportProgress, NoteTemplate, NoteTemplateInput, OrphanImageScan } from "@/types";
-import { systemApi, updaterApi, aiModelApi, importApi, exportApi, folderApi, templateApi, pdfApi, sourceFileApi, imageMaintApi, autostartApi, configApi } from "@/lib/api";
+import type { AiModel, AiModelInput, ImportResult, ImportProgress, ImportConflictPolicy, ScannedFile, ExportResult, ExportProgress, NoteTemplate, NoteTemplateInput } from "@/types";
+import { systemApi, updaterApi, aiModelApi, importApi, exportApi, folderApi, templateApi, pdfApi, sourceFileApi, autostartApi, configApi } from "@/lib/api";
 import {
   useAppStore,
   EDITOR_FONT_LABELS,
@@ -45,6 +44,7 @@ import { UpdateModal } from "@/components/ui/UpdateModal";
 import { RecommendCards } from "@/components/ui/RecommendCards";
 import { SyncTabs } from "@/components/settings/SyncTabs";
 import { DataDirSection } from "@/components/settings/DataDirSection";
+import OrphanAssetsPanel from "@/components/settings/OrphanAssetsPanel";
 import { HiddenPinSection } from "@/components/hidden/HiddenPinSection";
 import { TiptapEditor } from "@/components/editor";
 import type { Folder } from "@/types";
@@ -223,7 +223,7 @@ const SETTINGS_NAV_ITEMS: { id: string; label: string }[] = [
   { id: "settings-templates", label: "模板管理" },
   { id: "settings-data-dir", label: "数据目录" },
   { id: "settings-sync", label: "同步备份" },
-  { id: "settings-orphan-images", label: "孤儿图片清理" },
+  { id: "settings-orphan-assets", label: "孤儿素材清理" },
   { id: "settings-community", label: "作者 & 社区" },
 ];
 
@@ -329,12 +329,6 @@ export default function SettingsPage() {
   const [editingTpl, setEditingTpl] = useState<NoteTemplate | null>(null);
   const [tplForm] = Form.useForm<NoteTemplateInput>();
 
-  // 孤儿图片清理
-  const [orphanScan, setOrphanScan] = useState<OrphanImageScan | null>(null);
-  const [orphanScanning, setOrphanScanning] = useState(false);
-  const [orphanCleaning, setOrphanCleaning] = useState(false);
-  const [orphanPreviewOpen, setOrphanPreviewOpen] = useState(false);
-
   // 启动设置
   const [autostartEnabled, setAutostartEnabled] = useState(false);
   const [startMinimized, setStartMinimized] = useState(false);
@@ -414,40 +408,6 @@ export default function SettingsPage() {
       content: tpl.content,
     });
     setTplModalOpen(true);
-  }
-
-  async function handleScanOrphans() {
-    setOrphanScanning(true);
-    try {
-      const result = await imageMaintApi.scanOrphans();
-      setOrphanScan(result);
-    } catch (e) {
-      message.error(`扫描失败: ${e}`);
-    } finally {
-      setOrphanScanning(false);
-    }
-  }
-
-  async function handleCleanOrphans() {
-    if (!orphanScan || orphanScan.paths.length === 0) return;
-    setOrphanCleaning(true);
-    try {
-      const result = await imageMaintApi.cleanOrphans(orphanScan.paths);
-      const freedMb = (result.freedBytes / 1024 / 1024).toFixed(2);
-      if (result.failed.length > 0) {
-        message.warning(
-          `清理完成：删除 ${result.deleted} 个，失败 ${result.failed.length} 个，释放 ${freedMb} MB`,
-        );
-      } else {
-        message.success(`清理完成：删除 ${result.deleted} 个文件，释放 ${freedMb} MB`);
-      }
-      // 清理后重新扫，看是否还有（或是否截断过）
-      await handleScanOrphans();
-    } catch (e) {
-      message.error(`清理失败: ${e}`);
-    } finally {
-      setOrphanCleaning(false);
-    }
   }
 
   async function handleTemplateSave() {
@@ -1530,158 +1490,19 @@ export default function SettingsPage() {
         <SyncTabs />
       </div>
 
-      {/* 维护：孤儿图片清理 */}
+      {/* 维护：孤儿素材清理（5 类素材统一） */}
       <Card
-        id="settings-orphan-images"
+        id="settings-orphan-assets"
         title={
           <Space>
             <Trash2 size={16} />
-            <span>维护</span>
+            <span>维护 · 孤儿素材清理</span>
           </Space>
         }
         className="mb-4"
       >
-        <Space direction="vertical" style={{ width: "100%" }} size="middle">
-          <div>
-            <Button
-              icon={<SyncOutlined />}
-              onClick={handleScanOrphans}
-              loading={orphanScanning}
-            >
-              扫描孤儿图片
-            </Button>
-            <Typography.Text type="secondary" className="ml-3 text-xs">
-              笔记删掉图片后，磁盘上的文件不会自动删，用这里手动清理
-            </Typography.Text>
-          </div>
-
-          {orphanScan &&
-            (orphanScan.count === 0 ? (
-              <Alert type="success" showIcon message="没有孤儿图片，磁盘干净" />
-            ) : (
-              <Alert
-                type="warning"
-                showIcon
-                message={
-                  <span>
-                    发现 <b>{orphanScan.count}</b> 张孤儿图片，共{" "}
-                    <b>{(orphanScan.totalBytes / 1024 / 1024).toFixed(2)} MB</b>
-                    {orphanScan.truncated && (
-                      <span className="text-xs">（列表已截断至前 500 条，可多次清理）</span>
-                    )}
-                  </span>
-                }
-                action={
-                  <Space size="small">
-                    <Button size="small" onClick={() => setOrphanPreviewOpen(true)}>
-                      查看
-                    </Button>
-                    <Popconfirm
-                      title="确认清理？"
-                      description={`将删除 ${orphanScan.paths.length} 个文件，不可撤销。`}
-                      okText="删除"
-                      okType="danger"
-                      cancelText="取消"
-                      onConfirm={handleCleanOrphans}
-                    >
-                      <Button size="small" danger loading={orphanCleaning}>
-                        立即清理
-                      </Button>
-                    </Popconfirm>
-                  </Space>
-                }
-              />
-            ))}
-        </Space>
+        <OrphanAssetsPanel />
       </Card>
-
-      {/* 孤儿图片预览弹窗 */}
-      <Modal
-        title={`孤儿图片预览（${orphanScan?.paths.length ?? 0} / ${orphanScan?.count ?? 0}）`}
-        open={orphanPreviewOpen}
-        onCancel={() => setOrphanPreviewOpen(false)}
-        footer={[
-          <Button key="close" onClick={() => setOrphanPreviewOpen(false)}>
-            关闭
-          </Button>,
-          <Popconfirm
-            key="clean"
-            title="确认清理这些图片？"
-            description={`将删除 ${orphanScan?.paths.length ?? 0} 个文件，不可撤销。`}
-            okText="删除"
-            okType="danger"
-            cancelText="取消"
-            onConfirm={async () => {
-              await handleCleanOrphans();
-              setOrphanPreviewOpen(false);
-            }}
-          >
-            <Button danger loading={orphanCleaning}>
-              立即清理
-            </Button>
-          </Popconfirm>,
-        ]}
-        width={760}
-        styles={{ body: { maxHeight: "60vh", overflow: "auto" } }}
-      >
-        {orphanScan?.truncated && (
-          <Alert
-            type="info"
-            showIcon
-            className="mb-3"
-            message={`共 ${orphanScan.count} 张孤儿图片，仅预览前 ${orphanScan.paths.length} 张。清理后会重新扫描剩余文件。`}
-          />
-        )}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
-            gap: 12,
-          }}
-        >
-          {orphanScan?.paths.map((p) => (
-            <div
-              key={p}
-              style={{
-                border: "1px solid #e5e7eb",
-                borderRadius: 6,
-                overflow: "hidden",
-                background: "#fafafa",
-              }}
-            >
-              <div
-                style={{
-                  height: 100,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: "#fff",
-                }}
-              >
-                <img
-                  src={convertFileSrc(p)}
-                  alt={p}
-                  style={{
-                    maxWidth: "100%",
-                    maxHeight: "100%",
-                    objectFit: "contain",
-                  }}
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).style.display = "none";
-                  }}
-                />
-              </div>
-              <div
-                className="text-xs px-2 py-1 truncate"
-                style={{ color: "#666" }}
-                title={p}
-              >
-                {p.split(/[\\/]/).pop()}
-              </div>
-            </div>
-          ))}
-        </div>
-      </Modal>
 
       <Card id="settings-community" title="作者 & 社区">
         <div className="flex items-center justify-between py-1">

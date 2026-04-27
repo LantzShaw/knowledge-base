@@ -25,8 +25,9 @@ import type {
   ImportConflictPolicy,
   ImportResult,
   OpenMarkdownResult,
-  OrphanImageScan,
-  OrphanImageClean,
+  OrphanAssetScan,
+  OrphanAssetClean,
+  OrphanItem,
   AttachmentInfo,
   ScannedFile,
   ExportResult,
@@ -448,11 +449,11 @@ export const importApi = {
     invoke<OpenMarkdownResult>("open_markdown_file", { filePath }),
 };
 
-/** 图片维护 API（孤儿图片扫描/清理） */
-export const imageMaintApi = {
-  scanOrphans: () => invoke<OrphanImageScan>("scan_orphan_images"),
-  cleanOrphans: (paths: string[]) =>
-    invoke<OrphanImageClean>("clean_orphan_images", { paths }),
+/** 孤儿素材维护 API（图片/视频/附件/PDF/源文件统一扫描清理） */
+export const orphanAssetApi = {
+  scanAll: () => invoke<OrphanAssetScan>("scan_orphan_assets"),
+  clean: (items: OrphanItem[]) =>
+    invoke<OrphanAssetClean>("clean_orphan_assets", { items }),
 };
 
 /** 外部 .md 双向同步 API（保存即写回原文件） */

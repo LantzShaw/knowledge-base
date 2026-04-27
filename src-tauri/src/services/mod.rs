@@ -25,6 +25,7 @@ pub mod export_word;
 pub mod markdown;
 pub mod converter;
 pub mod image;
+pub mod orphan_scan;
 pub mod pdf;
 pub mod prompt;
 pub mod skills;

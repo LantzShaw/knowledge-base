@@ -23,6 +23,7 @@ import {
   Link as LinkIcon,
   Unlink,
   ImagePlus,
+  Film,
   Table as TableIcon,
   AlignLeft,
   AlignCenter,
@@ -35,7 +36,7 @@ import {
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { imageApi } from "@/lib/api";
+import { imageApi, videoApi } from "@/lib/api";
 
 interface ToolbarProps {
   editor: Editor;
@@ -94,6 +95,48 @@ export function EditorToolbar({ editor, noteId, ensureNoteId }: ToolbarProps) {
         }).run();
       } catch (e) {
         message.error(`图片插入失败: ${e}`);
+      }
+    }
+  }
+
+  /** 与 insertImage 对称：从文件选择器导入视频走 saveFromPath（零拷贝），
+   *  插入 video node。复用 TiptapEditor 已有的 VideoNode 渲染。
+   *  视频文件大（GB 级），用 saveFromPath 而非 base64 上传，避免主进程内存爆。 */
+  async function insertVideo() {
+    let effectiveNoteId = noteId;
+    if (!effectiveNoteId && ensureNoteId) {
+      try {
+        effectiveNoteId = await ensureNoteId();
+      } catch (e) {
+        message.error(`视频插入失败: ${e}`);
+        return;
+      }
+    }
+    if (!effectiveNoteId) {
+      message.warning("请先保存笔记后再插入视频");
+      return;
+    }
+    const selected = await open({
+      multiple: true,
+      filters: [
+        {
+          name: "视频",
+          extensions: ["mp4", "mov", "webm", "m4v", "ogv", "mkv", "avi"],
+        },
+      ],
+    });
+    if (!selected) return;
+    const paths = Array.isArray(selected) ? selected : [selected];
+    for (const filePath of paths) {
+      try {
+        const savedPath = await videoApi.saveFromPath(effectiveNoteId, filePath);
+        const assetUrl = convertFileSrc(savedPath);
+        editor.chain().focus().insertContent({
+          type: "video",
+          attrs: { src: assetUrl },
+        }).run();
+      } catch (e) {
+        message.error(`视频插入失败: ${e}`);
       }
     }
   }
@@ -387,6 +430,11 @@ export function EditorToolbar({ editor, noteId, ensureNoteId }: ToolbarProps) {
         icon: <ImagePlus size={15} />,
         title: "插入图片",
         action: insertImage,
+      },
+      {
+        icon: <Film size={15} />,
+        title: "插入视频",
+        action: insertVideo,
       },
       {
         icon: <Minus size={15} />,

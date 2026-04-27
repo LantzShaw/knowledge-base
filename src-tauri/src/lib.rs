@@ -745,9 +745,15 @@ pub fn run() {
             commands::image::save_note_image_from_path,
             commands::image::delete_note_images,
             commands::image::get_images_dir,
-            commands::image::scan_orphan_images,
-            commands::image::clean_orphan_images,
             commands::image::get_image_blob,
+            // 孤儿素材统一清理（替代旧的 scan_orphan_images / clean_orphan_images）
+            commands::orphan::scan_orphan_assets,
+            commands::orphan::clean_orphan_assets,
+            // 视频模块
+            commands::videos::save_video,
+            commands::videos::save_video_from_path,
+            commands::videos::delete_note_videos,
+            commands::videos::get_videos_dir,
             // 附件模块（PDF/Office/ZIP/音视频等通用文件）
             commands::attachment::save_note_attachment,
             commands::attachment::delete_note_attachments,

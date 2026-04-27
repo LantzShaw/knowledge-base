@@ -393,17 +393,43 @@ export interface OpenMarkdownResult {
   wasSynced: boolean;
 }
 
-/** 孤儿图片扫描结果 */
-export interface OrphanImageScan {
+/** 孤儿素材类型 */
+export type OrphanKind = "image" | "video" | "attachment" | "pdf" | "source";
+
+/** 孤儿原因 */
+export type OrphanReason = "notePurged" | "unreferenced";
+
+/** 单条孤儿素材 */
+export interface OrphanItem {
+  kind: OrphanKind;
+  /** 绝对路径 */
+  path: string;
+  /** 按 note_id 分目录的素材有；纯平铺的 images 没有 */
+  noteId: number | null;
+  size: number;
+  reason: OrphanReason;
+}
+
+/** 单类素材的孤儿组（UI Tab 内） */
+export interface OrphanGroup {
   count: number;
   totalBytes: number;
-  paths: string[];
-  /** paths 是否因数量过多被截断（真正孤儿数仍在 count 中） */
+  /** 实际明细（最多 500 条）*/
+  items: OrphanItem[];
   truncated: boolean;
 }
 
-/** 孤儿图片清理结果 */
-export interface OrphanImageClean {
+/** 全量孤儿扫描结果 */
+export interface OrphanAssetScan {
+  images: OrphanGroup;
+  videos: OrphanGroup;
+  attachments: OrphanGroup;
+  pdfs: OrphanGroup;
+  sources: OrphanGroup;
+}
+
+/** 孤儿素材清理结果 */
+export interface OrphanAssetClean {
   deleted: number;
   freedBytes: number;
   failed: string[];
