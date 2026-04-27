@@ -80,7 +80,16 @@ impl OrphanScanService {
                 continue;
             }
             if let Some(c) = content {
+                // 直接抓一遍：覆盖纯文本（如 markdown 链接）和 ASCII 文件名
                 collect_filename_tokens(c, &mut referenced_tokens);
+                // 再对 URL 解码版抓一遍：编辑器把图片路径走 convertFileSrc 后
+                // 在 HTML 里是 percent-encoded（中文 → `%E6%88%AA...`），
+                // 不解码 token 永远对不上磁盘上裸的 "截图.png" 名字。
+                if c.contains('%') {
+                    if let Ok(decoded) = urlencoding::decode(c) {
+                        collect_filename_tokens(&decoded, &mut referenced_tokens);
+                    }
+                }
             }
         }
 
@@ -685,6 +694,7 @@ pub fn collect_filename_tokens(text: &str, out: &mut HashSet<String>) {
                     | b','
                     | b';'
                     | b':'
+                    | b'%' // URL 编码起始符，防止 percent-encoded URL 把整段 path 都吞进 token
             ) {
                 break;
             }
