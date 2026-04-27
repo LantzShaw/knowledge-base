@@ -448,7 +448,7 @@ export default function HomePage() {
               </Text>
             </div>
           ) : (
-            <ul className="flex flex-col gap-1.5 m-0 p-0 list-none">
+            <ul className="flex flex-col gap-2 m-0 p-0 list-none">
               {displayedTodos.map((task) => {
                 const dueAt = new Date(task.due_date!).getTime();
                 const isOverdue = dueAt < Date.now();
@@ -463,7 +463,7 @@ export default function HomePage() {
                   <li
                     key={task.id}
                     className="flex items-start gap-2.5"
-                    style={{ minHeight: 38 }}
+                    style={{ padding: "4px 0" }}
                   >
                     <input
                       type="checkbox"
@@ -517,15 +517,15 @@ export default function HomePage() {
                           </Text>
                         )}
                       </div>
-                      {desc && (
-                        <Text
-                          type="secondary"
-                          ellipsis
-                          style={{ fontSize: 11, display: "block" }}
-                        >
-                          {desc}
-                        </Text>
-                      )}
+                      {/* 第二行始终渲染：无 desc 时用不间断空格占位，
+                          保证每条待办高度 = 标题 + 描述行，与右侧笔记节奏一致 */}
+                      <Text
+                        type="secondary"
+                        ellipsis
+                        style={{ fontSize: 11, display: "block", minHeight: 16 }}
+                      >
+                        {desc || "\u00A0"}
+                      </Text>
                     </div>
                   </li>
                 );
@@ -566,10 +566,7 @@ export default function HomePage() {
                 <li
                   key={note.id}
                   className="cursor-pointer"
-                  style={{
-                    padding: "4px 0",
-                    borderBottom: `1px solid ${token.colorBorderSecondary}`,
-                  }}
+                  style={{ padding: "4px 0" }}
                   onClick={() => navigate(`/notes/${note.id}`)}
                 >
                   <div className="flex items-center gap-1.5">
@@ -585,7 +582,10 @@ export default function HomePage() {
                       {note.title}
                     </Text>
                   </div>
-                  <Text type="secondary" style={{ fontSize: 11 }}>
+                  <Text
+                    type="secondary"
+                    style={{ fontSize: 11, display: "block", minHeight: 16 }}
+                  >
                     {relativeTime(note.updated_at)} · {note.word_count} 字
                   </Text>
                 </li>
@@ -795,7 +795,7 @@ export default function HomePage() {
         </Card>
       </div>
 
-      {/* 待办详情弹窗 — 点击列表项触发；只读展示,编辑请去待办页 */}
+      {/* 待办详情弹窗 — 点击列表项触发；展示 + 标记完成（状态切换由 handleToggleTask） */}
       <Modal
         open={taskDetail !== null}
         onCancel={() => setTaskDetail(null)}
@@ -806,11 +806,13 @@ export default function HomePage() {
             <Button
               type="primary"
               onClick={() => {
+                if (taskDetail) {
+                  void handleToggleTask(taskDetail.id);
+                }
                 setTaskDetail(null);
-                navigate("/tasks");
               }}
             >
-              去待办页
+              {taskDetail?.status === 1 ? "重新开启" : "标记完成"}
             </Button>
           </div>
         }

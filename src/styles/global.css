@@ -82,6 +82,8 @@ body,
   display: flex;
   align-items: center;
   width: 100%;
+  min-width: 0;
+  padding: 0 4px !important;
 }
 .sidebar-folder-tree .ant-tree-title {
   flex: 1;
@@ -89,19 +91,58 @@ body,
   overflow: hidden;
 }
 
-/* antd Tree 内部节点紧贴外容器左缘与上缘，外层 padding 影响不到它。
-   - padding-left: 让展开三角"▼"和文件夹图标不贴侧边栏左墙
-   - padding-top:  让第一个节点的"选中高亮背景矩形"离上方"文件夹"标题有一点空隙，
-                   避免蓝色选中态顶边直接贴标题下边 */
+/* 节点紧贴左缘 + 顶部一点空隙避免选中态贴住"文件夹"小节标题 */
 .sidebar-folder-tree .ant-tree-list-holder-inner {
-  padding-left: 6px;
+  padding-left: 2px;
   padding-top: 6px;
 }
 
-/* antd Tree 每级缩进默认 24px，侧边栏多层嵌套时水平空间吃紧，
-   压到 12px 让 4~5 级嵌套仍能容纳在 220px 宽的 Sider 内 */
+/* 每级缩进 antd 默认 24px → 压到 10px，4-5 级嵌套都能装下 */
 .sidebar-folder-tree .ant-tree-indent-unit {
-  width: 12px;
+  width: 10px;
+}
+
+/* switcher（展开/收起箭头）槽位 antd 默认 24×24，过宽 + 黑实心三角太显眼。
+   缩到 16×22 + 居中。叶节点的 noop 槽位同步缩窄保持对齐。 */
+.sidebar-folder-tree .ant-tree-switcher {
+  width: 16px;
+  height: 22px;
+  line-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--ant-color-text-tertiary, #8c8c8c);
+  background: transparent !important;
+  border-radius: 4px;
+  position: relative;
+}
+.sidebar-folder-tree .ant-tree-switcher-noop {
+  width: 16px;
+}
+.sidebar-folder-tree .ant-tree-switcher .anticon {
+  font-size: 11px;
+}
+/* 清掉 antd 默认在 switcher 上的指引线伪元素（连接父子节点的那条灰线），
+   它会以 ::before/::after 的形式画出小圆/竖线，跟 lucide 自定义箭头视觉错位。 */
+.sidebar-folder-tree .ant-tree-switcher::before,
+.sidebar-folder-tree .ant-tree-switcher::after {
+  display: none !important;
+}
+.sidebar-folder-tree .ant-tree-switcher .ant-tree-switcher-leaf-line {
+  display: none !important;
+}
+/* 自定义 hover：覆盖 16×22 范围而非默认的 24×24，与 chevron 视觉对齐 */
+.sidebar-folder-tree .ant-tree-switcher:hover {
+  background: var(--ant-color-fill-tertiary, rgba(0, 0, 0, 0.04)) !important;
+}
+
+/* 行整体压紧（默认 28-32px 行高在密集嵌套时太松） */
+.sidebar-folder-tree .ant-tree-treenode {
+  padding-top: 1px;
+  padding-bottom: 1px;
+  width: 100%;
+  align-items: center;
 }
 
 /* ─── Sider 拖拽调宽期间的性能优化 ─────────────
@@ -140,15 +181,87 @@ body,
   overflow-y: auto;
   overflow-x: hidden;
   background: var(--ant-color-bg-container, #fff);
+  /* 大纲打开时变 2 列：主内容 + 右侧 sticky 大纲；关闭时退回单列 */
+  display: block;
+}
+.editor-body[data-outline="on"] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 200px;
+  align-items: start;
 }
 
 .editor-content-area {
-  padding: 24px 48px 80px;
+  /* 底部 40vh 空白：保证大纲点最后几个标题时能 scrollIntoView 到顶部
+     （否则容器已到 scrollTop 上限，看起来"点了没反应"） */
+  padding: 24px 48px 40vh;
   width: 100%;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   min-height: 100%;
+}
+
+/* 右侧大纲面板：sticky 在滚动容器内跟随滚动 */
+.editor-outline-aside {
+  position: sticky;
+  top: 24px;
+  align-self: start;
+  padding: 24px 12px 24px 0;
+  /* 关键：让标题列表自身可滚（避免大纲过长撑开视口） */
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+/* 大纲点击 → scrollIntoView 兜底路径用：留出 sticky 工具栏 + 8px 呼吸的避让空间。
+   优先逻辑（EditorOutline.handleJump）会动态查询工具栏实际高度，这里只是兜底。 */
+.editor-content-area .tiptap h1,
+.editor-content-area .tiptap h2,
+.editor-content-area .tiptap h3,
+.editor-content-area .tiptap h4,
+.editor-content-area .tiptap h5,
+.editor-content-area .tiptap h6 {
+  scroll-margin-top: 88px;
+}
+
+.editor-outline {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ant-color-text-secondary, #555);
+  border-left: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+  padding-left: 10px;
+}
+.editor-outline__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  user-select: none;
+}
+.editor-outline__hint {
+  font-size: 11px;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+.editor-outline__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.editor-outline__item {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 3px 6px 3px 8px;
+  margin: 2px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.editor-outline__item:hover {
+  background: color-mix(in srgb, var(--ant-color-text, #000) 5%, transparent);
 }
 
 .editor-title .ant-input {
@@ -807,6 +920,17 @@ body,
   font-size: 13px;
 }
 
+/* 修复：Input.Password / 任何 affix-wrapper 内嵌的 <input> 不应被外层 28px
+   高度规则压住，否则会把 wrapper 的 padding 吃掉，placeholder 被挤到底部。
+   这里明确把内层 input 还原为 auto 高度 + 0 内边距，由外层 wrapper 的
+   padding（默认 4px 11px）控制视觉居中。 */
+.ai-model-modal .ant-input-affix-wrapper > input.ant-input {
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  line-height: 1.5715;
+}
+
 /* 5. Modal body 上下内边距继续压（默认 24px → 12px） */
 .ai-model-modal .ant-modal-body {
   padding-top: 12px;
@@ -938,6 +1062,91 @@ body,
   border-color: color-mix(in srgb, var(--ant-color-text, #fff) 12%, transparent);
 }
 [data-theme-category="dark"] .code-block-toolbar {
+  background: color-mix(in srgb, var(--ant-color-text, #fff) 5%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--ant-color-text, #fff) 8%, transparent);
+}
+
+/* ─── 视频块（带 toolbar + 高亮动画） ───────────────────────────── */
+.tiptap-video-block {
+  border: 1px solid color-mix(in srgb, var(--ant-color-text, #000) 8%, transparent);
+  border-radius: 6px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--ant-color-text, #000) 2%, transparent);
+  margin: 12px 0;
+  transition: box-shadow 0.3s, border-color 0.3s;
+}
+.tiptap-video-block[data-highlight="true"] {
+  border-color: var(--ant-color-primary, #1677ff);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ant-color-primary, #1677ff) 25%, transparent);
+  animation: video-highlight-pulse 1.2s ease-out;
+}
+@keyframes video-highlight-pulse {
+  0%   { box-shadow: 0 0 0 0   color-mix(in srgb, var(--ant-color-primary, #1677ff) 50%, transparent); }
+  60%  { box-shadow: 0 0 0 8px color-mix(in srgb, var(--ant-color-primary, #1677ff) 0%, transparent); }
+  100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ant-color-primary, #1677ff) 25%, transparent); }
+}
+.tiptap-video-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--ant-color-text, #000) 6%, transparent);
+  background: color-mix(in srgb, var(--ant-color-text, #000) 3%, transparent);
+  font-size: 12px;
+  user-select: none;
+}
+.tiptap-video-label {
+  font-weight: 500;
+  color: var(--ant-color-text-secondary, #666);
+}
+.tiptap-video-label-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.tiptap-video-toolbar-spacer { flex: 1; }
+.tiptap-video {
+  display: block;
+  width: 100%;
+  max-height: 480px;
+  background: #000;
+}
+
+/* ─── 视频时间戳 chip ──────────────────────────────────────────── */
+.video-ts-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  margin: 0 2px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--ant-color-primary, #1677ff) 12%, transparent);
+  color: var(--ant-color-primary, #1677ff);
+  font-size: 0.92em;
+  cursor: pointer;
+  user-select: none;
+  border: 1px solid color-mix(in srgb, var(--ant-color-primary, #1677ff) 30%, transparent);
+  white-space: nowrap;
+  transition: background 0.15s, transform 0.05s;
+}
+.video-ts-chip:hover {
+  background: color-mix(in srgb, var(--ant-color-primary, #1677ff) 22%, transparent);
+}
+.video-ts-chip:active { transform: translateY(1px); }
+.video-ts-chip.ProseMirror-selectednode {
+  outline: 2px solid var(--ant-color-primary, #1677ff);
+  outline-offset: 1px;
+}
+.video-ts-chip-broken {
+  background: color-mix(in srgb, var(--ant-color-text, #000) 8%, transparent);
+  color: var(--ant-color-text-quaternary, #999);
+  border-color: color-mix(in srgb, var(--ant-color-text, #000) 15%, transparent);
+  text-decoration: line-through;
+}
+
+[data-theme-category="dark"] .tiptap-video-block {
+  border-color: color-mix(in srgb, var(--ant-color-text, #fff) 12%, transparent);
+}
+[data-theme-category="dark"] .tiptap-video-toolbar {
   background: color-mix(in srgb, var(--ant-color-text, #fff) 5%, transparent);
   border-bottom-color: color-mix(in srgb, var(--ant-color-text, #fff) 8%, transparent);
 }
