@@ -75,7 +75,7 @@ function DragRegion() {
 }
 
 /** ActivityBar 固定宽度（与 ActivityBar.tsx 内硬编码保持一致） */
-const ACTIVITY_BAR_WIDTH = 48;
+const ACTIVITY_BAR_WIDTH = 64;
 
 /**
  * 跟踪 React Router history 栈位置，给 Header 后退/前进按钮提供 disabled 信号。

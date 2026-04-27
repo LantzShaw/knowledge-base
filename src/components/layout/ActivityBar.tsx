@@ -203,14 +203,17 @@ export function ActivityBar() {
           className="activity-item"
           data-active={isActive || undefined}
           style={{
-            width: 40,
-            height: 40,
+            width: 56,
+            height: 52,
             borderRadius: 8,
             border: "none",
             cursor: "pointer",
             display: "flex",
+            flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
+            gap: 2,
+            padding: "4px 2px",
             background: isActive ? `${token.colorPrimary}14` : "transparent",
             color: isActive ? token.colorPrimary : token.colorTextSecondary,
             position: "relative",
@@ -218,14 +221,27 @@ export function ActivityBar() {
           }}
         >
           {iconNode}
+          <span
+            style={{
+              fontSize: 10,
+              lineHeight: 1.1,
+              fontWeight: isActive ? 600 : 400,
+              maxWidth: "100%",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {item.label}
+          </span>
           {isActive && (
             <span
               aria-hidden
               style={{
                 position: "absolute",
                 left: -6,
-                top: 8,
-                bottom: 8,
+                top: 10,
+                bottom: 10,
                 width: 2,
                 borderRadius: 2,
                 background: token.colorPrimary,
@@ -242,7 +258,7 @@ export function ActivityBar() {
       aria-label="视图切换"
       className="activity-bar"
       style={{
-        width: 48,
+        width: 64,
         // 必须撑满 Sider 高度，否则下方 flex:1 spacer 没有空间，
         // 底部三项（隐藏笔记 / 回收站 / 关于）会贴在主组按钮后面而不是钉在左下角
         height: "100%",
