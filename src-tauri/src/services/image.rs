@@ -9,6 +9,7 @@ static IMAGE_SEQ: AtomicU64 = AtomicU64::new(0);
 
 use crate::database::Database;
 use crate::error::AppError;
+use crate::services::safe_filename;
 use crate::services::vault::{VaultService, VaultState};
 
 /// 图片资产目录名（dev 模式加 dev- 前缀实现数据隔离）
@@ -124,6 +125,15 @@ impl ImageService {
     }
 
     /// 内部落盘实现：`encrypted` 决定文件名是否追加 `.enc`。
+    ///
+    /// 命名规则（保留原名风格）：
+    ///   - 优先 `images/<note_id>/<原 stem>.<ext>`
+    ///   - 已存在 + 内容相同 → 复用旧文件（同一张图反复粘贴不浪费盘）
+    ///   - 已存在 + 内容不同 → 加 `-1` / `-2` / ... 后缀
+    ///
+    /// 加密模式下统一在最终落盘文件名后追加 `.enc`，让扫盘逻辑无需改动。
+    /// 加密判重比对的是密文，所以同一明文每次加密 nonce 不同 → 必然加后缀，
+    /// 这是预期行为（无法在不解密的情况下做语义判重）。
     fn save_bytes_inner(
         app_data_dir: &Path,
         note_id: i64,
@@ -132,29 +142,29 @@ impl ImageService {
         encrypted: bool,
     ) -> Result<String, AppError> {
         let note_dir = Self::images_dir(app_data_dir).join(note_id.to_string());
-        std::fs::create_dir_all(&note_dir)?;
 
-        // 从原始文件名提取扩展名
-        let ext = Path::new(file_name)
+        // 拆分原文件名为 stem + ext
+        let path = Path::new(file_name);
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("image");
+        let ext = path
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("png");
 
-        // Why: 原版只用 timestamp+纳秒，Windows 系统时钟在极短间隔内可能返回相同值，
-        // 多张图连续保存会互相覆盖 → 前端看起来"只进一张"。加进程内原子计数器彻底消除冲突。
-        let now = chrono::Local::now();
-        let seq = IMAGE_SEQ.fetch_add(1, Ordering::Relaxed);
-        let unique_name = format!(
-            "{}_{:09}_{:06}.{}{}",
-            now.format("%Y%m%d%H%M%S"),
-            now.timestamp_subsec_nanos(),
-            seq,
-            ext,
-            if encrypted { ENC_SUFFIX } else { "" },
-        );
+        // 加密时把 .enc 拼到 ext 上，让 save_unique 一次定位到最终落盘名
+        let final_ext = if encrypted {
+            format!("{}{}", ext, ENC_SUFFIX)
+        } else {
+            ext.to_string()
+        };
 
-        let file_path = note_dir.join(&unique_name);
-        std::fs::write(&file_path, data)?;
+        let file_path = safe_filename::save_unique(&note_dir, stem, &final_ext, data)?;
+
+        // 触一下进程内序号，保留旧的全局原子计数语义（其他模块可能依赖统计行为）
+        IMAGE_SEQ.fetch_add(1, Ordering::Relaxed);
 
         log::info!(
             "图片已保存{}: {}",

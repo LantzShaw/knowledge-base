@@ -14,6 +14,7 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 
 use crate::error::AppError;
 use crate::models::AttachmentInfo;
+use crate::services::safe_filename;
 
 /// 进程内递增计数器，保证同一毫秒内多次保存也不会冲突
 static ATTACHMENT_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -115,28 +116,17 @@ impl AttachmentService {
         }
 
         let note_dir = Self::attachments_dir(app_data_dir).join(note_id.to_string());
-        std::fs::create_dir_all(&note_dir)?;
-
         let stem = Path::new(file_name)
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("attachment");
         let ext_for_name = if ext.is_empty() { "bin" } else { ext.as_str() };
 
-        let now = chrono::Local::now();
-        let seq = ATTACHMENT_SEQ.fetch_add(1, Ordering::Relaxed);
-        let sanitized_stem = sanitize_stem(stem);
-        let unique_name = format!(
-            "{}__{}_{:09}_{:06}.{}",
-            sanitized_stem,
-            now.format("%Y%m%d%H%M%S"),
-            now.timestamp_subsec_nanos(),
-            seq,
-            ext_for_name
-        );
-
-        let file_path = note_dir.join(&unique_name);
-        std::fs::copy(source, &file_path)?;
+        // 零拷贝：safe_filename::save_unique_from_path 直接走 fs::copy，
+        // 避免大附件（zip/视频）读到 RAM。同名时直接加 -N 后缀。
+        let file_path =
+            safe_filename::save_unique_from_path(&note_dir, stem, ext_for_name, source)?;
+        ATTACHMENT_SEQ.fetch_add(1, Ordering::Relaxed);
 
         let size = std::fs::metadata(&file_path).map(|m| m.len()).unwrap_or(0);
         let mime = mime_for_ext(&ext).to_string();
@@ -155,7 +145,10 @@ impl AttachmentService {
         })
     }
 
-    /// 保存字节数据到文件
+    /// 保存字节数据到文件（base64 路径用，bytes 已在内存里）。
+    ///
+    /// 命名规则：`<原 stem>.<ext>`；冲突时加 `-1/-2/...`；
+    /// `safe_filename::save_unique` 内部对 ≤64MB 同名文件做内容 dedup（节省磁盘）。
     fn save_bytes(
         app_data_dir: &Path,
         note_id: i64,
@@ -163,7 +156,6 @@ impl AttachmentService {
         data: &[u8],
     ) -> Result<AttachmentInfo, AppError> {
         let note_dir = Self::attachments_dir(app_data_dir).join(note_id.to_string());
-        std::fs::create_dir_all(&note_dir)?;
 
         let ext = Path::new(file_name)
             .extension()
@@ -174,25 +166,11 @@ impl AttachmentService {
             .and_then(|s| s.to_str())
             .unwrap_or("attachment");
 
-        // 文件名：<原名>__YYYYMMDDHHMMSS_nanos_seq.ext
-        // 保留原文件名前缀便于用户肉眼识别；时间戳+原子 seq 保证唯一
-        let now = chrono::Local::now();
-        let seq = ATTACHMENT_SEQ.fetch_add(1, Ordering::Relaxed);
-        let sanitized_stem = sanitize_stem(stem);
-        let unique_name = format!(
-            "{}__{}_{:09}_{:06}.{}",
-            sanitized_stem,
-            now.format("%Y%m%d%H%M%S"),
-            now.timestamp_subsec_nanos(),
-            seq,
-            ext
-        );
-
-        let file_path = note_dir.join(&unique_name);
-        std::fs::write(&file_path, data)?;
+        let file_path = safe_filename::save_unique(&note_dir, stem, ext, data)?;
+        ATTACHMENT_SEQ.fetch_add(1, Ordering::Relaxed);
 
         let size = data.len() as u64;
-        let mime = mime_for_ext(&ext).to_string();
+        let mime = mime_for_ext(ext).to_string();
 
         log::info!("附件已保存: {} ({} bytes)", file_path.display(), size);
         Ok(AttachmentInfo {
@@ -212,24 +190,6 @@ impl AttachmentService {
         }
         Ok(())
     }
-}
-
-/// 清理原始文件名中的非法字符，防止构造出非法路径或过长文件名。
-///
-/// 保留：字母 / 数字 / `_` / `-` / `.` / 中文（CJK）；其他一律替换为 `_`。
-/// 长度上限 64 字符，避免触碰 Windows 260 字符路径限制。
-fn sanitize_stem(stem: &str) -> String {
-    let cleaned: String = stem
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '_' || c == '-' || c == '.' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    cleaned.chars().take(64).collect()
 }
 
 fn mime_for_ext(ext: &str) -> &'static str {
@@ -267,20 +227,6 @@ fn mime_for_ext(ext: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn sanitize_stem_keeps_safe_chars() {
-        assert_eq!(sanitize_stem("hello_world-01"), "hello_world-01");
-        assert_eq!(sanitize_stem("报告v2"), "报告v2");
-        assert_eq!(sanitize_stem("bad/path\\name"), "bad_path_name");
-        assert_eq!(sanitize_stem(""), "");
-    }
-
-    #[test]
-    fn sanitize_stem_truncates_long_input() {
-        let long = "a".repeat(200);
-        assert_eq!(sanitize_stem(&long).chars().count(), 64);
-    }
 
     #[test]
     fn blocked_ext_rejected_without_disk_io() {

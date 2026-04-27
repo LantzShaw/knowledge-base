@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::AppError;
+use crate::services::safe_filename;
 
 /// 视频资产目录名（dev 模式加 dev- 前缀实现数据隔离，与 image/attachment 一致）
 const ASSETS_DIR_PROD: &str = "kb_assets";
@@ -39,9 +40,11 @@ impl VideoService {
         Ok(dir)
     }
 
-    /// 保存字节到 `videos/<note_id>/`，返回绝对路径。
+    /// 保存字节到 `videos/<note_id>/`，**保留原文件名**。
     ///
-    /// `file_name` 仅用于提取扩展名，最终落盘名按时间戳+序号生成不会重名。
+    /// 命名规则：`<原 stem>.<ext>`；冲突时加 `-1/-2/...` 后缀。
+    /// 视频体积可能 GB 级，`safe_filename::save_unique` 内部对 >64MB
+    /// 的同名文件直接走加后缀路径，不做内容 dedup（避免双倍内存读）。
     pub fn save_bytes(
         data_dir: &Path,
         note_id: i64,
@@ -49,25 +52,19 @@ impl VideoService {
         data: &[u8],
     ) -> Result<String, AppError> {
         let note_dir = Self::videos_dir(data_dir).join(note_id.to_string());
-        std::fs::create_dir_all(&note_dir)?;
 
-        let ext = Path::new(file_name)
+        let path = Path::new(file_name);
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("video");
+        let ext = path
             .extension()
             .and_then(|e| e.to_str())
-            .unwrap_or("mp4")
-            .to_ascii_lowercase();
+            .unwrap_or("mp4");
 
-        let now = chrono::Local::now();
-        let seq = VIDEO_SEQ.fetch_add(1, Ordering::Relaxed);
-        let unique_name = format!(
-            "{}_{:09}_{:06}.{}",
-            now.format("%Y%m%d%H%M%S"),
-            now.timestamp_subsec_nanos(),
-            seq,
-            ext,
-        );
-        let file_path = note_dir.join(&unique_name);
-        std::fs::write(&file_path, data)?;
+        let file_path = safe_filename::save_unique(&note_dir, stem, ext, data)?;
+        VIDEO_SEQ.fetch_add(1, Ordering::Relaxed);
 
         log::info!(
             "视频已保存: {} ({} bytes)",
@@ -77,10 +74,11 @@ impl VideoService {
         Ok(file_path.to_string_lossy().into_owned())
     }
 
-    /// 从本地文件路径复制到 `videos/<note_id>/`，返回绝对路径。
+    /// 从本地文件路径复制到 `videos/<note_id>/`，**保留原文件名**，零拷贝。
     ///
-    /// 与 `save_bytes` 相比走 `std::fs::copy` 零拷贝，给"工具栏插入视频"
-    /// 这种已经有真路径的场景用，避免大视频走 IPC。
+    /// 给"工具栏插入视频"这种已经有真路径的场景用。
+    /// 走 `save_unique_from_path` → OS 级 `fs::copy`（避免 GB 级视频读到 RAM）。
+    /// 同名时直接加 `-N` 后缀，不做内容 dedup（视频 dedup 收益小，代价大）。
     pub fn save_from_path(
         data_dir: &Path,
         note_id: i64,
@@ -92,30 +90,22 @@ impl VideoService {
         }
 
         let note_dir = Self::videos_dir(data_dir).join(note_id.to_string());
-        std::fs::create_dir_all(&note_dir)?;
 
         let file_name = source
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("video.mp4");
+        let stem = Path::new(file_name)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("video");
         let ext = Path::new(file_name)
             .extension()
             .and_then(|e| e.to_str())
-            .unwrap_or("mp4")
-            .to_ascii_lowercase();
+            .unwrap_or("mp4");
 
-        let now = chrono::Local::now();
-        let seq = VIDEO_SEQ.fetch_add(1, Ordering::Relaxed);
-        let unique_name = format!(
-            "{}_{:09}_{:06}.{}",
-            now.format("%Y%m%d%H%M%S"),
-            now.timestamp_subsec_nanos(),
-            seq,
-            ext,
-        );
-        let file_path = note_dir.join(&unique_name);
-
-        std::fs::copy(source, &file_path)?;
+        let file_path = safe_filename::save_unique_from_path(&note_dir, stem, ext, source)?;
+        VIDEO_SEQ.fetch_add(1, Ordering::Relaxed);
 
         log::info!(
             "视频已复制: {} → {}",
