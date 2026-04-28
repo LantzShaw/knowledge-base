@@ -3,6 +3,92 @@
 /* T-011: KaTeX 公式渲染 — Mathematics 扩展 + 行内 $...$ / 块级 $$...$$ */
 @import "katex/dist/katex.min.css";
 
+/* ═══════════════════════════════════════════════════════════
+   Safari 15.x / macOS 12 Monterey WKWebView fallback
+   ═══════════════════════════════════════════════════════════
+   Tailwind v4 输出的 --color-* 用 oklch()，Safari 15 不识别会让整条声明
+   丢弃 → 变量为空 → bg-blue-500/text-gray-500 等 utility 全部失效 → 白屏。
+   现代浏览器（Safari 16.4+ / Chrome 111+ / Firefox 113+）@supports not
+   求值 false，整块跳过，零运行时开销。
+   覆盖范围：项目实际用到的色板（slate/gray/blue/violet/emerald/sky/amber）
+   及 antd token 应急色（极端情况下 ConfigProvider 注入晚于首屏渲染）。
+   themes.css 的 --kb-* 主题色板用 hex/rgba，不依赖 oklch，无需兜底。
+   ═══════════════════════════════════════════════════════════ */
+@supports not (color: oklch(0% 0 0)) {
+  :root {
+    --color-white: #ffffff;
+    --color-black: #000000;
+    /* gray —— 项目大量用 text-gray-400/500、bg-gray-50/100、border-gray-100 */
+    --color-gray-50: #f9fafb;
+    --color-gray-100: #f3f4f6;
+    --color-gray-200: #e5e7eb;
+    --color-gray-300: #d1d5db;
+    --color-gray-400: #9ca3af;
+    --color-gray-500: #6b7280;
+    --color-gray-600: #4b5563;
+    --color-gray-700: #374151;
+    --color-gray-800: #1f2937;
+    --color-gray-900: #111827;
+    /* slate —— Home/Dashboard 用 text-slate-400/500 */
+    --color-slate-300: #cbd5e1;
+    --color-slate-400: #94a3b8;
+    --color-slate-500: #64748b;
+    /* blue/sky —— 链接、强调、提示色 */
+    --color-blue-400: #60a5fa;
+    --color-blue-500: #3b82f6;
+    --color-blue-600: #2563eb;
+    --color-sky-500: #0ea5e9;
+    /* 语义色板 —— ImportPreviewModal 等 */
+    --color-violet-500: #8b5cf6;
+    --color-emerald-500: #10b981;
+    --color-amber-500: #f59e0b;
+    --color-red-500: #ef4444;
+    --color-green-500: #22c55e;
+  }
+
+  /* 项目内自定义 class 大量用 color-mix(in srgb, ...) 做半透明叠加，
+     Safari 15 不支持 color-mix → 整条 background/border 声明丢弃。
+     高频场景（编辑器代码块/视频块/工具栏）这里给静态 RGBA 兜底，
+     不影响现代浏览器（@supports not 已守门）。 */
+  .code-block-enhanced,
+  .tiptap-video-block {
+    background: rgba(0, 0, 0, 0.035);
+    border-color: rgba(0, 0, 0, 0.08);
+  }
+  .code-block-toolbar,
+  .tiptap-video-toolbar {
+    background: rgba(0, 0, 0, 0.02);
+    border-bottom-color: rgba(0, 0, 0, 0.06);
+  }
+  [data-theme-category="dark"] .code-block-enhanced,
+  [data-theme-category="dark"] .tiptap-video-block {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+  [data-theme-category="dark"] .code-block-toolbar,
+  [data-theme-category="dark"] .tiptap-video-toolbar {
+    background: rgba(255, 255, 255, 0.05);
+    border-bottom-color: rgba(255, 255, 255, 0.08);
+  }
+  /* Callout 4 类（color-mix 失效时退化为单色淡底） */
+  .tiptap-callout[data-callout="info"]    { background: rgba(22, 119, 255, 0.08); }
+  .tiptap-callout[data-callout="tip"]     { background: rgba(82, 196, 26, 0.10); }
+  .tiptap-callout[data-callout="warning"] { background: rgba(250, 173, 20, 0.10); }
+  .tiptap-callout[data-callout="danger"]  { background: rgba(255, 77, 79, 0.10); }
+  /* 视频时间戳 chip */
+  .video-ts-chip {
+    background: rgba(22, 119, 255, 0.12);
+    border-color: rgba(22, 119, 255, 0.30);
+  }
+  .video-ts-chip:hover {
+    background: rgba(22, 119, 255, 0.22);
+  }
+  /* Emoji 选择器激活态 */
+  .emoji-cat-btn.active {
+    background: rgba(22, 119, 255, 0.12);
+  }
+}
+
 :root {
   --sidebar-width: 220px;
   --header-height: 48px;
