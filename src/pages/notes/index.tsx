@@ -577,6 +577,7 @@ export default function NoteListPage() {
         await noteApi.delete(id);
         useTabsStore.getState().closeTab(id);
         message.success("删除成功");
+        useAppStore.getState().bumpNotesRefresh();
         loadNotes(data.page);
       } catch (e) {
         message.error(String(e));
@@ -807,6 +808,7 @@ export default function NoteListPage() {
           const count = await noteApi.trashAll();
           useTabsStore.getState().closeAllTabs();
           message.success(`已将 ${count} 篇笔记移到回收站`);
+          useAppStore.getState().bumpNotesRefresh();
           loadNotes(1);
         } catch (e) {
           message.error(String(e));
@@ -1105,6 +1107,7 @@ export default function NoteListPage() {
                 const n = await noteApi.trashBatch(selectedIds);
                 message.success(`已移到回收站 ${n} 条`);
                 setSelectedIds([]);
+                useAppStore.getState().bumpNotesRefresh();
                 await loadNotes(data.page);
               } catch (e) {
                 message.error(`删除失败: ${e}`);

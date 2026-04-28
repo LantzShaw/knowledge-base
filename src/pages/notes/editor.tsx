@@ -811,6 +811,7 @@ export default function NoteEditorPage() {
       await noteApi.delete(noteId);
       message.success("删除成功");
       useTabsStore.getState().closeTab(noteId);
+      useAppStore.getState().bumpNotesRefresh();
       navigate("/notes");
     } catch (e) {
       message.error(String(e));
