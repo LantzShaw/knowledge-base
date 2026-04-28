@@ -33,6 +33,13 @@ impl super::Database {
             binds.push(Box::new(k.clone()));
             binds.push(Box::new(k));
         }
+        // 分类筛选：category_id 优先；否则看 uncategorized
+        if let Some(cid) = query.category_id {
+            where_clauses.push("category_id = ?".into());
+            binds.push(Box::new(cid));
+        } else if query.uncategorized.unwrap_or(false) {
+            where_clauses.push("category_id IS NULL".into());
+        }
         let where_sql = if where_clauses.is_empty() {
             String::new()
         } else {
@@ -43,7 +50,7 @@ impl super::Database {
             "SELECT id, title, description, priority, important, status, due_date,
                     completed_at, created_at, updated_at, remind_before_minutes, reminded_at,
                     repeat_kind, repeat_interval, repeat_weekdays, repeat_until,
-                    repeat_count, repeat_done_count, source_batch_id
+                    repeat_count, repeat_done_count, source_batch_id, category_id
              FROM tasks
              {}
              ORDER BY status ASC,
@@ -77,6 +84,7 @@ impl super::Database {
                     repeat_count: row.get(16)?,
                     repeat_done_count: row.get(17)?,
                     source_batch_id: row.get(18)?,
+                    category_id: row.get(19)?,
                     links: Vec::new(),
                 })
             })?
@@ -152,6 +160,7 @@ impl super::Database {
                         repeat_count: row.get(16)?,
                         repeat_done_count: row.get(17)?,
                         source_batch_id: row.get(18)?,
+                        category_id: row.get(19)?,
                         links: Vec::new(),
                     })
                 },
@@ -199,8 +208,8 @@ impl super::Database {
             "INSERT INTO tasks (title, description, priority, important, due_date,
                                 remind_before_minutes, repeat_kind, repeat_interval,
                                 repeat_weekdays, repeat_until, repeat_count,
-                                source_batch_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                                source_batch_id, category_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 input.title,
                 input.description,
@@ -214,6 +223,7 @@ impl super::Database {
                 input.repeat_until,
                 input.repeat_count,
                 input.source_batch_id,
+                input.category_id,
             ],
         )?;
         let task_id = tx.last_insert_rowid();
@@ -301,6 +311,13 @@ impl super::Database {
         } else if let Some(c) = input.repeat_count {
             sets.push("repeat_count = ?");
             binds.push(Box::new(c));
+        }
+        // ─── 分类 ─────────────────────────────────
+        if input.clear_category_id.unwrap_or(false) {
+            sets.push("category_id = NULL");
+        } else if let Some(cid) = input.category_id {
+            sets.push("category_id = ?");
+            binds.push(Box::new(cid));
         }
         if sets.is_empty() {
             return Ok(false);
@@ -517,6 +534,7 @@ impl super::Database {
                     repeat_count: row.get(16)?,
                     repeat_done_count: row.get(17)?,
                     source_batch_id: row.get(18)?,
+                    category_id: row.get(19)?,
                     links: Vec::new(),
                 })
             })?

@@ -20,6 +20,7 @@ import type {
   GraphData,
   AiModel,
   AiModelInput,
+  AiModelTestResult,
   AiConversation,
   AiMessage,
   ImportConflictPolicy,
@@ -53,6 +54,9 @@ import type {
   UpdateTaskInput,
   TaskQuery,
   TaskStats,
+  TaskCategory,
+  CreateTaskCategoryInput,
+  UpdateTaskCategoryInput,
   PromptTemplate,
   PromptTemplateInput,
   PlanTodayRequest,
@@ -84,6 +88,10 @@ export const systemApi = {
   /** 是否允许多开实例（默认 false：第二个进程会唤起已有窗口并退出） */
   getMultiInstanceEnabled: () =>
     invoke<boolean>("get_multi_instance_enabled"),
+  /** 把笔记 content 里的 `kb-asset://...` 后那段相对路径还原成 OS 绝对路径。
+   * 用于附件链接点击 → opener 打开（opener 必须传绝对路径）。 */
+  resolveAssetAbsolute: (rel: string) =>
+    invoke<string>("resolve_asset_absolute_path", { rel }),
   /** 切换"允许多开"开关，下次启动生效 */
   setMultiInstanceEnabled: (enabled: boolean) =>
     invoke<void>("set_multi_instance_enabled", { enabled }),
@@ -344,6 +352,9 @@ export const aiModelApi = {
     invoke<AiModel>("update_ai_model", { id, input }),
   delete: (id: number) => invoke<void>("delete_ai_model", { id }),
   setDefault: (id: number) => invoke<void>("set_default_ai_model", { id }),
+  /** 测试模型连通性。入参用未保存的 AiModelInput，方便 Modal 表单里直接试。 */
+  test: (input: AiModelInput) =>
+    invoke<AiModelTestResult>("test_ai_model", { input }),
 };
 
 /** AI 对话 API */
@@ -484,7 +495,11 @@ export const exportApi = {
     invoke<HtmlExportResult>("export_single_note_to_html", { id, targetPath }),
 };
 
-/** 附件 API（PDF/Office/ZIP/音视频等非图片非文本文件） */
+/** 附件 API（PDF/Office/ZIP/音视频等非图片非文本文件）
+ *
+ * AttachmentInfo.path 是**相对 data_dir 的 POSIX 路径**；笔记 content 里写
+ * `kb-asset://<path>`，需要调用 OS opener 时通过 `systemApi.resolveAssetAbsolute(path)` 还原。
+ */
 export const attachmentApi = {
   /** 保存附件（base64 数据，给前端拖放/粘贴用） */
   save: (noteId: number, fileName: string, base64Data: string) =>
@@ -499,23 +514,26 @@ export const attachmentApi = {
   getAttachmentsDir: () => invoke<string>("get_attachments_dir"),
 };
 
-/** 图片 API */
+/** 图片 API
+ *
+ * save / saveFromPath 返回**相对 data_dir 的 POSIX 路径**（如 `kb_assets/images/1/x.png`）。
+ * 调用方要拼 `kb-asset://<rel>` 写入笔记 content；用 `lib/assetUrl.ts` 的 `toKbAsset()`。
+ */
 export const imageApi = {
-  /** 保存图片（base64 数据，用于粘贴/拖放） */
+  /** 保存图片（base64 数据，用于粘贴/拖放）；返回相对路径 */
   save: (noteId: number, fileName: string, base64Data: string) =>
     invoke<string>("save_note_image", { noteId, fileName, base64Data }),
-  /** 从本地文件路径保存图片（用于工具栏文件选择） */
+  /** 从本地文件路径保存图片（用于工具栏文件选择）；返回相对路径 */
   saveFromPath: (noteId: number, sourcePath: string) =>
     invoke<string>("save_note_image_from_path", { noteId, sourcePath }),
   /** 删除笔记的所有图片 */
   deleteNoteImages: (noteId: number) =>
     invoke<void>("delete_note_images", { noteId }),
-  /** 获取图片存储目录路径 */
+  /** 获取图片存储目录路径（绝对路径，用于"打开目录"入口） */
   getImagesDir: () => invoke<string>("get_images_dir"),
   /** 读取图片字节流：路径以 `.enc` 结尾时由后端自动解密。
-   * 加密笔记的图片不能用 convertFileSrc 走 asset 协议（那读到的是密文），
-   * 必须经此 Command 拿到明文 bytes，前端再转成 blob URL 喂给 <img>。
-   * vault 锁定时此调用会失败。 */
+   * 接收**相对路径**（kb-asset:// 后那段），加密笔记 observer 用此还原明文 bytes
+   * 转 blob URL 喂给 <img>。vault 锁定时此调用会失败。 */
   getBlob: async (path: string): Promise<Uint8Array> => {
     const v = await invoke<number[]>("get_image_blob", { path });
     return new Uint8Array(v);
@@ -527,13 +545,15 @@ export const imageApi = {
  * 与图片 API 对称，但走 Tauri 2.x binary IPC（参数 Uint8Array → Rust Vec<u8>），
  * 比 base64 省 33% 体积 + 零编解码，100MB 视频也能秒传。
  *
+ * save / saveFromPath 返回**相对 data_dir 的 POSIX 路径**，调用方拼 `kb-asset://<rel>`。
+ *
  * v1 不支持加密笔记的视频；后端遇到加密笔记会拒绝。
  */
 export const videoApi = {
-  /** 保存视频字节（Uint8Array 直传，用于粘贴/拖入） */
+  /** 保存视频字节（Uint8Array 直传，用于粘贴/拖入）；返回相对路径 */
   save: (noteId: number, fileName: string, data: Uint8Array) =>
     invoke<string>("save_video", { noteId, fileName, data }),
-  /** 从本地文件路径保存（工具栏文件选择器 / 大文件回退路径，零拷贝） */
+  /** 从本地文件路径保存（工具栏文件选择器 / 大文件回退路径，零拷贝）；返回相对路径 */
   saveFromPath: (noteId: number, sourcePath: string) =>
     invoke<string>("save_video_from_path", { noteId, sourcePath }),
   /** 删除笔记的所有视频 */
@@ -720,4 +740,15 @@ export const taskApi = {
   /** 完成本次：循环任务推进到下一次；非循环任务等同于 toggleStatus */
   completeOccurrence: (id: number) =>
     invoke<void>("complete_task_occurrence", { id }),
+};
+
+/** 待办分类 API（一级扁平分类） */
+export const taskCategoryApi = {
+  list: () => invoke<TaskCategory[]>("list_task_categories"),
+  create: (input: CreateTaskCategoryInput) =>
+    invoke<number>("create_task_category", { input }),
+  update: (id: number, input: UpdateTaskCategoryInput) =>
+    invoke<boolean>("update_task_category", { id, input }),
+  /** 删除分类。任务的 category_id 会因 ON DELETE SET NULL 自动落到未分类 */
+  delete: (id: number) => invoke<boolean>("delete_task_category", { id }),
 };

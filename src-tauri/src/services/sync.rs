@@ -9,7 +9,7 @@
 
 use std::fs;
 use std::io::{BufReader, BufWriter, Cursor, Read, Seek, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
@@ -67,6 +67,10 @@ impl SyncService {
         }
 
         // 2. kb_assets/images/
+        // 设计：ZIP 内路径**保留当前实例的 dev/prod 风格**（dev 写 dev-kb_assets/，
+        // prod 写 kb_assets/），让 dev/prod 数据物理隔离不相互污染。
+        // Import 端直接按 ZIP 内路径落盘，并通过 manifest.is_dev 做强一致性校验，
+        // 跨 dev/prod 的导入会被拒绝（防止 dev 包污染 prod 实例反之亦然）。
         if scope.images {
             let images_dir = data_dir.join(assets_dir_name());
             let (count, size) = add_dir_to_zip(
@@ -125,6 +129,8 @@ impl SyncService {
             app_version: app_version.to_string(),
             scope: scope.clone(),
             stats: stats.clone(),
+            // 标记当前 build 类型，import 端做强一致性校验
+            is_dev: Some(cfg!(debug_assertions)),
         };
         let manifest_json = serde_json::to_string_pretty(&manifest)?;
         zip.start_file(MANIFEST_FILE, opt)?;
@@ -181,6 +187,24 @@ impl SyncService {
             )));
         }
 
+        // dev/prod 一致性校验：包里的 is_dev 必须和当前 build 匹配，
+        // 防止 dev 包污染 prod 实例（资产路径前缀不同会造成无法读取的孤儿数据）。
+        // is_dev 字段为 None = 老版本导出（在引入校验之前），按"宽容兼容"放行 + 日志告警。
+        let current_is_dev = cfg!(debug_assertions);
+        match manifest.is_dev {
+            Some(zip_is_dev) if zip_is_dev != current_is_dev => {
+                return Err(AppError::Custom(format!(
+                    "同步包来源是 {} 实例，当前是 {} 实例，不允许跨环境导入（资产目录前缀不同会变成孤儿数据）",
+                    if zip_is_dev { "dev" } else { "prod" },
+                    if current_is_dev { "dev" } else { "prod" },
+                )));
+            }
+            None => {
+                log::warn!("[sync] 同步包未带 is_dev 字段（老版本导出），跳过 dev/prod 一致性校验");
+            }
+            _ => {}
+        }
+
         // overwrite 模式：替换 app.db 前先清掉资产目录
         if matches!(mode, SyncImportMode::Overwrite) {
             if manifest.scope.images {
@@ -224,10 +248,12 @@ impl SyncService {
                 }
                 n if n == SETTINGS_FILE_IN_ZIP => data_dir.join(settings_file_name()),
                 other => {
-                    // 资产：把 ZIP 里的 "kb_assets/..." / "pdfs/..." / "sources/..." 映射到
-                    // data_dir 下对应带 dev- 前缀的实际目录
-                    let mapped = remap_asset_path_with_prefix(other);
-                    data_dir.join(mapped)
+                    // 资产路径在 ZIP 内已带当前实例风格的 dev/prod 前缀
+                    // （由 export 端 assets_dir_name() 等决定）+ 已通过 manifest.is_dev 校验
+                    // 与当前 build 一致，直接 join 到 data_dir 落盘即可。
+                    // 历史上有个 BUG：这里又加一遍 dev- 前缀导致 dev-dev-kb_assets/ 双前缀目录，
+                    // 已通过 export/import 路径前缀职责对齐 + manifest 校验消除。
+                    data_dir.join(other)
                 }
             };
 
@@ -500,23 +526,6 @@ fn add_dir_to_zip<W: Write + Seek>(
         size += n;
     }
     Ok((count, size))
-}
-
-/// 把 ZIP 里标准路径（kb_assets/... / pdfs/... / sources/...）
-/// 映射回本地带 dev- 前缀的实际路径（如 dev-kb_assets/...）
-fn remap_asset_path_with_prefix(zip_path: &str) -> PathBuf {
-    let prefix = if cfg!(debug_assertions) { "dev-" } else { "" };
-    if prefix.is_empty() {
-        return PathBuf::from(zip_path);
-    }
-    // 把第一段目录名加前缀
-    if let Some(slash) = zip_path.find('/') {
-        let head = &zip_path[..slash];
-        let tail = &zip_path[slash..];
-        PathBuf::from(format!("{}{}{}", prefix, head, tail))
-    } else {
-        PathBuf::from(format!("{}{}", prefix, zip_path))
-    }
 }
 
 fn assets_dir_name() -> &'static str {

@@ -14,10 +14,14 @@ import {
   Check,
   Repeat,
   Link as LinkIcon,
+  Tags as TagsIcon,
+  Settings as SettingsIcon,
+  Inbox as InboxIcon,
 } from "lucide-react";
-import { taskApi } from "@/lib/api";
+import { taskApi, taskCategoryApi } from "@/lib/api";
 import { useAppStore } from "@/store";
-import type { Task, TaskStats } from "@/types";
+import type { Task, TaskStats, TaskCategory } from "@/types";
+import { TaskCategoryManageModal } from "@/components/tasks/TaskCategoryManageModal";
 
 /**
  * TasksPanel —— "待办"视图的主面板（方案 C MVP）。
@@ -109,28 +113,48 @@ export function TasksPanel() {
 
   // URL 是真相源；缺省视为 "todo"
   const currentFilter = (searchParams.get("filter") ?? "todo") as FilterKey;
+  /** URL 上的 category 参数：数字字符串 = 该分类 ID；"none" = 未分类 */
+  const currentCategory = searchParams.get("category");
 
   // 订阅：主区任务增删改后 bump urgentTodoCount → 这里重拉
   const urgentTodoCount = useAppStore((s) => s.urgentTodoCount);
 
   const [todoTasks, setTodoTasks] = useState<Task[]>([]);
   const [stats, setStats] = useState<TaskStats | null>(null);
+  const [categories, setCategories] = useState<TaskCategory[]>([]);
+  const [manageOpen, setManageOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    // 并发：未完成任务列表 + 统计（为拿 totalDone）
+    // 并发：未完成任务列表 + 统计 + 分类
     Promise.all([
       taskApi.list({ status: 0 }).catch(() => [] as Task[]),
       taskApi.stats().catch(() => null),
-    ]).then(([list, s]) => {
+      taskCategoryApi.list().catch(() => [] as TaskCategory[]),
+    ]).then(([list, s, cats]) => {
       if (cancelled) return;
       setTodoTasks(list);
       setStats(s);
+      setCategories(cats);
     });
     return () => {
       cancelled = true;
     };
   }, [urgentTodoCount]);
+
+  /** 每个分类下的未完成任务数 + 未分类计数 */
+  const categoryCounts = useMemo(() => {
+    const map = new Map<number, number>();
+    let none = 0;
+    for (const t of todoTasks) {
+      if (t.category_id == null) {
+        none++;
+      } else {
+        map.set(t.category_id, (map.get(t.category_id) ?? 0) + 1);
+      }
+    }
+    return { byId: map, none };
+  }, [todoTasks]);
 
   const counts = useMemo(() => {
     const c = deriveCounts(todoTasks);
@@ -144,6 +168,11 @@ export function TasksPanel() {
     } else {
       navigate(`/tasks?filter=${f}`);
     }
+  }
+
+  /** 跳到分类视图：value=number 表示分类 ID，"none" 表示未分类 */
+  function goToCategory(value: number | "none") {
+    navigate(`/tasks?category=${value}`);
   }
 
   return (
@@ -270,6 +299,77 @@ export function TasksPanel() {
           token={token}
         />
 
+        {/* 分类 section */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            color: token.colorTextTertiary,
+            fontSize: 11,
+            textTransform: "uppercase",
+            letterSpacing: 0.5,
+            padding: "12px 10px 6px",
+          }}
+        >
+          <TagsIcon size={11} style={{ marginRight: 4 }} />
+          <span style={{ flex: 1 }}>分类</span>
+          <Button
+            type="text"
+            size="small"
+            icon={<SettingsIcon size={12} />}
+            onClick={() => setManageOpen(true)}
+            style={{ width: 20, height: 20, padding: 0, fontSize: 11 }}
+            title="管理分类"
+          />
+        </div>
+        <SmartRow
+          active={currentCategory === "none"}
+          icon={<InboxIcon size={14} />}
+          label="未分类"
+          count={categoryCounts.none}
+          onClick={() => goToCategory("none")}
+          token={token}
+        />
+        {categories.map((c) => (
+          <SmartRow
+            key={c.id}
+            active={currentCategory === String(c.id)}
+            icon={
+              <span
+                style={{
+                  display: "inline-block",
+                  width: 10,
+                  height: 10,
+                  borderRadius: 999,
+                  background: c.color,
+                }}
+              />
+            }
+            label={c.name}
+            count={categoryCounts.byId.get(c.id) ?? 0}
+            onClick={() => goToCategory(c.id)}
+            token={token}
+          />
+        ))}
+        {categories.length === 0 && (
+          <div
+            style={{
+              fontSize: 11,
+              color: token.colorTextTertiary,
+              padding: "4px 10px 10px",
+            }}
+          >
+            <Button
+              type="link"
+              size="small"
+              style={{ padding: 0, fontSize: 11, height: "auto" }}
+              onClick={() => setManageOpen(true)}
+            >
+              + 新建分类
+            </Button>
+          </div>
+        )}
+
         <GroupLabel token={token}>归档</GroupLabel>
 
         <SmartRow
@@ -281,6 +381,16 @@ export function TasksPanel() {
           token={token}
         />
       </div>
+
+      <TaskCategoryManageModal
+        open={manageOpen}
+        onClose={() => setManageOpen(false)}
+        onChanged={async () => {
+          // 重拉分类列表（任务列表里的 category_id 不会变，无需重拉任务）
+          const list = await taskCategoryApi.list().catch(() => [] as TaskCategory[]);
+          setCategories(list);
+        }}
+      />
     </div>
   );
 }

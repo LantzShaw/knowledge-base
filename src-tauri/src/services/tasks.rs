@@ -3,7 +3,8 @@ use chrono::{Datelike, Duration, Months, NaiveDate, NaiveDateTime};
 use crate::database::Database;
 use crate::error::AppError;
 use crate::models::{
-    CreateTaskInput, Task, TaskLinkInput, TaskQuery, TaskStats, UpdateTaskInput,
+    CreateTaskCategoryInput, CreateTaskInput, Task, TaskCategory, TaskLinkInput, TaskQuery,
+    TaskStats, UpdateTaskCategoryInput, UpdateTaskInput,
 };
 
 pub struct TaskService;
@@ -79,6 +80,47 @@ impl TaskService {
     /// 稍后提醒：把截止时间向后推 N 分钟 + 清提醒已触发标记
     pub fn snooze(db: &Database, id: i64, minutes: i32) -> Result<bool, AppError> {
         db.snooze_task(id, minutes)
+    }
+
+    // ─── 分类 CRUD ────────────────────────────────
+
+    pub fn list_categories(db: &Database) -> Result<Vec<TaskCategory>, AppError> {
+        db.list_task_categories()
+    }
+
+    pub fn create_category(
+        db: &Database,
+        mut input: CreateTaskCategoryInput,
+    ) -> Result<i64, AppError> {
+        input.name = input.name.trim().to_string();
+        if input.name.is_empty() {
+            return Err(AppError::InvalidInput("分类名称不能为空".into()));
+        }
+        if input.name.chars().count() > 30 {
+            return Err(AppError::InvalidInput("分类名称不能超过 30 字".into()));
+        }
+        db.create_task_category(input)
+    }
+
+    pub fn update_category(
+        db: &Database,
+        id: i64,
+        mut input: UpdateTaskCategoryInput,
+    ) -> Result<bool, AppError> {
+        if let Some(n) = input.name.as_mut() {
+            *n = n.trim().to_string();
+            if n.is_empty() {
+                return Err(AppError::InvalidInput("分类名称不能为空".into()));
+            }
+            if n.chars().count() > 30 {
+                return Err(AppError::InvalidInput("分类名称不能超过 30 字".into()));
+            }
+        }
+        db.update_task_category(id, input)
+    }
+
+    pub fn delete_category(db: &Database, id: i64) -> Result<bool, AppError> {
+        db.delete_task_category(id)
     }
 
     /// 完成本次（循环任务）：推进 due 到下一次；若循环已到终止条件则自动结束整条。

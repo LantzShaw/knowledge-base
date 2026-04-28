@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use crate::error::AppError;
 
 /// 当前 Schema 版本
-pub const SCHEMA_VERSION: i32 = 28;
+pub const SCHEMA_VERSION: i32 = 30;
 
 /// 获取数据库版本
 pub fn get_version(conn: &Connection) -> Result<i32, AppError> {
@@ -58,6 +58,8 @@ pub fn migrate(conn: &Connection) -> Result<(), AppError> {
             25 => migrate_v25_to_v26(conn)?,
             26 => migrate_v26_to_v27(conn)?,
             27 => migrate_v27_to_v28(conn)?,
+            28 => migrate_v28_to_v29(conn)?,
+            29 => migrate_v29_to_v30(conn)?,
             _ => {
                 return Err(AppError::Custom(format!(
                     "未知的数据库版本: {}",
@@ -1117,5 +1119,139 @@ fn migrate_v27_to_v28(conn: &Connection) -> Result<(), AppError> {
     }
 
     set_version(conn, 28)?;
+    Ok(())
+}
+
+/// v28 -> v29: 把笔记 content 里的素材绝对路径替换成相对协议 `kb-asset://`
+///
+/// 历史背景：旧版前端用 `convertFileSrc(absolute)` 直接把 `http://asset.localhost/<URL编码的绝对路径>`
+/// 写进笔记 content。这导致一旦用户改变数据目录（指针文件 / KB_DATA_DIR），
+/// 笔记里 src 仍指向旧位置，文件读不到 → 全裂图。
+///
+/// 治本方案：content 里只存 `kb-asset://<相对 data_dir 的 POSIX 路径>`，
+/// 渲染时由前端 MutationObserver 实时拼当前 data_dir 解析。
+///
+/// 本迁移 = 一次性数据清洗：
+/// 1. 正则扫每条笔记 content，匹配 `http://asset.localhost/<encoded>` 与 `asset://localhost/<encoded>`
+/// 2. URL-decode 拿到原始绝对路径
+/// 3. 用 `services::asset_path::abs_to_rel` 把绝对路径转相对（支持 fallback 找已知子目录段，
+///    解决"绝对路径来自旧机器/旧 data_dir、当前 data_dir 不是其前缀"的场景）
+/// 4. 替换为 `kb-asset://<rel>` 写回
+///
+/// 失败兜底：路径既不在 data_dir 下也找不到已知段名时保留原样（极少见，迁移日志会告警）。
+/// 跑完后 content 里出现的 `http://asset.localhost/...` 全部应为 0；遗留的视为外链。
+fn migrate_v28_to_v29(conn: &Connection) -> Result<(), AppError> {
+    log::info!("数据库迁移: v28 -> v29 (笔记 content 绝对资产路径 → kb-asset://)");
+
+    use regex::Regex;
+
+    // 匹配两种 asset 协议前缀，捕获后面的 URL 编码部分（直到引号/空格/<>/换行/反引号）
+    let re = Regex::new(
+        r#"(?P<scheme>(?:http://asset\.localhost/|asset://localhost/))(?P<path>[^"'\s<>`]+)"#,
+    )
+    .expect("正则字面量恒定，编译失败属于代码 BUG");
+
+    let mut stmt = conn.prepare(
+        "SELECT id, content FROM notes WHERE content IS NOT NULL AND content != ''",
+    )?;
+    let rows: Vec<(i64, String)> = stmt
+        .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
+        .filter_map(|r| r.ok())
+        .collect();
+    drop(stmt);
+
+    log::info!("[v29] 扫描 {} 条笔记里的 asset URL", rows.len());
+
+    // 临时拿一个 dummy data_dir：abs_to_rel 在 fallback 路径里只用 known segments 切，
+    // 不实际依赖 data_dir。准确 strip_prefix 走不通时 fallback 即可。
+    let dummy_data_dir = std::path::Path::new("");
+
+    let mut replaced_notes = 0usize;
+    let mut replaced_urls = 0usize;
+    let mut unresolved = 0usize;
+
+    let tx = conn.unchecked_transaction()?;
+    for (id, content) in &rows {
+        let mut changed_in_this_note = false;
+        let new_content = re.replace_all(content, |caps: &regex::Captures<'_>| -> String {
+            let encoded = caps.name("path").map(|m| m.as_str()).unwrap_or("");
+            let decoded = match urlencoding::decode(encoded) {
+                Ok(s) => s.into_owned(),
+                Err(_) => return caps.get(0).map(|m| m.as_str()).unwrap_or("").to_string(),
+            };
+            let abs = std::path::Path::new(&decoded);
+            match crate::services::asset_path::abs_to_rel(abs, dummy_data_dir) {
+                Some(rel) => {
+                    replaced_urls += 1;
+                    changed_in_this_note = true;
+                    format!("kb-asset://{}", rel)
+                }
+                None => {
+                    unresolved += 1;
+                    log::warn!(
+                        "[v29] 笔记 {} 中 asset 路径无法解析为相对路径，保留原样: {}",
+                        id, decoded
+                    );
+                    caps.get(0).map(|m| m.as_str()).unwrap_or("").to_string()
+                }
+            }
+        });
+
+        if changed_in_this_note {
+            tx.execute(
+                "UPDATE notes SET content = ?1 WHERE id = ?2",
+                rusqlite::params![new_content.as_ref(), id],
+            )?;
+            replaced_notes += 1;
+        }
+    }
+    tx.commit()?;
+
+    log::info!(
+        "[v29] 迁移完成：触达 {} 条笔记，替换 {} 个 asset URL，{} 个无法解析（已保留）",
+        replaced_notes, replaced_urls, unresolved
+    );
+
+    set_version(conn, 29)?;
+    Ok(())
+}
+
+/// v29 → v30: 待办任务一级分类
+///
+/// 新表 `task_categories`：用户自定义分类（彩色圆点 + 名称 + 排序）
+/// `tasks.category_id`：外键，NULL = 未分类（虚拟分类）
+///
+/// 设计：
+/// - `ON DELETE SET NULL`：删分类时任务回落到未分类，不级联删任务
+/// - 不预置种子数据，让用户首次进设置页自己建（避免清理负担）
+fn migrate_v29_to_v30(conn: &Connection) -> Result<(), AppError> {
+    log::info!("数据库迁移: v29 -> v30 (待办分类: task_categories + tasks.category_id)");
+
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS task_categories (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT NOT NULL UNIQUE,
+            color      TEXT NOT NULL DEFAULT '#1677ff',
+            icon       TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        ",
+    )?;
+
+    let cols = list_columns(conn, "tasks")?;
+    if !cols.iter().any(|c| c == "category_id") {
+        conn.execute_batch(
+            "ALTER TABLE tasks ADD COLUMN category_id INTEGER
+                REFERENCES task_categories(id) ON DELETE SET NULL;",
+        )?;
+    }
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_tasks_category
+            ON tasks(category_id) WHERE category_id IS NOT NULL;",
+    )?;
+
+    set_version(conn, 30)?;
     Ok(())
 }

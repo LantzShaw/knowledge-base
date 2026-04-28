@@ -8,6 +8,7 @@ pub mod search;
 pub mod sync;
 pub mod sync_v1;
 pub mod tags;
+pub mod task_categories;
 pub mod tasks;
 pub mod templates;
 pub mod url_mapping;

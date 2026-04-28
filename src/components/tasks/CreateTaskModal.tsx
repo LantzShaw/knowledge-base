@@ -20,11 +20,12 @@ import dayjs, { type Dayjs } from "dayjs";
 import { Plus, NotebookText, Folder as FolderIcon, File as FileIcon, Link as LinkIcon } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useNavigate } from "react-router-dom";
-import { taskApi, noteApi, configApi } from "@/lib/api";
+import { taskApi, taskCategoryApi, noteApi, configApi } from "@/lib/api";
 import { relativeTime } from "@/lib/utils";
 import type {
   Note,
   Task,
+  TaskCategory,
   TaskLinkInput,
   TaskPriority,
   TaskRepeatKind,
@@ -45,6 +46,8 @@ interface Props {
   presetImportant?: boolean;
   /** 新建时预设截止日期 YYYY-MM-DD（日历双击格子传进来） */
   presetDueDate?: string;
+  /** 新建时预设分类 ID；null 表示未分类 */
+  presetCategoryId?: number | null;
   onClose: () => void;
   onSaved: () => void;
 }
@@ -55,6 +58,7 @@ export function CreateTaskModal({
   presetPriority,
   presetImportant,
   presetDueDate,
+  presetCategoryId,
   onClose,
   onSaved,
 }: Props) {
@@ -90,6 +94,18 @@ export function CreateTaskModal({
   const [urlInput, setUrlInput] = useState("");
   /** 选日期时用于填充的默认时分（从 app_config.all_day_reminder_time 读，默认 09:00） */
   const [defaultTime, setDefaultTime] = useState("09:00");
+  // ─── 分类 ─────────────────────────────────
+  const [categories, setCategories] = useState<TaskCategory[]>([]);
+  const [categoryId, setCategoryId] = useState<number | null>(null);
+
+  // 拉分类列表（一次即可；管理弹窗变更后由父组件 onSaved 触发列表刷新）
+  useEffect(() => {
+    if (!open) return;
+    taskCategoryApi
+      .list()
+      .then(setCategories)
+      .catch(() => setCategories([]));
+  }, [open]);
 
   // 组件首次挂载时拉一次默认时分；早于用户打开弹窗加载，避免首屏跳变
   useEffect(() => {
@@ -146,6 +162,7 @@ export function CreateTaskModal({
         setDueDate(null);
       }
       setRemindBefore(editing.remind_before_minutes);
+      setCategoryId(editing.category_id);
       setLinks(
         editing.links.map((l) => ({
           kind: l.kind,
@@ -185,6 +202,7 @@ export function CreateTaskModal({
         setDueDate(null);
       }
       setRemindBefore(null);
+      setCategoryId(presetCategoryId ?? null);
       setLinks([]);
       // 循环默认清零
       setRepeatMode("none");
@@ -201,7 +219,7 @@ export function CreateTaskModal({
     setNotePickerOpen(false);
     setNoteQuery("");
     setNoteOptions([]);
-  }, [open, editing, presetPriority, presetImportant, presetDueDate]);
+  }, [open, editing, presetPriority, presetImportant, presetDueDate, presetCategoryId]);
 
   /** 拉候选笔记：keyword 空 → 最近 8 条，非空 → 模糊搜前 10 条 */
   const loadNoteCandidates = useCallback(async (keyword: string) => {
@@ -327,6 +345,8 @@ export function CreateTaskModal({
           clear_due_date: !dueStr,
           remind_before_minutes: remindBefore ?? undefined,
           clear_remind_before_minutes: remindBefore === null,
+          category_id: categoryId ?? undefined,
+          clear_category_id: categoryId === null,
           ...repeatPayload.update,
         });
         // 更新 links：简单策略——删除所有旧的，再加新的
@@ -345,6 +365,7 @@ export function CreateTaskModal({
           important,
           due_date: dueStr,
           remind_before_minutes: remindBefore,
+          category_id: categoryId,
           links,
           ...repeatPayload.create,
         });
@@ -485,6 +506,40 @@ export function CreateTaskModal({
               <span className="text-xs">标记为重要</span>
             </Checkbox>
           </div>
+        </div>
+
+        {/* 分类 */}
+        <div>
+          <div className="text-[11px] mb-1" style={{ color: token.colorTextSecondary }}>
+            分类（可选）
+          </div>
+          <Select
+            value={categoryId}
+            onChange={(v) => setCategoryId(v ?? null)}
+            allowClear
+            placeholder="未分类"
+            style={{ minWidth: 200 }}
+            options={[
+              { value: null, label: <span style={{ color: token.colorTextTertiary }}>未分类</span> },
+              ...categories.map((c) => ({
+                value: c.id,
+                label: (
+                  <span className="inline-flex items-center gap-2">
+                    <span
+                      style={{
+                        display: "inline-block",
+                        width: 10,
+                        height: 10,
+                        borderRadius: 999,
+                        background: c.color,
+                      }}
+                    />
+                    {c.name}
+                  </span>
+                ),
+              })),
+            ]}
+          />
         </div>
 
         {/* 截止时间 */}

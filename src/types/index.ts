@@ -196,6 +196,15 @@ export interface AiModelInput {
   max_context?: number;
 }
 
+/** AI 模型连通性测试结果 */
+export interface AiModelTestResult {
+  ok: boolean;
+  /** 端到端往返耗时（毫秒） */
+  latency_ms: number;
+  /** 服务端样本：成功时为模型回复前 40 字 */
+  sample: string | null;
+}
+
 /** AI 对话 */
 export interface AiConversation {
   id: number;
@@ -689,6 +698,8 @@ export interface Task {
   repeat_done_count: number;
   /** AI 智能规划批次 ID（手动创建为 null） */
   source_batch_id: string | null;
+  /** 一级分类 ID；null = 未分类 */
+  category_id: number | null;
   links: TaskLink[];
 }
 
@@ -713,6 +724,8 @@ export interface CreateTaskInput {
   repeat_count?: number | null;
   /** AI 智能规划批次 ID（同次生成共享一个 UUID，可一键撤销整批） */
   source_batch_id?: string | null;
+  /** 一级分类 ID；不传或 null = 未分类 */
+  category_id?: number | null;
 }
 
 export interface UpdateTaskInput {
@@ -732,12 +745,48 @@ export interface UpdateTaskInput {
   clear_repeat_until?: boolean;
   repeat_count?: number | null;
   clear_repeat_count?: boolean;
+  /** 改分类；不传 = 不动 */
+  category_id?: number | null;
+  /** 传 true 显式清空，落到"未分类" */
+  clear_category_id?: boolean;
 }
 
 export interface TaskQuery {
   status?: TaskStatus;
   keyword?: string;
   priority?: TaskPriority;
+  /** 某个分类（与 uncategorized 互斥，category_id 优先） */
+  category_id?: number | null;
+  /** true 时只看 category_id IS NULL 的任务 */
+  uncategorized?: boolean;
+}
+
+// ─── 待办分类 ─────────────────────────────────
+
+export interface TaskCategory {
+  id: number;
+  name: string;
+  /** 圆点颜色，如 "#1677ff" */
+  color: string;
+  /** 可选 emoji 或 lucide 图标名 */
+  icon: string | null;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface CreateTaskCategoryInput {
+  name: string;
+  color?: string | null;
+  icon?: string | null;
+  sort_order?: number | null;
+}
+
+export interface UpdateTaskCategoryInput {
+  name?: string;
+  color?: string;
+  icon?: string | null;
+  clear_icon?: boolean;
+  sort_order?: number;
 }
 
 export interface TaskStats {

@@ -1,7 +1,8 @@
 use tauri::State;
 
 use crate::models::{
-    CreateTaskInput, Task, TaskLinkInput, TaskQuery, TaskStats, UpdateTaskInput,
+    CreateTaskCategoryInput, CreateTaskInput, Task, TaskCategory, TaskLinkInput, TaskQuery,
+    TaskStats, UpdateTaskCategoryInput, UpdateTaskInput,
 };
 use crate::services::tasks::TaskService;
 use crate::state::AppState;
@@ -115,6 +116,40 @@ pub fn snooze_task_reminder(
     let ok = TaskService::snooze(&state.db, id, minutes).map_err(|e| e.to_string())?;
     notify_reminder(&state);
     Ok(ok)
+}
+
+// ─── 分类 CRUD ────────────────────────────────
+
+#[tauri::command]
+pub fn list_task_categories(
+    state: State<'_, AppState>,
+) -> Result<Vec<TaskCategory>, String> {
+    TaskService::list_categories(&state.db).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn create_task_category(
+    state: State<'_, AppState>,
+    input: CreateTaskCategoryInput,
+) -> Result<i64, String> {
+    TaskService::create_category(&state.db, input).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_task_category(
+    state: State<'_, AppState>,
+    id: i64,
+    input: UpdateTaskCategoryInput,
+) -> Result<bool, String> {
+    TaskService::update_category(&state.db, id, input).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_task_category(
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<bool, String> {
+    TaskService::delete_category(&state.db, id).map_err(|e| e.to_string())
 }
 
 /// 完成本次（循环任务）：推进到下一次；非循环任务等同于 toggle 到完成。

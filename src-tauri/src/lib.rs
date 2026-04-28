@@ -52,13 +52,50 @@ fn parse_instance_arg() -> Option<u32> {
     None
 }
 
+/// 当前进程使用的 app_data 子目录名。
+///
+/// - prod: `com.agilefr.kb`（与 Tauri 默认一致）
+/// - dev:  `com.agilefr.kb-dev`（整目录隔离，方便用户备份/清理 dev 数据；
+///         比"同目录加 dev- 文件前缀"更直观）
+///
+/// 注意：Tauri 内置的 `app.path().app_data_dir()` 永远返回 prod 名（因为它读
+/// `tauri.conf.json` 的 identifier）。setup 中需要在这个返回值上手动改写到
+/// `app_data_dir_name()`，所有依赖 framework_app_data_dir 的下游都跟着走。
+fn app_data_dir_name() -> String {
+    if cfg!(debug_assertions) {
+        format!("{}-dev", IDENTIFIER)
+    } else {
+        IDENTIFIER.to_string()
+    }
+}
+
+/// 取当前进程实际使用的 framework_app_data_dir（dev 已隔离到 `-dev` 目录）。
+///
+/// Tauri 内置 `app.path().app_data_dir()` 永远返回 prod 名（基于 tauri.conf.json
+/// 的 identifier），所有运行期 Command 拿 framework_app_data_dir 都要经过本函数，
+/// 否则 dev 单实例锁 / multi_instance flag / 指针文件 等会落到 prod 目录里。
+pub(crate) fn framework_app_data_dir(
+    handle: &tauri::AppHandle,
+) -> Result<PathBuf, tauri::Error> {
+    let from_tauri = handle.path().app_data_dir()?;
+    if cfg!(debug_assertions) {
+        Ok(from_tauri
+            .parent()
+            .map(|parent| parent.join(app_data_dir_name()))
+            .unwrap_or(from_tauri))
+    } else {
+        Ok(from_tauri)
+    }
+}
+
 /// 在 Tauri Builder 启动前估算 app data 目录（用于早期投递判断）
-/// 必须与 Tauri 内部计算保持一致：基于 IDENTIFIER
+/// 必须与 setup 里的 framework_app_data_dir 保持一致：dev 走 `-dev` 隔离目录
 fn early_app_data_dir() -> PathBuf {
+    let name = app_data_dir_name();
     #[cfg(windows)]
     {
         if let Ok(p) = std::env::var("APPDATA") {
-            return PathBuf::from(p).join(IDENTIFIER);
+            return PathBuf::from(p).join(&name);
         }
     }
     #[cfg(target_os = "macos")]
@@ -66,19 +103,19 @@ fn early_app_data_dir() -> PathBuf {
         if let Ok(home) = std::env::var("HOME") {
             return PathBuf::from(home)
                 .join("Library/Application Support")
-                .join(IDENTIFIER);
+                .join(&name);
         }
     }
     #[cfg(target_os = "linux")]
     {
         if let Ok(p) = std::env::var("XDG_DATA_HOME") {
-            return PathBuf::from(p).join(IDENTIFIER);
+            return PathBuf::from(p).join(&name);
         }
         if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home).join(".local/share").join(IDENTIFIER);
+            return PathBuf::from(home).join(".local/share").join(&name);
         }
     }
-    std::env::temp_dir().join(IDENTIFIER)
+    std::env::temp_dir().join(name)
 }
 
 /// 尝试以独占方式打开锁文件
@@ -388,8 +425,9 @@ pub fn run() {
                 let _ = window.show();
             }
 
-            // framework 默认 app_data_dir：单实例锁 + 指针文件 + 迁移 marker 永远在这里
-            let framework_app_data_dir = app.path().app_data_dir()?;
+            // framework 默认 app_data_dir：单实例锁 + 指针文件 + 迁移 marker 永远在这里。
+            // dev 模式重定向到 `-dev` 隔离目录（见 `framework_app_data_dir` helper 注释）。
+            let framework_app_data_dir = framework_app_data_dir(&app.handle())?;
             std::fs::create_dir_all(&framework_app_data_dir)?;
 
             // T-013 完整版：检测迁移 marker → 弹 splash 窗口跑迁移 → close splash
@@ -483,6 +521,22 @@ pub fn run() {
             let sources_dir = services::source_file::SourceFileService::ensure_dir(&instance_dir)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
             log::info!("源文件存储目录: {}", sources_dir.display());
+
+            // 把当前实例数据目录加进 asset protocol scope（递归）。
+            // 静态 tauri.conf.json 里的 `$APPDATA/**` 只覆盖 OS 默认 app_data_dir，
+            // 用户改自定义数据目录 / KB_DATA_DIR / 多开 instance-N 后 kb_assets/pdfs/sources
+            // 都会落到这条静态 scope 之外，导致 `convertFileSrc()` 出来的 asset URL 被 WebView 拒绝
+            // → 图片/视频/PDF/附件全部加载失败。
+            // 失败仅 log warn：素材渲染降级，不阻断启动。
+            if let Err(e) = app.asset_protocol_scope().allow_directory(&instance_dir, true) {
+                log::warn!(
+                    "[asset_scope] 注册数据目录到 asset 协议失败（图片/PDF 可能无法显示）: {} ({})",
+                    instance_dir.display(),
+                    e
+                );
+            } else {
+                log::info!("[asset_scope] 已允许 asset 协议读取: {}", instance_dir.display());
+            }
 
             // 注册全局状态
             let state = AppState::new(db, instance_dir.clone(), instance_id, lock_file);
@@ -603,6 +657,7 @@ pub fn run() {
             commands::system::get_writing_trend,
             commands::system::get_multi_instance_enabled,
             commands::system::set_multi_instance_enabled,
+            commands::system::resolve_asset_absolute_path,
             // 配置模块
             commands::config::get_all_config,
             commands::config::get_config,
@@ -701,6 +756,7 @@ pub fn run() {
             commands::ai::update_ai_model,
             commands::ai::delete_ai_model,
             commands::ai::set_default_ai_model,
+            commands::ai::test_ai_model,
             commands::ai::list_ai_conversations,
             commands::ai::create_ai_conversation,
             commands::ai::delete_ai_conversation,
@@ -805,6 +861,11 @@ pub fn run() {
             commands::tasks::get_task_stats,
             commands::tasks::snooze_task_reminder,
             commands::tasks::complete_task_occurrence,
+            // 待办分类
+            commands::tasks::list_task_categories,
+            commands::tasks::create_task_category,
+            commands::tasks::update_task_category,
+            commands::tasks::delete_task_category,
         ])
         // ─── 窗口事件处理 ─────────────────────────
         .on_window_event(|window, event| {

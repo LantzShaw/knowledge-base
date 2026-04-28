@@ -30,9 +30,9 @@ import {
 } from "lucide-react";
 import { NewTodoButton } from "@/components/NewTodoButton";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { taskApi } from "@/lib/api";
+import { taskApi, taskCategoryApi } from "@/lib/api";
 import { useAppStore } from "@/store";
-import type { Task, TaskPriority } from "@/types";
+import type { Task, TaskPriority, TaskCategory } from "@/types";
 
 type ViewMode = "list" | "kanban" | "quadrant" | "calendar";
 import { CreateTaskModal } from "@/components/tasks/CreateTaskModal";
@@ -233,6 +233,8 @@ export default function TasksPage() {
 
   // URL 是筛选真相源
   const filter = ((searchParams.get("filter") ?? "todo") as SmartFilter);
+  /** URL `?category=` 参数：纯数字 = 分类 ID，"none" = 未分类，null = 不按分类筛选 */
+  const categoryParam = searchParams.get("category");
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -243,6 +245,20 @@ export default function TasksPage() {
   const [presetPriority, setPresetPriority] = useState<TaskPriority | undefined>(undefined);
   const [presetImportant, setPresetImportant] = useState<boolean | undefined>(undefined);
   const [presetDueDate, setPresetDueDate] = useState<string | undefined>(undefined);
+  /** 分类列表（用于在任务行内按 category_id 渲染圆点 + 名字） */
+  const [categories, setCategories] = useState<TaskCategory[]>([]);
+  const categoryMap = useMemo(() => {
+    const m = new Map<number, TaskCategory>();
+    for (const c of categories) m.set(c.id, c);
+    return m;
+  }, [categories]);
+
+  useEffect(() => {
+    taskCategoryApi
+      .list()
+      .then(setCategories)
+      .catch(() => setCategories([]));
+  }, []);
 
   // 多选模式（仅 list 视图，切到 kanban/quadrant/calendar 自动退出）
   const [multiSelect, setMultiSelect] = useState(false);
@@ -304,9 +320,16 @@ export default function TasksPage() {
       } else {
         statusArg = filter === "todo" ? undefined : filterToStatusArg(filter);
       }
+      // 分类筛选下放给后端：URL 上的 category 参数转成 category_id / uncategorized
+      const categoryQuery = categoryParam
+        ? categoryParam === "none"
+          ? { uncategorized: true }
+          : { category_id: Number(categoryParam) }
+        : {};
       const list = await taskApi.list({
         status: statusArg,
         keyword: keyword.trim() || undefined,
+        ...categoryQuery,
       });
       // overdue / today / urgent 这些维度后端暂未支持参数，前端二次过滤
       setTasks(applySmartFilter(list, filter));
@@ -317,7 +340,7 @@ export default function TasksPage() {
     } finally {
       setLoading(false);
     }
-  }, [viewMode, filter, keyword, message]);
+  }, [viewMode, filter, keyword, categoryParam, message]);
 
   // 订阅全局 tasksListRefreshTick：提醒弹窗 / 紧急窗 / 后台 reminder 推进循环
   // 任务等场景修改任务后会 bump tick，让本页自动重拉，无需关页再开
@@ -416,7 +439,29 @@ export default function TasksPage() {
         <div>
           <h1 className="text-lg font-semibold flex items-center gap-2">
             <CheckSquare size={20} style={{ color: token.colorPrimary }} />
-            {filterTitle(filter)}
+            {(() => {
+              if (categoryParam === "none") return "未分类";
+              if (categoryParam) {
+                const c = categoryMap.get(Number(categoryParam));
+                if (c) {
+                  return (
+                    <span className="inline-flex items-center gap-2">
+                      <span
+                        style={{
+                          display: "inline-block",
+                          width: 12,
+                          height: 12,
+                          borderRadius: 999,
+                          background: c.color,
+                        }}
+                      />
+                      {c.name}
+                    </span>
+                  );
+                }
+              }
+              return filterTitle(filter);
+            })()}
           </h1>
           <Text type="secondary" className="text-xs">
             {tasks.filter((t) => t.status === 0).length} 条未完成 ·{" "}
@@ -555,6 +600,7 @@ export default function TasksPage() {
               multiSelect={multiSelect}
               selectedIds={selectedIds}
               onToggleSelect={toggleSelect}
+              categoryMap={categoryMap}
             />
           )}
           {grouped.today.length > 0 && (
@@ -571,6 +617,7 @@ export default function TasksPage() {
               multiSelect={multiSelect}
               selectedIds={selectedIds}
               onToggleSelect={toggleSelect}
+              categoryMap={categoryMap}
             />
           )}
           {grouped.upcoming.length > 0 && (
@@ -587,6 +634,7 @@ export default function TasksPage() {
               multiSelect={multiSelect}
               selectedIds={selectedIds}
               onToggleSelect={toggleSelect}
+              categoryMap={categoryMap}
             />
           )}
           {grouped.noDate.length > 0 && (
@@ -602,6 +650,7 @@ export default function TasksPage() {
               multiSelect={multiSelect}
               selectedIds={selectedIds}
               onToggleSelect={toggleSelect}
+              categoryMap={categoryMap}
             />
           )}
           {filter === "todo"
@@ -644,6 +693,7 @@ export default function TasksPage() {
                   multiSelect={multiSelect}
                   selectedIds={selectedIds}
                   onToggleSelect={toggleSelect}
+                  categoryMap={categoryMap}
                 />
               )
             : grouped.done.length > 0 && (
@@ -659,6 +709,7 @@ export default function TasksPage() {
                   multiSelect={multiSelect}
                   selectedIds={selectedIds}
                   onToggleSelect={toggleSelect}
+                  categoryMap={categoryMap}
                 />
               )}
         </div>
@@ -774,6 +825,8 @@ interface SectionProps {
   onToggleSelect?: (id: number) => void;
   /** 显式隐藏标题的留口（备用） */
   hideHeader?: boolean;
+  /** 分类映射（id → category），用于行内渲染分类圆点 */
+  categoryMap?: Map<number, TaskCategory>;
 }
 
 function TaskSection({
@@ -791,6 +844,7 @@ function TaskSection({
   selectedIds,
   onToggleSelect,
   hideHeader,
+  categoryMap,
 }: SectionProps) {
   return (
     <section>
@@ -823,6 +877,7 @@ function TaskSection({
             multiSelect={multiSelect}
             selected={selectedIds?.has(t.id)}
             onToggleSelect={onToggleSelect}
+            category={t.category_id != null ? categoryMap?.get(t.category_id) : undefined}
           />
         ))}
       </div>
@@ -841,6 +896,8 @@ interface RowProps {
   multiSelect?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: number) => void;
+  /** 任务对应的分类（已 join 好），用于行内渲染圆点 + 名字；缺省/未分类则不渲染 */
+  category?: TaskCategory;
 }
 
 function TaskRow({
@@ -854,6 +911,7 @@ function TaskRow({
   multiSelect,
   selected,
   onToggleSelect,
+  category,
 }: RowProps) {
   const done = task.status === 1;
   const due = describeDueDate(task.due_date);
@@ -962,6 +1020,25 @@ function TaskRow({
               title="循环任务"
             >
               {describeRepeat(task)}
+            </span>
+          )}
+          {category && (
+            <span
+              className="inline-flex items-center gap-1 text-[10px]"
+              style={{ color: token.colorTextTertiary }}
+              title={`分类：${category.name}`}
+            >
+              <span
+                style={{
+                  display: "inline-block",
+                  width: 8,
+                  height: 8,
+                  borderRadius: 999,
+                  background: category.color,
+                  opacity: done ? 0.4 : 1,
+                }}
+              />
+              {category.name}
             </span>
           )}
         </div>

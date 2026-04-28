@@ -205,6 +205,20 @@ pub struct AiModel {
     pub created_at: String,
 }
 
+/// AI 模型连通性测试结果
+///
+/// 测试按钮专用：发一次极小请求（OpenAI 兼容 max_tokens=1，Ollama num_predict=1），
+/// 失败原因走 `format_*_error` 中文化，前端 Modal.error 直接展示。
+#[derive(Debug, Clone, Serialize)]
+pub struct AiModelTestResult {
+    /// 是否连通成功
+    pub ok: bool,
+    /// 端到端往返耗时（毫秒）
+    pub latency_ms: u64,
+    /// 服务端样本（成功时取首段回复前 N 字；失败时为空，错误走 Err 路径）
+    pub sample: Option<String>,
+}
+
 /// 创建/更新 AI 模型入参
 #[derive(Debug, Clone, Deserialize)]
 pub struct AiModelInput {
@@ -591,6 +605,12 @@ pub struct SyncManifest {
     pub scope: SyncScope,
     /// 元数据统计（仅用于预览展示）
     pub stats: SyncStats,
+    /// 导出端是否为 dev build。
+    /// import 端会用此字段强校验：dev 包不能导入 prod 实例反之亦然
+    /// （否则资产路径前缀不一致会变孤儿数据）。
+    /// `Option`：None = 老版本导出（在引入校验之前），按宽容模式放行 + 日志告警。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_dev: Option<bool>,
 }
 
 /// 同步数据统计
@@ -680,6 +700,8 @@ pub struct Task {
     pub repeat_done_count: i32,
     /// 批次来源标识（AI 批量导入用，同次生成共享同一个 UUID）；手动创建为 NULL
     pub source_batch_id: Option<String>,
+    /// 一级分类 ID；None = 未分类
+    pub category_id: Option<i64>,
     pub links: Vec<TaskLink>,
 }
 
@@ -701,6 +723,8 @@ pub struct CreateTaskInput {
     pub repeat_count: Option<i32>,
     /// AI 批量导入时同批次共享一个 UUID，用于一键撤销整批
     pub source_batch_id: Option<String>,
+    /// 一级分类 ID；None = 未分类
+    pub category_id: Option<i64>,
 }
 
 /// 更新任务入参（字段缺省表示不改动）
@@ -725,6 +749,10 @@ pub struct UpdateTaskInput {
     pub clear_repeat_until: Option<bool>,
     pub repeat_count: Option<i32>,
     pub clear_repeat_count: Option<bool>,
+    /// 一级分类 ID（None 不动；传 Some(id) 改）
+    pub category_id: Option<i64>,
+    /// 传 true 显式清空 category_id（落到"未分类"）
+    pub clear_category_id: Option<bool>,
 }
 
 /// 任务关联入参（新建任务时一起传）
@@ -744,6 +772,42 @@ pub struct TaskQuery {
     pub keyword: Option<String>,
     /// 某个优先级
     pub priority: Option<i32>,
+    /// 某个分类（与 uncategorized 互斥，同时传 category_id 优先生效）
+    pub category_id: Option<i64>,
+    /// true 时只返回 category_id IS NULL 的任务（"未分类"虚拟分类）
+    pub uncategorized: Option<bool>,
+}
+
+/// 待办分类（一级，扁平）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskCategory {
+    pub id: i64,
+    pub name: String,
+    /// 圆点颜色，如 "#1677ff"
+    pub color: String,
+    /// 可选 emoji 或 lucide 图标名
+    pub icon: Option<String>,
+    pub sort_order: i32,
+    pub created_at: String,
+}
+
+/// 创建分类入参
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreateTaskCategoryInput {
+    pub name: String,
+    pub color: Option<String>,
+    pub icon: Option<String>,
+    pub sort_order: Option<i32>,
+}
+
+/// 更新分类入参（字段缺省 = 不改）
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpdateTaskCategoryInput {
+    pub name: Option<String>,
+    pub color: Option<String>,
+    pub icon: Option<String>,
+    pub clear_icon: Option<bool>,
+    pub sort_order: Option<i32>,
 }
 
 /// 任务统计（首页卡片 / 侧边栏徽章）
