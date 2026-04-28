@@ -1,11 +1,25 @@
 use tauri::State;
 
+use crate::services::asset_path;
 use crate::services::image::ImageService;
 use crate::state::AppState;
 
+/// 把 Service 返回的绝对路径转成相对 `state.data_dir` 的 POSIX 路径。
+/// 不能转出来的视为内部 BUG（图片应当永远落在 data_dir 下）。
+fn to_relative(state: &AppState, abs: &str) -> Result<String, String> {
+    asset_path::abs_to_rel(std::path::Path::new(abs), &state.data_dir).ok_or_else(|| {
+        format!(
+            "内部错误：保存的图片路径 {} 不在数据目录 {} 下",
+            abs,
+            state.data_dir.display()
+        )
+    })
+}
+
 /// 保存图片（base64 数据，用于粘贴/拖放）。按笔记 is_encrypted 自动加密。
 ///
-/// 返回保存后的绝对路径（加密笔记返回的路径以 `.enc` 结尾，前端据此走 `get_image_blob`）
+/// 返回**相对 data_dir 的 POSIX 路径**（例如 `kb_assets/images/1/x.png` 或加密版 `*.png.enc`）。
+/// 前端拼成 `kb-asset://<rel>` 写入笔记 content；渲染层再解析为可显示 URL。
 #[tauri::command]
 pub fn save_note_image(
     state: State<'_, AppState>,
@@ -13,7 +27,7 @@ pub fn save_note_image(
     file_name: String,
     base64_data: String,
 ) -> Result<String, String> {
-    ImageService::save_from_base64(
+    let abs = ImageService::save_from_base64(
         &state.db,
         &state.vault,
         &state.data_dir,
@@ -21,7 +35,8 @@ pub fn save_note_image(
         &file_name,
         &base64_data,
     )
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    to_relative(&state, &abs)
 }
 
 /// 从本地文件路径保存图片（用于工具栏文件选择）。按笔记 is_encrypted 自动加密。
@@ -31,14 +46,15 @@ pub fn save_note_image_from_path(
     note_id: i64,
     source_path: String,
 ) -> Result<String, String> {
-    ImageService::save_from_path(
+    let abs = ImageService::save_from_path(
         &state.db,
         &state.vault,
         &state.data_dir,
         note_id,
         &source_path,
     )
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    to_relative(&state, &abs)
 }
 
 /// 删除笔记的所有图片
@@ -54,19 +70,23 @@ pub fn get_images_dir(state: State<'_, AppState>) -> Result<String, String> {
     Ok(images_dir.to_string_lossy().into_owned())
 }
 
-/// 读取图片字节流，路径以 `.enc` 结尾时用 vault key 解密。返回原始 PNG/JPG 等字节，
+/// 读取图片字节流（接收**相对路径**）。路径以 `.enc` 结尾时用 vault key 解密。
 /// 前端用 `new Blob([bytes])` + `URL.createObjectURL` 喂给 `<img>`。
 ///
-/// 安全：只允许读 `kb_assets/images/` 目录下的文件，避免被当任意文件读接口滥用。
+/// 安全：rel 必须不含 `..`、不能是绝对路径，且解析后必须落在 images 目录下。
 #[tauri::command]
 pub fn get_image_blob(state: State<'_, AppState>, path: String) -> Result<Vec<u8>, String> {
+    // 兼容传入绝对路径的旧调用：尝试转相对，失败则当作绝对路径继续走老校验
+    let abs = match asset_path::rel_to_abs(&path, &state.data_dir) {
+        Ok(p) => p,
+        Err(_) => std::path::PathBuf::from(&path),
+    };
     let images_root = ImageService::images_dir(&state.data_dir);
-    let images_root_str = images_root.to_string_lossy().to_string();
-    let normalized = path.replace('\\', "/");
-    let root_normalized = images_root_str.replace('\\', "/");
-    if !normalized.starts_with(&root_normalized) {
+    let images_root_str = images_root.to_string_lossy().to_string().replace('\\', "/");
+    let abs_str = abs.to_string_lossy().to_string().replace('\\', "/");
+    if !abs_str.starts_with(&images_root_str) {
         return Err(format!("非法路径（不在 images 目录下）: {}", path));
     }
-    ImageService::read_for_render(&state.vault, &path).map_err(|e| e.to_string())
+    ImageService::read_for_render(&state.vault, &abs.to_string_lossy())
+        .map_err(|e| e.to_string())
 }
-

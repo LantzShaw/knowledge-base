@@ -170,12 +170,13 @@ const TableWithMarkdown = Table.extend({
   },
 });
 import { common, createLowlight } from "lowlight";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useRef, useCallback, useState } from "react";
 import { message } from "antd";
 import { theme as antdTheme } from "antd";
-import { attachmentApi, imageApi, videoApi } from "@/lib/api";
+import { attachmentApi, imageApi, systemApi, videoApi } from "@/lib/api";
+import { parseKbAsset, resolveAssetSrc, toKbAsset, KB_ASSET_SCHEME } from "@/lib/assetUrl";
+import { useAppStore } from "@/store";
 import { EditorToolbar } from "./EditorToolbar";
 import { AiWriteMenu } from "./AiWriteMenu";
 import { WikiLinkDecoration } from "./WikiLinkDecoration";
@@ -481,17 +482,6 @@ function humanSize(bytes: number): string {
   return `${(mb / 1024).toFixed(1)} GB`;
 }
 
-/** 把绝对路径转成 file:// URL，路径里的 `\\` 替换为 `/`，各段做 URI 编码 */
-function pathToFileUrl(absPath: string): string {
-  const normalized = absPath.replace(/\\/g, "/");
-  // 保留 `/` 作分隔符，逐段 encodeURIComponent 避免空格/中文/括号破坏链接
-  const encoded = normalized
-    .split("/")
-    .map((seg) => encodeURIComponent(seg))
-    .join("/");
-  return normalized.startsWith("/") ? `file://${encoded}` : `file:///${encoded}`;
-}
-
 /** 反解 file:// URL 拿回绝对路径，供 opener 使用 */
 function fileUrlToPath(url: string): string {
   const trimmed = url.replace(/^file:\/\/\/?/, "");
@@ -648,8 +638,9 @@ export function TiptapEditor({
         images.map(async (file) => {
           try {
             const base64 = await fileToBase64(file);
-            const filePath = await imageApi.save(effectiveNoteId!, file.name, base64);
-            return { ok: true as const, filePath, name: file.name };
+            // imageApi.save 返回相对 data_dir 的 POSIX 路径（如 kb_assets/images/1/x.png）
+            const relPath = await imageApi.save(effectiveNoteId!, file.name, base64);
+            return { ok: true as const, relPath, name: file.name };
           } catch (e) {
             return { ok: false as const, err: String(e), name: file.name };
           }
@@ -659,10 +650,11 @@ export function TiptapEditor({
       const nodes: { type: string; attrs: { src: string } }[] = [];
       for (const r of results) {
         if (r.ok) {
-          console.log("[image-drop] saved:", r.name, "=>", r.filePath);
+          console.log("[image-drop] saved:", r.name, "=>", r.relPath);
           nodes.push({
             type: "imageResize",
-            attrs: { src: convertFileSrc(r.filePath) },
+            // 写入 kb-asset:// 虚拟 URL；DOM 渲染时由 MutationObserver 解析为 asset URL / Blob URL
+            attrs: { src: toKbAsset(r.relPath) },
           });
         } else {
           message.error(`图片插入失败(${r.name}): ${r.err}`);
@@ -730,12 +722,12 @@ export function TiptapEditor({
         ok.map(async (file) => {
           try {
             const buf = await file.arrayBuffer();
-            const filePath = await videoApi.save(
+            const relPath = await videoApi.save(
               effectiveNoteId!,
               file.name,
               new Uint8Array(buf),
             );
-            return { ok: true as const, filePath, name: file.name };
+            return { ok: true as const, relPath, name: file.name };
           } catch (e) {
             return { ok: false as const, err: String(e), name: file.name };
           }
@@ -748,7 +740,7 @@ export function TiptapEditor({
           nodes.push({
             type: "video",
             // 给每个视频生成稳定 id，VideoTimestamp 通过此 id 锚定跳转
-            attrs: { src: convertFileSrc(r.filePath), id: Math.random().toString(36).slice(2, 10) },
+            attrs: { src: toKbAsset(r.relPath), id: Math.random().toString(36).slice(2, 10) },
           });
         } else {
           message.error(`视频插入失败(${r.name}): ${r.err}`);
@@ -812,7 +804,8 @@ export function TiptapEditor({
       for (const r of results) {
         if (r.ok) {
           const label = `📎 ${r.info.fileName} (${humanSize(r.info.size)})`;
-          const href = pathToFileUrl(r.info.path);
+          // info.path 已是相对 data_dir 的 POSIX 路径；存 kb-asset:// 让 content 跨数据目录可移植
+          const href = toKbAsset(r.info.path);
           nodes.push({
             type: "text",
             text: label,
@@ -1079,29 +1072,34 @@ export function TiptapEditor({
     },
   });
 
-  // 加密笔记图片渲染拦截：editor 里 <img> 的 src 形如 asset://.../xxx.png.enc，
-  // 浏览器直接走 asset 协议拿到的是密文，img 显示 broken。这里用 MutationObserver
-  // 监视 editor DOM，发现 src 路径以 .enc 结尾的就 invoke get_image_blob 拿明文 bytes，
-  // 转 blob URL 替换 img.src。attrs.src 不动（保持 markdown 序列化稳定）。
+  // 资产渲染拦截：笔记 content 里的 <img>/<video> src 是 `kb-asset://<rel>`，
+  // 浏览器看不懂这种协议，需要在 DOM 阶段替换为可显示 URL。
+  //
+  // 三条分支：
+  //   A. `kb-asset://<rel>` 且 rel 以 .enc 结尾   → 加密图，invoke get_image_blob → Blob URL
+  //   B. `kb-asset://<rel>` 普通明文            → resolveAssetSrc → http://asset.localhost/...
+  //   C. 旧 `asset://...xxx.png.enc`（迁移前历史） → 走加密分支兼容
+  //
+  // ProseMirror state 里 attrs.src 永远是 `kb-asset://...`，所以 getHTML/serialize
+  // 输出的 markdown 与 DB 里的一致；只有 DOM 上的 src 被替换成可视 URL。
+  // 替换后 mutation 再次触发但识别不到 kb-asset:// → 自然终止，不会死循环。
+  const dataDir = useAppStore((s) => s.instanceInfo?.dataDir ?? null);
   useEffect(() => {
     if (!editor) return;
     const dom = editor.view.dom as HTMLElement;
-    // 单 editor 实例内复用 blob URL，避免重复 invoke + 重复创建
+    // 单 editor 实例内复用 Blob URL，避免重复 invoke + 重复创建
     const blobCache = new Map<string, string>();
 
-    /** 从 asset URL（含 URL 编码）中还原出 .enc 文件的本地路径；非 .enc 返回 null */
-    const extractEncPath = (src: string): string | null => {
+    /** 历史 asset URL → .enc 文件本地绝对路径（兼容未跑 Step 4 迁移的存量笔记） */
+    const extractLegacyEncPath = (src: string): string | null => {
       if (!src) return null;
-      // 去掉 asset 协议前缀，剩下的是 URL 编码的路径
       let encoded = src;
       if (encoded.startsWith("http://asset.localhost/")) {
         encoded = encoded.slice("http://asset.localhost/".length);
       } else if (encoded.startsWith("asset://localhost/")) {
         encoded = encoded.slice("asset://localhost/".length);
-      } else if (encoded.startsWith("blob:")) {
-        return null; // 已经是 blob URL，跳过
       } else {
-        return null; // 非 asset 协议（外链 / data: 等）
+        return null;
       }
       let decoded: string;
       try {
@@ -1112,50 +1110,67 @@ export function TiptapEditor({
       return decoded.endsWith(".enc") ? decoded : null;
     };
 
-    const processImg = async (img: HTMLImageElement) => {
-      const path = extractEncPath(img.getAttribute("src") ?? "");
-      if (!path) return;
-      const cached = blobCache.get(path);
+    /** 走 Blob URL 通道（加密图共用）。`pathArg` 是后端能直接读的路径（相对 OR 绝对） */
+    const applyBlob = async (el: HTMLElement, pathArg: string) => {
+      const cached = blobCache.get(pathArg);
       if (cached) {
-        if (img.src !== cached) img.src = cached;
+        if ((el as HTMLImageElement).src !== cached) (el as HTMLImageElement).src = cached;
         return;
       }
       try {
-        const bytes = await imageApi.getBlob(path);
+        const bytes = await imageApi.getBlob(pathArg);
         const blob = new Blob([bytes as BlobPart]);
         const url = URL.createObjectURL(blob);
-        blobCache.set(path, url);
-        img.src = url;
+        blobCache.set(pathArg, url);
+        (el as HTMLImageElement).src = url;
       } catch (e) {
-        // vault 锁定 / 文件丢失 → 静默；用户在 UI 上能看到 broken img + 锁图标提示
-        console.warn("[encrypted-image] 解密失败:", path, e);
+        console.warn("[asset-resolve] 解密失败:", pathArg, e);
       }
     };
 
-    // 初始化：先扫一遍现有 img
-    dom.querySelectorAll("img").forEach((img) => {
-      void processImg(img as HTMLImageElement);
-    });
+    const processEl = (el: HTMLElement) => {
+      const src = el.getAttribute("src") ?? "";
+      if (!src || src.startsWith("blob:")) return;
 
-    // 持续观察：粘贴 / 拖放新图后 DOM 节点插入会触发
+      const rel = parseKbAsset(src);
+      if (rel) {
+        // 新格式 kb-asset://
+        if (rel.endsWith(".enc")) {
+          void applyBlob(el, rel); // 后端 get_image_blob 已能接受相对路径
+        } else if (dataDir) {
+          const next = resolveAssetSrc(src, dataDir);
+          if (next !== src) el.setAttribute("src", next);
+        }
+        return;
+      }
+
+      // 兼容老格式：未跑迁移的笔记 src 仍是 asset://...xxx.enc
+      const legacy = extractLegacyEncPath(src);
+      if (legacy) void applyBlob(el, legacy);
+    };
+
+    const scanAll = () => {
+      dom.querySelectorAll("img, video").forEach((el) => processEl(el as HTMLElement));
+    };
+
+    scanAll();
+
     const observer = new MutationObserver((mutations) => {
       for (const m of mutations) {
         if (m.type === "childList") {
           m.addedNodes.forEach((node) => {
-            if (node instanceof HTMLImageElement) {
-              void processImg(node);
+            if (node instanceof HTMLImageElement || node instanceof HTMLVideoElement) {
+              processEl(node);
             } else if (node instanceof HTMLElement) {
-              node.querySelectorAll("img").forEach((img) => {
-                void processImg(img as HTMLImageElement);
-              });
+              node.querySelectorAll("img, video").forEach((el) => processEl(el as HTMLElement));
             }
           });
         } else if (
           m.type === "attributes" &&
           m.attributeName === "src" &&
-          m.target instanceof HTMLImageElement
+          (m.target instanceof HTMLImageElement || m.target instanceof HTMLVideoElement)
         ) {
-          void processImg(m.target);
+          processEl(m.target);
         }
       }
     });
@@ -1168,11 +1183,10 @@ export function TiptapEditor({
 
     return () => {
       observer.disconnect();
-      // 释放 blob URL 防内存泄漏
       blobCache.forEach((url) => URL.revokeObjectURL(url));
       blobCache.clear();
     };
-  }, [editor]);
+  }, [editor, dataDir]);
 
   // 拦截编辑器内链接点击 → 分发给系统对应程序：
   //   file:// / 本地绝对路径 → openPath（系统默认程序打开 PDF/DOC/视频等）
@@ -1197,7 +1211,17 @@ export function TiptapEditor({
       ev.preventDefault();
       ev.stopPropagation();
 
-      if (href.startsWith("file://")) {
+      if (href.startsWith(KB_ASSET_SCHEME)) {
+        // 新格式：kb-asset://<rel> → resolve 当前 data_dir 拿绝对路径再喂 opener
+        const rel = parseKbAsset(href) ?? "";
+        void systemApi
+          .resolveAssetAbsolute(rel)
+          .then((abs) => openPath(abs))
+          .catch((e) => {
+            message.error(`打开附件失败: ${e}`);
+          });
+      } else if (href.startsWith("file://")) {
+        // 旧格式：迁移 SQL 跑完后历史链接已被替换；这里保留兜底兼容未迁移的笔记
         const path = fileUrlToPath(href);
         void openPath(path).catch((e) => {
           message.error(`打开附件失败: ${e}`);

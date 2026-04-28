@@ -1,5 +1,6 @@
-use tauri::{Manager, State};
+use tauri::State;
 
+use crate::services::asset_path;
 use crate::services::pdf::{PdfImportResult, PdfService};
 use crate::state::AppState;
 
@@ -9,43 +10,37 @@ use crate::state::AppState;
 /// - 单个失败不影响其他，错误信息回填到 `error` 字段
 #[tauri::command]
 pub fn import_pdfs(
-    app: tauri::AppHandle,
     state: State<'_, AppState>,
     paths: Vec<String>,
     folder_id: Option<i64>,
 ) -> Result<Vec<PdfImportResult>, String> {
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?;
-
-    Ok(PdfService::import_many(&data_dir, &state.db, &paths, folder_id))
+    Ok(PdfService::import_many(&state.data_dir, &state.db, &paths, folder_id))
 }
 
-/// 获取笔记对应 PDF 的绝对路径
+/// 获取笔记对应 PDF 的**相对 data_dir 的 POSIX 路径**（迁移前叫 get_pdf_absolute_path）。
 ///
-/// 前端 `convertFileSrc()` 转成 asset: 协议可直接在 iframe 里预览
+/// 返回值前端拼 `kb-asset://<rel>` 喂给 iframe / 渲染层。
+/// 历史命名保留 `absolute` 字样仅为兼容 IPC 调用方，含义已变。
 #[tauri::command]
 pub fn get_pdf_absolute_path(
-    app: tauri::AppHandle,
     state: State<'_, AppState>,
     note_id: i64,
 ) -> Result<Option<String>, String> {
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?;
-
     let note = state
         .db
         .get_note(note_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("笔记 {} 不存在", note_id))?;
 
-    let Some(rel) = note.source_file_path else {
+    let Some(rel_legacy) = note.source_file_path else {
         return Ok(None);
     };
 
-    Ok(PdfService::resolve_pdf_absolute_path(&data_dir, &rel)
-        .map(|p| p.to_string_lossy().into_owned()))
+    // DB 里 source_file_path 已经是相对路径（可能 Windows 风格反斜杠）。
+    // 先 join 还原绝对路径再 abs_to_rel 一次，确保最终输出 POSIX 风格。
+    let abs = match PdfService::resolve_pdf_absolute_path(&state.data_dir, &rel_legacy) {
+        Some(p) => p,
+        None => return Ok(None),
+    };
+    Ok(asset_path::abs_to_rel(&abs, &state.data_dir))
 }

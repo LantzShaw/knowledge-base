@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use tauri::{Manager, State};
+use tauri::State;
 
 use crate::services::converter::{self, ConverterDiagnostic, DocConverter};
 use crate::services::source_file::SourceFileService;
@@ -49,15 +49,13 @@ pub fn convert_doc_to_docx_base64(path: String) -> Result<String, String> {
 /// 用于 Word 导入：前端先建笔记拿到 note_id，再调用本接口把原文件挂上
 #[tauri::command]
 pub fn attach_source_file(
-    app: tauri::AppHandle,
     state: State<'_, AppState>,
     note_id: i64,
     source_path: String,
     file_type: String,
 ) -> Result<String, String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let src = PathBuf::from(&source_path);
-    let rel = SourceFileService::attach(&data_dir, note_id, &src, &file_type)
+    let rel = SourceFileService::attach(&state.data_dir, note_id, &src, &file_type)
         .map_err(|e| e.to_string())?;
     state
         .db
@@ -68,14 +66,16 @@ pub fn attach_source_file(
 
 /// 获取笔记关联源文件的绝对路径（pdf/docx/doc 通用）
 ///
-/// 老的 `get_pdf_absolute_path` 仍保留作 PDF 专用别名
+/// 这个 Command 的返回值仅用于 PDF iframe 预览 / opener 打开（**不写入笔记 content**），
+/// 所以保留输出绝对路径，前端 `convertFileSrc` 直接喂给 iframe 即可；笔记 content 里
+/// 的 PDF 引用走另一套 kb-asset:// + Step 4 数据迁移。
+///
+/// 老的 `get_pdf_absolute_path` 仍保留作 PDF 专用别名（已迁到相对路径）
 #[tauri::command]
 pub fn get_source_file_absolute_path(
-    app: tauri::AppHandle,
     state: State<'_, AppState>,
     note_id: i64,
 ) -> Result<Option<String>, String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let note = state
         .db
         .get_note(note_id)
@@ -84,6 +84,6 @@ pub fn get_source_file_absolute_path(
     let Some(rel) = note.source_file_path else {
         return Ok(None);
     };
-    Ok(SourceFileService::resolve_absolute(&data_dir, &rel)
+    Ok(SourceFileService::resolve_absolute(&state.data_dir, &rel)
         .map(|p| p.to_string_lossy().into_owned()))
 }

@@ -42,7 +42,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { toKbAsset } from "@/lib/assetUrl";
 import { attachmentApi, imageApi, videoApi } from "@/lib/api";
 import { insertVideoTimestamp } from "./VideoTimestamp";
 import { EditorStats } from "./EditorStats";
@@ -132,11 +132,10 @@ export function EditorToolbar({ editor, noteId, ensureNoteId }: ToolbarProps) {
     const paths = Array.isArray(selected) ? selected : [selected];
     for (const filePath of paths) {
       try {
-        const savedPath = await imageApi.saveFromPath(effectiveNoteId, filePath);
-        const assetUrl = convertFileSrc(savedPath);
+        const relPath = await imageApi.saveFromPath(effectiveNoteId, filePath);
         editor.chain().focus().insertContent({
           type: "imageResize",
-          attrs: { src: assetUrl },
+          attrs: { src: toKbAsset(relPath) },
         }).run();
       } catch (e) {
         message.error(`图片插入失败: ${e}`);
@@ -174,11 +173,10 @@ export function EditorToolbar({ editor, noteId, ensureNoteId }: ToolbarProps) {
     const paths = Array.isArray(selected) ? selected : [selected];
     for (const filePath of paths) {
       try {
-        const savedPath = await videoApi.saveFromPath(effectiveNoteId, filePath);
-        const assetUrl = convertFileSrc(savedPath);
+        const relPath = await videoApi.saveFromPath(effectiveNoteId, filePath);
         editor.chain().focus().insertContent({
           type: "video",
-          attrs: { src: assetUrl, id: Math.random().toString(36).slice(2, 10) },
+          attrs: { src: toKbAsset(relPath), id: Math.random().toString(36).slice(2, 10) },
         }).run();
       } catch (e) {
         message.error(`视频插入失败: ${e}`);
@@ -231,7 +229,8 @@ export function EditorToolbar({ editor, noteId, ensureNoteId }: ToolbarProps) {
       try {
         const info = await attachmentApi.saveFromPath(effectiveNoteId, filePath);
         const label = `📎 ${info.fileName} (${formatSize(info.size)})`;
-        const href = pathToFileUrl(info.path);
+        // info.path 是相对 data_dir 的 POSIX 路径；存 kb-asset:// 跨数据目录可移植
+        const href = toKbAsset(info.path);
         nodes.push({ type: "text", text: label, marks: [{ type: "link", attrs: { href } }] });
         nodes.push({ type: "text", text: "\n" });
       } catch (e) {
@@ -1140,9 +1139,3 @@ function formatSize(bytes: number): string {
   return `${(mb / 1024).toFixed(1)} GB`;
 }
 
-/** 绝对路径 → file:// URL（与 TiptapEditor.pathToFileUrl 同实现） */
-function pathToFileUrl(absPath: string): string {
-  const normalized = absPath.replace(/\\/g, "/");
-  const encoded = normalized.split("/").map((seg) => encodeURIComponent(seg)).join("/");
-  return normalized.startsWith("/") ? `file://${encoded}` : `file:///${encoded}`;
-}

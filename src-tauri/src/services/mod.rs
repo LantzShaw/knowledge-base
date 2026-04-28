@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod asset_path;
 pub mod attachment;
 pub mod config;
 pub mod crypto;

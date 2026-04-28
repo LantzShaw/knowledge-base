@@ -9,6 +9,7 @@
 
 use tauri::State;
 
+use crate::services::asset_path;
 use crate::services::video::VideoService;
 use crate::state::AppState;
 
@@ -16,9 +17,20 @@ use crate::state::AppState;
 /// 这里只兜底防止异常调用 OOM。
 const MAX_BYTES: usize = 500 * 1024 * 1024;
 
+fn to_relative(state: &AppState, abs: &str) -> Result<String, String> {
+    asset_path::abs_to_rel(std::path::Path::new(abs), &state.data_dir).ok_or_else(|| {
+        format!(
+            "内部错误：保存的视频路径 {} 不在数据目录 {} 下",
+            abs,
+            state.data_dir.display()
+        )
+    })
+}
+
 /// 保存视频（前端 Uint8Array 直传，Tauri 2.x 走 binary IPC）
 ///
-/// 返回保存后的绝对路径，前端拼 `convertFileSrc` 喂给 `<video src=...>`
+/// 返回**相对 data_dir 的 POSIX 路径**（如 `kb_assets/videos/1/x.mp4`）。
+/// 前端拼 `kb-asset://<rel>` 写入 content。
 #[tauri::command]
 pub fn save_video(
     state: State<'_, AppState>,
@@ -45,8 +57,9 @@ pub fn save_video(
         return Err("加密笔记暂不支持插入视频，请先取消加密".into());
     }
 
-    VideoService::save_bytes(&state.data_dir, note_id, &file_name, &data)
-        .map_err(|e| e.to_string())
+    let abs = VideoService::save_bytes(&state.data_dir, note_id, &file_name, &data)
+        .map_err(|e| e.to_string())?;
+    to_relative(&state, &abs)
 }
 
 /// 从本地文件路径保存视频（用于工具栏文件选择 / 大文件回退路径）
@@ -66,8 +79,9 @@ pub fn save_video_from_path(
         return Err("加密笔记暂不支持插入视频，请先取消加密".into());
     }
 
-    VideoService::save_from_path(&state.data_dir, note_id, &source_path)
-        .map_err(|e| e.to_string())
+    let abs = VideoService::save_from_path(&state.data_dir, note_id, &source_path)
+        .map_err(|e| e.to_string())?;
+    to_relative(&state, &abs)
 }
 
 /// 删除笔记的所有视频

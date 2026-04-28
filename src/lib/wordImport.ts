@@ -1,6 +1,6 @@
 import mammoth from "mammoth";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { noteApi, sourceFileApi, imageApi } from "@/lib/api";
+import { toKbAsset } from "@/lib/assetUrl";
 import type { Note } from "@/types";
 
 export interface WordImportResult {
@@ -46,8 +46,9 @@ async function relocateImages(html: string, noteId: number): Promise<string> {
     const ext = mime.split("/")[1].split("+")[0] || "png";
     const fileName = `word-${Date.now()}-${idx++}.${ext}`;
     try {
-      const abs = await imageApi.save(noteId, fileName, b64);
-      const url = convertFileSrc(abs);
+      // imageApi.save 返回相对 data_dir 的 POSIX 路径；直接拼 kb-asset:// 写进 content
+      const rel = await imageApi.save(noteId, fileName, b64);
+      const url = toKbAsset(rel);
       replacements.push({
         match: whole,
         replacement: `<img ${before}src="${url}"${after}>`,
