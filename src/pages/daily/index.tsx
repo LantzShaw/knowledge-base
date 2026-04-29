@@ -24,6 +24,7 @@ import { TiptapEditor } from "@/components/editor";
 import { useAutoSave } from "@/hooks/useAutoSave";
 import { useAppStore } from "@/store";
 import { PlanTodayModal } from "@/components/ai/PlanTodayModal";
+import { NoteAiDrawer } from "@/components/ai/NoteAiDrawer";
 import type { Note } from "@/types";
 
 
@@ -62,6 +63,9 @@ export default function DailyPage() {
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(true);
   const [showPlanModal, setShowPlanModal] = useState(false);
+  // 与 notes/editor 一致：选段触发「问 AI」时打开伴生抽屉，把选段当引用挂上
+  const [aiDrawerOpen, setAiDrawerOpen] = useState(false);
+  const [aiSelection, setAiSelection] = useState<string | undefined>(undefined);
   // 相邻"真实存在"的日记日期（跳过空白日）；按当前 date 拉
   const [neighbors, setNeighbors] = useState<{ prev: string | null; next: string | null }>({
     prev: null,
@@ -389,20 +393,46 @@ export default function DailyPage() {
                 onChange={setContent}
                 placeholder="写点什么..."
                 noteId={note?.id}
-                // 拖/粘贴图片时若日记还没创建，按需建档再插入（无需用户手动"保存"）
+                // 拖/粘贴图片 / 问 AI 时若日记还没创建，按需建档（无需用户手动"保存"）
                 ensureNoteId={async () => {
-                  if (noteRef.current) return noteRef.current.id;
-                  const created = await dailyApi.getOrCreate(dateRef.current);
-                  setNote(created);
-                  noteRef.current = created;
-                  useAppStore.getState().bumpNotesRefresh();
-                  return created.id;
+                  const n = await ensureDailyNote();
+                  return n.id;
+                }}
+                onAskAi={async (selected) => {
+                  // 与 notes/editor.tsx 行为一致：选段挂到抽屉的"引用 chip"，
+                  // 输入框留空给用户写问题。日记还没建档时先按 date 懒建。
+                  try {
+                    await ensureDailyNote();
+                    setAiSelection(selected);
+                    setAiDrawerOpen(true);
+                  } catch (e) {
+                    message.error(`打开 AI 失败：${e}`);
+                  }
                 }}
               />
             </>
           )}
         </div>
       </div>
+      {/* 伴生 AI 抽屉：仅在日记 note 已存在时挂载（NoteAiDrawer 需要确切 noteId） */}
+      {note && (
+        <NoteAiDrawer
+          noteId={note.id}
+          open={aiDrawerOpen}
+          onClose={() => setAiDrawerOpen(false)}
+          pendingSelection={aiSelection}
+        />
+      )}
     </div>
   );
+
+  /** 取或懒建当天日记（noteRef + state 双写，兼顾闭包内立即可见和 React 重渲染） */
+  async function ensureDailyNote(): Promise<Note> {
+    if (noteRef.current) return noteRef.current;
+    const created = await dailyApi.getOrCreate(dateRef.current);
+    setNote(created);
+    noteRef.current = created;
+    useAppStore.getState().bumpNotesRefresh();
+    return created;
+  }
 }

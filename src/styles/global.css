@@ -948,18 +948,19 @@ body,
 }
 
 /* 设置页：左侧锚点导航 + 右侧内容区 两栏布局。
-   左侧 sticky 跟随主区滚动；右侧维持原 max-w-2xl 居中视觉。 */
+   左侧 sticky 跟随主区滚动；右侧内容区铺到接近主区域宽度，
+   两侧仅留 12px 内边距避免贴边。整体不再硬限 max-width，
+   随主内容区自适应（外层 AppLayout 已限 viewport）。 */
 .anchor-page-layout {
   display: flex;
   gap: 24px;
   align-items: flex-start;
-  /* 居中两栏整体（导航 180 + gap 24 + 内容 672 ≈ 876） */
-  max-width: 900px;
+  max-width: 1080px;
   margin: 0 auto;
-  padding: 0 4px;
+  padding: 0 12px;
 }
 .anchor-page-nav {
-  width: 180px;
+  width: 150px;
   flex-shrink: 0;
   position: sticky;
   top: 16px;
@@ -993,7 +994,7 @@ body,
 .anchor-page-content {
   flex: 1;
   min-width: 0;
-  max-width: 672px;
+  /* 不再硬限 672：让内容跟着主区域宽度自然铺开，超宽屏走外层 1280 兜底 */
 }
 /* 视口窄时降级：导航折叠成水平横滚条 */
 @media (max-width: 720px) {

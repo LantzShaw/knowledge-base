@@ -153,12 +153,40 @@ export function DataDirSection() {
 
       {info && (
         <div className="space-y-2">
-          {/* 当前 */}
+          {/* 当前数据目录：路径展示 + 行末尾的「选择/更换」「恢复默认」按钮组，
+              环境变量覆盖时按钮被隐藏（UI 不允许在 env 模式下改路径）。 */}
           <PathRow
             label="当前数据目录"
             path={info.currentDir}
             tag={sourceTag}
             onCopy={copyPath}
+            trailing={
+              !isEnvOverride && (
+                <Space size={4}>
+                  {info.source === "pointer" && (
+                    <Popconfirm
+                      title="恢复默认数据目录?"
+                      description="清除指针文件，重启后回到默认 app_data 路径。本地数据不会被删除。"
+                      onConfirm={handleClear}
+                      okText="恢复默认"
+                      cancelText="取消"
+                    >
+                      <Button size="small" icon={<RotateCcw size={12} />}>
+                        恢复默认
+                      </Button>
+                    </Popconfirm>
+                  )}
+                  <Button
+                    type="primary"
+                    size="small"
+                    icon={<FolderOpen size={12} />}
+                    onClick={handlePick}
+                  >
+                    {info.source === "default" ? "选择新数据目录…" : "更换…"}
+                  </Button>
+                </Space>
+              )
+            }
           />
 
           {/* 默认 */}
@@ -201,33 +229,16 @@ export function DataDirSection() {
             />
           )}
 
-          <Space className="mt-3" wrap>
-            <Button
-              type="primary"
-              icon={<FolderOpen size={14} />}
-              onClick={handlePick}
-              disabled={isEnvOverride}
-            >
-              {info.source === "default" ? "选择新数据目录…" : "更换数据目录…"}
-            </Button>
-            {info.source === "pointer" && (
-              <Popconfirm
-                title="恢复默认数据目录?"
-                description="清除指针文件，重启后回到默认 app_data 路径。本地数据不会被删除。"
-                onConfirm={handleClear}
-                okText="恢复默认"
-                cancelText="取消"
-              >
-                <Button icon={<RotateCcw size={14} />}>恢复默认</Button>
-              </Popconfirm>
-            )}
-            {isEnvOverride && (
+          {/* 操作按钮已提到 Card 标题栏右侧 extra 槽，保持与其它卡片一致；
+              仅 KB_DATA_DIR 环境变量覆盖时显示状态提示（此时 extra 不渲染按钮） */}
+          {isEnvOverride && (
+            <div className="mt-2">
               <Text type="secondary" style={{ fontSize: 12 }}>
                 提示：当前由 <Text code>KB_DATA_DIR</Text>{" "}
                 环境变量驱动，UI 不允许覆盖；要修改请先 unset 该环境变量
               </Text>
-            )}
-          </Space>
+            </div>
+          )}
         </div>
       )}
 
@@ -338,16 +349,19 @@ function PathRow({
   tag,
   dim,
   onCopy,
+  trailing,
 }: {
   label: string;
   path: string;
   tag?: { label: string; color: string } | null;
   dim?: boolean;
   onCopy: (p: string) => void;
+  /** 行末尾自定义槽（如"选择新数据目录"按钮组），跟在复制按钮后面 */
+  trailing?: React.ReactNode;
 }) {
   const { token } = antdTheme.useToken();
   return (
-    <div className="flex items-start gap-2" style={{ fontSize: 13 }}>
+    <div className="flex items-center gap-2 flex-wrap" style={{ fontSize: 13 }}>
       <span
         style={{
           color: dim ? token.colorTextTertiary : token.colorTextSecondary,
@@ -365,6 +379,7 @@ function PathRow({
           borderRadius: 4,
           fontSize: 12,
           color: dim ? token.colorTextTertiary : token.colorText,
+          minWidth: 200,
         }}
       >
         {path}
@@ -377,6 +392,7 @@ function PathRow({
         onClick={() => onCopy(path)}
         title="复制路径"
       />
+      {trailing}
     </div>
   );
 }

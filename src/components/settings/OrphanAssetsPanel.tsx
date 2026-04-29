@@ -136,18 +136,32 @@ export default function OrphanAssetsPanel() {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-3 flex-wrap">
+      {/* 说明独立成段，与「数据目录」「数据同步与备份」的节奏一致 */}
+      <Text
+        type="secondary"
+        style={{ fontSize: 12, lineHeight: 1.7, display: "block" }}
+      >
+        扫描数据库里没有引用关系的素材文件，覆盖图片 / 视频 / 附件 / PDF / 源文件 5 类，按类别分组展示。
+      </Text>
+
+      {/* 状态文字 + 主按钮：模仿 SyncV1Section 的"已配置的同步源 ... [新增同步源]"节奏 */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <span style={{ fontSize: 13, color: "var(--ant-color-text-secondary)" }}>
+          {scanning
+            ? "正在扫描…"
+            : scan
+              ? `本次扫描结果：共 ${totalCount} 项`
+              : "尚未扫描，点右侧按钮开始"}
+        </span>
         <Button
           icon={<SyncOutlined />}
           onClick={handleScan}
           loading={scanning}
           type="primary"
+          size="small"
         >
-          扫描全部孤儿素材
+          {scan ? "重新扫描" : "扫描全部孤儿素材"}
         </Button>
-        <Text type="secondary" className="text-xs">
-          覆盖图片 / 视频 / 附件 / PDF / 源文件 5 类，按类别分组展示
-        </Text>
       </div>
 
       {scan && totalCount === 0 && (

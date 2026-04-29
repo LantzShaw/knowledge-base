@@ -1574,11 +1574,12 @@ export default function SettingsPage() {
       {/* 维护：孤儿素材清理（5 类素材统一） */}
       <Card
         id="settings-orphan-assets"
+        size="small"
         title={
-          <Space>
-            <Trash2 size={16} />
-            <span>维护 · 孤儿素材清理</span>
-          </Space>
+          <span className="flex items-center gap-2">
+            <Trash2 size={16} style={{ color: "var(--ant-color-primary)" }} />
+            维护 · 孤儿素材清理
+          </span>
         }
         className="mb-4"
       >
