@@ -716,7 +716,9 @@ export function NotesPanel() {
     const dropKey = String(info.node.key);
     if (dragKey.startsWith(NEW_NODE_PREFIX) || dropKey.startsWith(NEW_NODE_PREFIX)) return;
 
-    // ── 笔记拖动 → 移动到目标文件夹 ──
+    // ── 笔记拖动 → 跨 folder 改 folder_id；同 folder 内调 reorder 改 sort_order ──
+    // Why: 跨 folder 时改 sort_order 没意义（用户肯定还要再拖到目标位置），保持原行为；
+    //      同 folder 时拖到另一笔记上/旁 → 重排，注意：仅在列表页"自定义排序"模式下可见
     if (isNoteKey(dragKey)) {
       const noteId = noteIdFromKey(dragKey);
       const note = findNoteById(noteId);
@@ -727,8 +729,10 @@ export function NotesPanel() {
       //   - 落在文件夹之间的 gap → 目标 = 该文件夹的父
       //   - 落在另一篇笔记上/旁 → 目标 = 那篇笔记所在的文件夹
       let targetFolderId: number | null;
+      let dropNoteId: number | null = null;
       if (isNoteKey(dropKey)) {
-        const dropNote = findNoteById(noteIdFromKey(dropKey));
+        dropNoteId = noteIdFromKey(dropKey);
+        const dropNote = findNoteById(dropNoteId);
         targetFolderId = dropNote ? dropNote.folder_id : note.folder_id;
       } else {
         const dropFolderId = Number(dropKey);
@@ -738,9 +742,44 @@ export function NotesPanel() {
           : dropFolderId;
       }
 
-      if (targetFolderId === note.folder_id) return; // 同目录无操作
+      // 跨 folder：保持原"只换 folder_id"行为
+      if (targetFolderId !== note.folder_id) {
+        try {
+          await noteApi.moveToFolder(noteId, targetFolderId);
+          useAppStore.getState().bumpNotesRefresh();
+        } catch (e) {
+          message.error(String(e));
+        }
+        return;
+      }
+
+      // 同 folder + 落在另一个笔记叶子上/旁 → 重排该 folder 内笔记顺序
+      if (dropNoteId == null || dropNoteId === noteId) return;
+      const siblings: Note[] =
+        targetFolderId == null
+          ? uncategorizedNotes
+          : (notesByFolder.get(targetFolderId) ?? []);
+      const withoutDrag = siblings.filter((n) => n.id !== noteId);
+      const dropIdx = withoutDrag.findIndex((n) => n.id === dropNoteId);
+      if (dropIdx < 0) return;
+      // antd Tree 的 dropPosition 相对父级位置；diff 出 dropOffset 判断"落在前/后"
+      const posArr = info.node.pos.split("-");
+      const dropOffset =
+        info.dropPosition - Number(posArr[posArr.length - 1]);
+      const insertIdx = dropOffset > 0 ? dropIdx + 1 : dropIdx;
+      const newOrder = [...withoutDrag];
+      newOrder.splice(insertIdx, 0, note);
       try {
-        await noteApi.moveToFolder(noteId, targetFolderId);
+        await noteApi.reorder(newOrder.map((n) => n.id));
+        // 重载该 folder 笔记缓存以反映新顺序（list_notes 默认按时间序，所以肉眼
+        // 看不到差异；切到列表页"自定义排序"模式才能看见）
+        if (targetFolderId == null) {
+          loadingUncategorizedRef.current = false;
+          void loadUncategorizedNotes();
+        } else {
+          loadingNotesRef.current.delete(targetFolderId);
+          void loadNotesForFolder(targetFolderId);
+        }
         useAppStore.getState().bumpNotesRefresh();
       } catch (e) {
         message.error(String(e));

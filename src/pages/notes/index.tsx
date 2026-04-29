@@ -53,6 +53,21 @@ import {
   ContextMenuOverlay,
   type ContextMenuEntry,
 } from "@/components/ui/ContextMenuOverlay";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useTabsStore } from "@/store/tabs";
 import { useAppStore } from "@/store";
 import { stripHtml, relativeTime } from "@/lib/utils";
@@ -66,6 +81,33 @@ import type { Note, PageResult, Folder, Tag as NoteTag } from "@/types";
 const { Title, Text, Paragraph } = Typography;
 
 type ViewMode = "list" | "card" | "timeline";
+
+/**
+ * 自定义排序模式下用的 antd Table 行：把每个 <tr> 包成 @dnd-kit/sortable 节点。
+ * 通过 antd Table `components.body.row` 注入。activationConstraint 由父级 PointerSensor
+ * 控制，避免 click 误触发拖拽（保证 checkbox / 行 click 仍能正常用）。
+ */
+function SortableTableRow(
+  props: React.HTMLAttributes<HTMLTableRowElement> & {
+    "data-row-key"?: string | number;
+  },
+) {
+  const id = String(props["data-row-key"] ?? "");
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id });
+  const style: React.CSSProperties = {
+    ...props.style,
+    transform: CSS.Transform.toString(transform),
+    transition,
+    cursor: "grab",
+    ...(isDragging
+      ? { position: "relative" as const, zIndex: 999, opacity: 0.7 }
+      : {}),
+  };
+  return (
+    <tr {...props} ref={setNodeRef} style={style} {...attributes} {...listeners} />
+  );
+}
 
 /** 将笔记按日期分组 */
 function groupByDate(notes: Note[]): Map<string, Note[]> {
@@ -501,6 +543,10 @@ export default function NoteListPage() {
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   /** 列表视图每页条数，受分页组件 sizeChanger 控制；初始 12 */
   const [listPageSize, setListPageSize] = useState(12);
+  /** 列表排序模式（仅 list 视图生效）。"custom" 才启用拖拽排序 */
+  const [sortBy, setSortBy] = useState<"default" | "custom" | "created" | "title">(
+    "default",
+  );
   /** 列表视图下选中的笔记 id，切换到其他视图/翻页自动清空 */
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   /** 批量移动 Popover 的开关 */
@@ -533,6 +579,12 @@ export default function NoteListPage() {
   useEffect(() => {
     loadNotes(1);
   }, [folderId]);
+
+  // sortBy 切换时重新拉取（排序由后端决定）
+  useEffect(() => {
+    loadNotes(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortBy]);
 
   // 监听全局"刷新"触发器：任何创建/导入流程完成后都会 bump，触发列表重拉
   const notesRefreshTick = useAppStore((s) => s.notesRefreshTick);
@@ -568,6 +620,8 @@ export default function NoteListPage() {
               ? Number(folderId)
               : undefined,
           uncategorized: isUncategorized || undefined,
+          // 只 list 视图才让用户切换 sort_by；卡片/时间线沿用默认
+          sort_by: viewMode === "list" ? sortBy : undefined,
         });
         setData(result);
       } catch (e) {
@@ -576,7 +630,7 @@ export default function NoteListPage() {
         setLoading(false);
       }
     },
-    [viewMode, keyword, folderId, listPageSize],
+    [viewMode, keyword, folderId, listPageSize, sortBy],
   );
 
   const handleDelete = useCallback(
@@ -843,6 +897,33 @@ export default function NoteListPage() {
       });
     },
     [loadNotes],
+  );
+
+  // ─── DnD 自定义排序（仅 list + sortBy=custom） ──────
+  // PointerSensor 设 5px 激活距离，防止 click 误触发拖拽（checkbox / 行 click 仍正常）
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  );
+  const dndEnabled = viewMode === "list" && sortBy === "custom";
+
+  const handleDragEnd = useCallback(
+    async (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const oldIdx = data.items.findIndex((n) => String(n.id) === String(active.id));
+      const newIdx = data.items.findIndex((n) => String(n.id) === String(over.id));
+      if (oldIdx < 0 || newIdx < 0) return;
+      const reordered = arrayMove(data.items, oldIdx, newIdx);
+      // 乐观更新
+      setData((prev) => ({ ...prev, items: reordered }));
+      try {
+        await noteApi.reorder(reordered.map((n) => n.id));
+      } catch (e) {
+        message.error(`排序保存失败：${e}`);
+        loadNotes(data.page);
+      }
+    },
+    [data.items, data.page, loadNotes],
   );
 
   // ─── 列表行右键菜单 ──────────────────────────
@@ -1311,30 +1392,91 @@ export default function NoteListPage() {
             overflow: "hidden",
           }}
         >
-          <div className="flex-1 min-h-0 overflow-auto">
-            <Table
-              columns={columns}
-              dataSource={data.items}
-              rowKey="id"
-              loading={loading}
+          {/* 排序模式切换：custom 才启用拖拽，其他模式按对应字段后端排序 */}
+          <div
+            className="flex-shrink-0 flex items-center justify-end gap-2 px-3 py-2"
+            style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}
+          >
+            <span style={{ fontSize: 12, color: token.colorTextSecondary }}>
+              排序
+            </span>
+            <Segmented
               size="small"
-              pagination={false}
-              sticky
-              rowSelection={{
-                selectedRowKeys: selectedIds,
-                onChange: (keys) => setSelectedIds(keys.map((k) => Number(k))),
-                columnWidth: 40,
-              }}
-              onRow={(record) => ({
-                onContextMenu: (e) => {
-                  e.preventDefault();
-                  noteCtx.open(
-                    { clientX: e.clientX, clientY: e.clientY },
-                    record,
-                  );
-                },
-              })}
+              value={sortBy}
+              onChange={(v) =>
+                setSortBy(v as "default" | "custom" | "created" | "title")
+              }
+              options={[
+                { value: "default", label: "修改时间" },
+                { value: "created", label: "创建时间" },
+                { value: "title", label: "标题" },
+                { value: "custom", label: "自定义" },
+              ]}
             />
+          </div>
+          <div className="flex-1 min-h-0 overflow-auto">
+            {dndEnabled ? (
+              <DndContext
+                sensors={dndSensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext
+                  items={data.items.map((n) => String(n.id))}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <Table
+                    columns={columns}
+                    dataSource={data.items}
+                    rowKey="id"
+                    loading={loading}
+                    size="small"
+                    pagination={false}
+                    sticky
+                    rowSelection={{
+                      selectedRowKeys: selectedIds,
+                      onChange: (keys) =>
+                        setSelectedIds(keys.map((k) => Number(k))),
+                      columnWidth: 40,
+                    }}
+                    components={{ body: { row: SortableTableRow } }}
+                    onRow={(record) => ({
+                      onContextMenu: (e: React.MouseEvent) => {
+                        e.preventDefault();
+                        noteCtx.open(
+                          { clientX: e.clientX, clientY: e.clientY },
+                          record,
+                        );
+                      },
+                    })}
+                  />
+                </SortableContext>
+              </DndContext>
+            ) : (
+              <Table
+                columns={columns}
+                dataSource={data.items}
+                rowKey="id"
+                loading={loading}
+                size="small"
+                pagination={false}
+                sticky
+                rowSelection={{
+                  selectedRowKeys: selectedIds,
+                  onChange: (keys) => setSelectedIds(keys.map((k) => Number(k))),
+                  columnWidth: 40,
+                }}
+                onRow={(record) => ({
+                  onContextMenu: (e) => {
+                    e.preventDefault();
+                    noteCtx.open(
+                      { clientX: e.clientX, clientY: e.clientY },
+                      record,
+                    );
+                  },
+                })}
+              />
+            )}
           </div>
           <div
             className="flex-shrink-0 flex justify-end items-center px-3 py-2"
