@@ -1,7 +1,13 @@
+import { useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Button, Popconfirm, theme as antdTheme } from "antd";
-import { Search as SearchIcon, Clock, X, Trash2 } from "lucide-react";
+import { Button, Popconfirm, message, theme as antdTheme } from "antd";
+import { Search as SearchIcon, Clock, X, Trash2, Copy, MinusCircle } from "lucide-react";
 import { useAppStore } from "@/store";
+import { useContextMenu } from "@/hooks/useContextMenu";
+import {
+  ContextMenuOverlay,
+  type ContextMenuEntry,
+} from "@/components/ui/ContextMenuOverlay";
 
 /**
  * SearchPanel —— Activity Bar 模式下"搜索"视图的主面板。
@@ -29,10 +35,56 @@ export function SearchPanel() {
     navigate(`/search?q=${encodeURIComponent(q)}`);
   }
 
+  // ─── 右键菜单 ────────────────────────────────
+  const ctx = useContextMenu<{ q: string }>();
+
+  const menuItems: ContextMenuEntry[] = useMemo(() => {
+    const p = ctx.state.payload;
+    if (!p) return [];
+    return [
+      {
+        key: "copy",
+        label: "复制查询词",
+        icon: <Copy size={13} />,
+        onClick: () => {
+          ctx.close();
+          navigator.clipboard
+            .writeText(p.q)
+            .then(() => message.success("已复制"))
+            .catch((e) => message.error(`复制失败：${e}`));
+        },
+      },
+      {
+        key: "remove",
+        label: "从历史中移除",
+        icon: <MinusCircle size={13} />,
+        onClick: () => {
+          ctx.close();
+          removeRecentSearch(p.q);
+        },
+      },
+      { type: "divider" },
+      {
+        key: "clear-all",
+        label: "清空所有历史",
+        icon: <Trash2 size={13} />,
+        danger: true,
+        onClick: () => {
+          ctx.close();
+          clearRecentSearches();
+          message.success("已清空");
+        },
+      },
+    ];
+  }, [ctx, removeRecentSearch, clearRecentSearches]);
+
   return (
     <div
       className="flex flex-col h-full"
       style={{ overflow: "hidden" }}
+      // 顶层兜底：本面板无 input，整个面板的 WebView 默认菜单都吞掉。
+      // 历史条目子级 onContextMenu 已自管 preventDefault + ctx.open
+      onContextMenu={(e) => e.preventDefault()}
     >
       {/* 视图标题 */}
       <div
@@ -94,10 +146,15 @@ export function SearchPanel() {
         ) : (
           recentSearches.map((q) => {
             const active = q === currentQ;
+            const ctxActive = ctx.state.payload?.q === q;
             return (
               <div
                 key={q}
                 onClick={() => goToQuery(q)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  ctx.open(e.nativeEvent, { q });
+                }}
                 className="cursor-pointer group"
                 style={{
                   display: "flex",
@@ -110,7 +167,9 @@ export function SearchPanel() {
                     : "transparent",
                   color: active ? token.colorPrimary : token.colorText,
                   fontSize: 13,
-                  transition: "background .15s",
+                  outline: ctxActive ? `1px solid ${token.colorPrimary}` : "none",
+                  outlineOffset: -1,
+                  transition: "background .15s, outline .1s",
                 }}
               >
                 <SearchIcon
@@ -152,6 +211,14 @@ export function SearchPanel() {
           })
         )}
       </div>
+
+      <ContextMenuOverlay
+        open={!!ctx.state.payload}
+        x={ctx.state.x}
+        y={ctx.state.y}
+        items={menuItems}
+        onClose={ctx.close}
+      />
     </div>
   );
 }
