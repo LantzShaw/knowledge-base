@@ -9,8 +9,9 @@ import {
   Badge,
   message,
   Spin,
+  theme as antdTheme,
 } from "antd";
-import dayjs from "dayjs";
+import dayjs, { type Dayjs } from "dayjs";
 import {
   Calendar,
   ChevronLeft,
@@ -66,6 +67,14 @@ export default function DailyPage() {
     prev: null,
     next: null,
   });
+  // DatePicker 弹窗里"哪些天有日记"，按月缓存（key="YYYY-MM"）
+  // 用 Map 而不是平铺 Set：避免跨月切换重复请求
+  const [datesByMonth, setDatesByMonth] = useState<Map<string, Set<string>>>(
+    () => new Map(),
+  );
+  // 正在加载的月份集合（去重并发请求；失败会从这里删除允许重试）
+  const loadingMonthsRef = useRef<Set<string>>(new Set());
+  const { token } = antdTheme.useToken();
 
   const isToday = date === todayStr();
 
@@ -115,6 +124,49 @@ export default function DailyPage() {
       cancelled = true;
     };
   }, [date]);
+
+  /**
+   * 加载某月有日记的日期集合（DatePicker 弹窗里的圆点标识）。
+   * - 已加载 / 加载中 → 直接返回不重复请求
+   * - 失败 → 从 loadingMonthsRef 里删除允许重试；不打扰用户（picker 仅缺圆点不影响选日）
+   */
+  const ensureMonthLoaded = useCallback(async (year: number, month: number) => {
+    const key = `${year}-${String(month).padStart(2, "0")}`;
+    if (loadingMonthsRef.current.has(key)) return;
+    loadingMonthsRef.current.add(key);
+    try {
+      const list = await dailyApi.listDates(year, month);
+      setDatesByMonth((prev) => {
+        const next = new Map(prev);
+        next.set(key, new Set(list));
+        return next;
+      });
+    } catch (e) {
+      console.warn("[daily] listDates 失败:", e);
+      loadingMonthsRef.current.delete(key);
+    }
+  }, []);
+
+  // 当前 date 改变 → 预加载该月，让 picker 一打开就能看到圆点
+  // 同时也加载相邻月份的日期数据（用户翻月时常会看上下月，预热避免延迟）
+  useEffect(() => {
+    const d = dayjs(date);
+    void ensureMonthLoaded(d.year(), d.month() + 1);
+    // SidePanel / 自动保存创建新日记 后 bumpNotesRefresh 会触发本组件重渲染，
+    // 但缓存仍在；用 notesRefresh 作 effect 触发器在新建日记后强制 reload 当前月
+  }, [date, ensureMonthLoaded]);
+
+  // 当 SidePanel 提示「笔记列表需要刷新」时（自动保存新建了日记），
+  // 清掉当前月份缓存让下一次 picker 打开重拉
+  const notesRefreshTick = useAppStore((s) => s.notesRefreshTick);
+  useEffect(() => {
+    if (notesRefreshTick === 0) return; // 初始化跳过
+    setDatesByMonth(new Map());
+    loadingMonthsRef.current.clear();
+    const d = dayjs(date);
+    void ensureMonthLoaded(d.year(), d.month() + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notesRefreshTick]);
 
   /**
    * 自动保存：内容变化后 1.2s 防抖入库。
@@ -227,6 +279,42 @@ export default function DailyPage() {
             // 未来日期不能选（日记是对过去/当下的记录）
             disabledDate={(d) => d.isAfter(dayjs().endOf("day"))}
             style={{ fontWeight: 600, padding: "0 4px" }}
+            // 用户在日选模式下翻月 → 拉新月份的"有日记"日期集合
+            onPanelChange={(d, mode) => {
+              if (mode === "date") {
+                void ensureMonthLoaded(d.year(), d.month() + 1);
+              }
+            }}
+            // 给"有日记"的日期单元格加底部圆点（与 Apple Calendar / Notion 一致）
+            cellRender={(current, info) => {
+              if (info.type !== "date") return info.originNode;
+              const d = current as Dayjs;
+              const monthKey = d.format("YYYY-MM");
+              const dateStr = d.format("YYYY-MM-DD");
+              const hasDaily =
+                datesByMonth.get(monthKey)?.has(dateStr) ?? false;
+              if (!hasDaily) return info.originNode;
+              return (
+                // paddingBottom 撑开外层给圆点专属空间；不依赖负 bottom（被 cell 容器裁切风险）
+                <div style={{ position: "relative", paddingBottom: 8 }}>
+                  {info.originNode}
+                  <span
+                    aria-hidden
+                    style={{
+                      position: "absolute",
+                      left: "50%",
+                      bottom: 1,
+                      transform: "translateX(-50%)",
+                      width: 4,
+                      height: 4,
+                      borderRadius: "50%",
+                      background: token.colorPrimary,
+                      pointerEvents: "none",
+                    }}
+                  />
+                </div>
+              );
+            }}
           />
           <Button
             size="small"
