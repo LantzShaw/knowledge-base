@@ -182,6 +182,8 @@ import { EditorToolbar } from "./EditorToolbar";
 import { AiWriteMenu } from "./AiWriteMenu";
 import { WikiLinkDecoration } from "./WikiLinkDecoration";
 import { WikiLinkSuggestion } from "./WikiLinkSuggestion";
+import { useEditorContextMenu } from "./useEditorContextMenu";
+import { ContextMenuOverlay } from "@/components/ui/ContextMenuOverlay";
 import { Video as VideoNode } from "./VideoNode";
 import { VideoTimestamp } from "./VideoTimestamp";
 import { AllowFileLink } from "./AllowFileLink";
@@ -1285,6 +1287,10 @@ export function TiptapEditor({
 
   const { token } = antdTheme.useToken();
 
+  // 编辑器节点右键菜单：图片/视频/附件/wiki 链接的自定义右键操作；
+  // 普通文本继续走浏览器原生剪切/复制/粘贴菜单
+  const { ctx: nodeCtxMenu, menuItems: nodeMenuItems } = useEditorContextMenu(editor);
+
   // 编辑器统计信息：打字时不实时算，停顿 300ms 后再遍历整篇。
   // 算法与右上角 EditorStats 共用 src/lib/textStats.ts，确保两处数字永远一致。
   const [stats, setStats] = useState({ chars: 0, words: 0, readingTime: "< 1 min" });
@@ -1344,6 +1350,15 @@ export function TiptapEditor({
         <span>{stats.chars} 字符</span>
         <span>{stats.readingTime} 阅读</span>
       </div>
+
+      {/* 节点级右键菜单（图片/视频/附件/wiki 链接） */}
+      <ContextMenuOverlay
+        open={!!nodeCtxMenu.state.payload}
+        x={nodeCtxMenu.state.x}
+        y={nodeCtxMenu.state.y}
+        items={nodeMenuItems}
+        onClose={nodeCtxMenu.close}
+      />
     </div>
   );
 }
