@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Button,
+  Modal,
   Pagination,
   Popconfirm,
   Space,
@@ -11,11 +12,22 @@ import {
   theme as antdTheme,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { Eye, EyeOff, Folder as FolderIcon } from "lucide-react";
-import { folderApi, hiddenApi, noteApi } from "@/lib/api";
+import {
+  Eye,
+  EyeOff,
+  Folder as FolderIcon,
+  ExternalLink,
+  Trash2,
+} from "lucide-react";
+import { folderApi, hiddenApi, noteApi, trashApi } from "@/lib/api";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { relativeTime } from "@/lib/utils";
 import type { Folder, Note, PageResult } from "@/types";
+import { useContextMenu } from "@/hooks/useContextMenu";
+import {
+  ContextMenuOverlay,
+  type ContextMenuEntry,
+} from "@/components/ui/ContextMenuOverlay";
 
 const { Title, Text } = Typography;
 
@@ -134,6 +146,65 @@ export default function HiddenPage() {
     }
   }
 
+  // ─── 右键菜单 ────────────────────────────────
+  const ctx = useContextMenu<{ id: number; title: string }>();
+
+  const menuItems: ContextMenuEntry[] = useMemo(() => {
+    const p = ctx.state.payload;
+    if (!p) return [];
+    return [
+      {
+        key: "open",
+        label: "打开笔记",
+        icon: <ExternalLink size={13} />,
+        onClick: () => {
+          ctx.close();
+          navigate(`/notes/${p.id}`);
+        },
+      },
+      {
+        key: "unhide",
+        label: "取消隐藏",
+        icon: <Eye size={13} />,
+        onClick: () => {
+          ctx.close();
+          void handleUnhide(p.id);
+        },
+      },
+      { type: "divider" },
+      {
+        key: "delete",
+        label: "移到回收站",
+        icon: <Trash2 size={13} />,
+        danger: true,
+        onClick: () => {
+          ctx.close();
+          Modal.confirm({
+            title: `把「${p.title || "(无标题)"}」移到回收站？`,
+            content: "可以在回收站恢复。",
+            okText: "移入回收站",
+            okButtonProps: { danger: true },
+            async onOk() {
+              try {
+                await trashApi.softDelete(p.id);
+                message.success("已移到回收站");
+                // 本地从列表移除（不重拉，避免分页跳动）
+                setData((prev) => ({
+                  ...prev,
+                  items: prev.items.filter((n) => n.id !== p.id),
+                  total: Math.max(0, prev.total - 1),
+                }));
+              } catch (e) {
+                message.error(`删除失败：${e}`);
+              }
+            },
+          });
+        },
+      },
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx.state.payload, navigate]);
+
   const columns: ColumnsType<Note> = useMemo(
     () => [
       {
@@ -243,7 +314,16 @@ export default function HiddenPage() {
   );
 
   return (
-    <div className="max-w-4xl mx-auto h-full flex flex-col min-h-0">
+    <div
+      className="max-w-4xl mx-auto h-full flex flex-col min-h-0"
+      onContextMenu={(e) => {
+        // 顶层兜底：表格行/操作有自己的 onContextMenu 会先 preventDefault；
+        // 其他位置（标题、空白）走顶层吞掉默认菜单。input 白名单保留浏览器原生菜单
+        const t = e.target as HTMLElement;
+        if (t.closest("input, textarea, [contenteditable='true']")) return;
+        e.preventDefault();
+      }}
+    >
       <div className="flex items-center justify-between mb-2 flex-shrink-0">
         <Title level={3} style={{ margin: 0, lineHeight: "32px" }}>
           <span className="flex items-center gap-2">
@@ -281,6 +361,22 @@ export default function HiddenPage() {
               size="small"
               pagination={false}
               sticky
+              onRow={(record) => ({
+                onContextMenu: (e) => {
+                  e.preventDefault();
+                  ctx.open(e.nativeEvent, {
+                    id: record.id,
+                    title: record.title,
+                  });
+                },
+                style:
+                  ctx.state.payload?.id === record.id
+                    ? {
+                        outline: `1px solid ${token.colorPrimary}`,
+                        outlineOffset: -1,
+                      }
+                    : undefined,
+              })}
             />
           </div>
           <div className="flex-shrink-0 flex justify-end items-center px-3 py-2">
@@ -308,6 +404,14 @@ export default function HiddenPage() {
           }
         />
       )}
+
+      <ContextMenuOverlay
+        open={!!ctx.state.payload}
+        x={ctx.state.x}
+        y={ctx.state.y}
+        items={menuItems}
+        onClose={ctx.close}
+      />
     </div>
   );
 }

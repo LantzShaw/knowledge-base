@@ -105,7 +105,12 @@ export function HiddenPanel() {
   }
 
   return (
-    <div className="flex flex-col h-full" style={{ overflow: "hidden" }}>
+    <div
+      className="flex flex-col h-full"
+      style={{ overflow: "hidden" }}
+      // 本面板纯目录导航 + 无 input → 顶层兜底吞 WebView 默认菜单
+      onContextMenu={(e) => e.preventDefault()}
+    >
       {/* 视图标题 */}
       <div
         className="flex items-center gap-2 px-3 py-2.5 shrink-0"
