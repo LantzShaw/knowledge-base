@@ -27,7 +27,16 @@ import {
   Edit3,
   ListChecks,
   X as IconX,
+  Copy,
+  Flame,
+  Circle,
+  Check as IconCheck,
 } from "lucide-react";
+import { useContextMenu } from "@/hooks/useContextMenu";
+import {
+  ContextMenuOverlay,
+  type ContextMenuEntry,
+} from "@/components/ui/ContextMenuOverlay";
 import { NewTodoButton } from "@/components/NewTodoButton";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { taskApi, taskCategoryApi } from "@/lib/api";
@@ -632,6 +641,7 @@ export default function TasksPage() {
               selectedIds={selectedIds}
               onToggleSelect={toggleSelect}
               categoryMap={categoryMap}
+              onUpdated={loadTasks}
             />
           )}
           {grouped.today.length > 0 && (
@@ -649,6 +659,7 @@ export default function TasksPage() {
               selectedIds={selectedIds}
               onToggleSelect={toggleSelect}
               categoryMap={categoryMap}
+              onUpdated={loadTasks}
             />
           )}
           {grouped.upcoming.length > 0 && (
@@ -666,6 +677,7 @@ export default function TasksPage() {
               selectedIds={selectedIds}
               onToggleSelect={toggleSelect}
               categoryMap={categoryMap}
+              onUpdated={loadTasks}
             />
           )}
           {grouped.noDate.length > 0 && (
@@ -682,6 +694,7 @@ export default function TasksPage() {
               selectedIds={selectedIds}
               onToggleSelect={toggleSelect}
               categoryMap={categoryMap}
+              onUpdated={loadTasks}
             />
           )}
           {filter === "todo"
@@ -725,6 +738,7 @@ export default function TasksPage() {
                   selectedIds={selectedIds}
                   onToggleSelect={toggleSelect}
                   categoryMap={categoryMap}
+                  onUpdated={loadTasks}
                 />
               )
             : grouped.done.length > 0 && (
@@ -741,6 +755,7 @@ export default function TasksPage() {
                   selectedIds={selectedIds}
                   onToggleSelect={toggleSelect}
                   categoryMap={categoryMap}
+                  onUpdated={loadTasks}
                 />
               )}
         </div>
@@ -850,6 +865,8 @@ interface SectionProps {
   onDelete: (t: Task) => void;
   onEdit: (t: Task) => void;
   onOpenLink: (l: Task["links"][number]) => void;
+  /** 右键菜单中"改优先级"等需要重拉列表的操作完成后回调，由父级触发 loadTasks */
+  onUpdated?: () => void;
   /** 多选态相关；undefined 表示非多选态 */
   multiSelect?: boolean;
   selectedIds?: Set<number>;
@@ -871,12 +888,118 @@ function TaskSection({
   onDelete,
   onEdit,
   onOpenLink,
+  onUpdated,
   multiSelect,
   selectedIds,
   onToggleSelect,
   hideHeader,
   categoryMap,
 }: SectionProps) {
+  const { message } = AntdApp.useApp();
+  // 右键菜单：每个 section 独立 ctx state；同一时刻只有一个 section 弹菜单不冲突
+  const ctx = useContextMenu<Task>();
+
+  /** 把任务序列化成 markdown 列表项 */
+  function toMarkdown(t: Task): string {
+    const checkbox = t.status === 1 ? "[x]" : "[ ]";
+    const due = t.due_date ? ` (截止: ${t.due_date.slice(0, 16)})` : "";
+    return `- ${checkbox} ${t.title}${due}`;
+  }
+
+  async function changePriority(t: Task, p: 0 | 1 | 2) {
+    try {
+      await taskApi.update(t.id, { priority: p });
+      message.success(p === 0 ? "已设为紧急" : p === 1 ? "已设为普通" : "已设为低");
+      onUpdated?.();
+    } catch (e) {
+      message.error(`修改优先级失败：${e}`);
+    }
+  }
+
+  const menuItems: ContextMenuEntry[] = useMemo(() => {
+    const t = ctx.state.payload;
+    if (!t) return [];
+    const done = t.status === 1;
+    return [
+      {
+        key: "toggle",
+        label: done ? "标记为未完成" : "标记已完成",
+        icon: <IconCheck size={13} />,
+        onClick: () => {
+          ctx.close();
+          onToggle(t);
+        },
+      },
+      {
+        key: "edit",
+        label: "编辑任务",
+        icon: <Edit3 size={13} />,
+        onClick: () => {
+          ctx.close();
+          onEdit(t);
+        },
+      },
+      {
+        key: "copy",
+        label: "复制为 Markdown",
+        icon: <Copy size={13} />,
+        onClick: () => {
+          ctx.close();
+          navigator.clipboard
+            .writeText(toMarkdown(t))
+            .then(() => message.success("已复制"))
+            .catch((err) => message.error(`复制失败：${err}`));
+        },
+      },
+      { type: "divider" },
+      {
+        key: "p-urgent",
+        label: "设为紧急",
+        icon: <Flame size={13} />,
+        disabled: t.priority === 0,
+        hint: t.priority === 0 ? "✓" : undefined,
+        onClick: () => {
+          ctx.close();
+          void changePriority(t, 0);
+        },
+      },
+      {
+        key: "p-normal",
+        label: "设为普通",
+        icon: <Circle size={13} />,
+        disabled: t.priority === 1,
+        hint: t.priority === 1 ? "✓" : undefined,
+        onClick: () => {
+          ctx.close();
+          void changePriority(t, 1);
+        },
+      },
+      {
+        key: "p-low",
+        label: "设为低",
+        icon: <Circle size={13} />,
+        disabled: t.priority === 2,
+        hint: t.priority === 2 ? "✓" : undefined,
+        onClick: () => {
+          ctx.close();
+          void changePriority(t, 2);
+        },
+      },
+      { type: "divider" },
+      {
+        key: "delete",
+        label: "删除任务",
+        icon: <Trash2 size={13} />,
+        danger: true,
+        onClick: () => {
+          ctx.close();
+          onDelete(t);
+        },
+      },
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx.state.payload]);
+
   return (
     <section>
       {!hideHeader && (
@@ -909,9 +1032,22 @@ function TaskSection({
             selected={selectedIds?.has(t.id)}
             onToggleSelect={onToggleSelect}
             category={t.category_id != null ? categoryMap?.get(t.category_id) : undefined}
+            contextActive={ctx.state.payload?.id === t.id}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              ctx.open(e.nativeEvent, t);
+            }}
           />
         ))}
       </div>
+
+      <ContextMenuOverlay
+        open={!!ctx.state.payload}
+        x={ctx.state.x}
+        y={ctx.state.y}
+        items={menuItems}
+        onClose={ctx.close}
+      />
     </section>
   );
 }
@@ -929,6 +1065,10 @@ interface RowProps {
   onToggleSelect?: (id: number) => void;
   /** 任务对应的分类（已 join 好），用于行内渲染圆点 + 名字；缺省/未分类则不渲染 */
   category?: TaskCategory;
+  /** 右键菜单当前指向本行 → 加蓝色描边提示操作目标 */
+  contextActive?: boolean;
+  /** 右键事件，由父级 TaskSection 注入 ctx.open */
+  onContextMenu?: (e: React.MouseEvent) => void;
 }
 
 function TaskRow({
@@ -943,6 +1083,8 @@ function TaskRow({
   selected,
   onToggleSelect,
   category,
+  contextActive,
+  onContextMenu,
 }: RowProps) {
   const done = task.status === 1;
   const due = describeDueDate(task.due_date);
@@ -955,10 +1097,14 @@ function TaskRow({
         background:
           multiSelect && isSelected ? token.colorPrimaryBg : "transparent",
         cursor: multiSelect ? "pointer" : "default",
+        outline: contextActive ? `1px solid ${token.colorPrimary}` : "none",
+        outlineOffset: -1,
+        transition: "background .15s, outline .1s",
       }}
       onClick={
         multiSelect ? () => onToggleSelect?.(task.id) : undefined
       }
+      onContextMenu={onContextMenu}
     >
       {/* 多选态：复选框；普通态：完成勾选 */}
       {multiSelect ? (

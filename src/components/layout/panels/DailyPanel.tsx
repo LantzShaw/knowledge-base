@@ -183,6 +183,9 @@ export function DailyPanel() {
     <div
       className="flex flex-col h-full"
       style={{ overflow: "hidden" }}
+      // 本面板纯导航 + 没有 input 元素 → 顶层兜底吞掉 WebView 默认菜单。
+      // DateRow 子级 onContextMenu 会自己 preventDefault + ctx.open 弹自定义菜单
+      onContextMenu={(e) => e.preventDefault()}
     >
       {/* 视图标题 */}
       <div

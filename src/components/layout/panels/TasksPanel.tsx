@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Button, Badge, theme as antdTheme } from "antd";
+import { Button, Badge, Modal, Input, message, theme as antdTheme } from "antd";
 import {
   CheckSquare,
   Plus,
@@ -17,11 +17,18 @@ import {
   Tags as TagsIcon,
   Settings as SettingsIcon,
   Inbox as InboxIcon,
+  Edit3,
+  Trash2,
 } from "lucide-react";
 import { taskApi, taskCategoryApi } from "@/lib/api";
 import { useAppStore } from "@/store";
 import type { Task, TaskStats, TaskCategory } from "@/types";
 import { TaskCategoryManageModal } from "@/components/tasks/TaskCategoryManageModal";
+import { useContextMenu } from "@/hooks/useContextMenu";
+import {
+  ContextMenuOverlay,
+  type ContextMenuEntry,
+} from "@/components/ui/ContextMenuOverlay";
 
 /**
  * TasksPanel —— "待办"视图的主面板（方案 C MVP）。
@@ -175,8 +182,94 @@ export function TasksPanel() {
     navigate(`/tasks?category=${value}`);
   }
 
+  // ─── 右键菜单（分类行）────────────────────────
+  const ctx = useContextMenu<{ id: number; name: string }>();
+  // 重命名 Modal（受控）：null = 关闭
+  const [renameTarget, setRenameTarget] = useState<{ id: number; name: string } | null>(null);
+  const [renameInput, setRenameInput] = useState("");
+
+  /** 重新拉分类列表（重命名 / 删除后调用） */
+  async function reloadCategories() {
+    const list = await taskCategoryApi.list().catch(() => [] as TaskCategory[]);
+    setCategories(list);
+  }
+
+  const categoryMenuItems: ContextMenuEntry[] = useMemo(() => {
+    const p = ctx.state.payload;
+    if (!p) return [];
+    return [
+      {
+        key: "rename",
+        label: "重命名",
+        icon: <Edit3 size={13} />,
+        onClick: () => {
+          setRenameTarget({ id: p.id, name: p.name });
+          setRenameInput(p.name);
+          ctx.close();
+        },
+      },
+      { type: "divider" },
+      {
+        key: "delete",
+        label: "删除分类",
+        icon: <Trash2 size={13} />,
+        danger: true,
+        onClick: () => {
+          ctx.close();
+          Modal.confirm({
+            title: `删除分类「${p.name}」？`,
+            content: "此分类下的任务会自动落到「未分类」（任务本身不会被删除）。",
+            okText: "删除",
+            okButtonProps: { danger: true },
+            async onOk() {
+              try {
+                await taskCategoryApi.delete(p.id);
+                message.success("已删除分类");
+                await reloadCategories();
+                // 当前若正在查看这个分类，跳到未分类
+                if (currentCategory === String(p.id)) {
+                  goToCategory("none");
+                }
+              } catch (e) {
+                message.error(`删除失败：${e}`);
+              }
+            },
+          });
+        },
+      },
+    ];
+  }, [ctx, currentCategory]);
+
+  async function submitRename() {
+    if (!renameTarget) return;
+    const name = renameInput.trim();
+    if (!name) {
+      message.warning("分类名不能为空");
+      return;
+    }
+    if (name === renameTarget.name) {
+      setRenameTarget(null);
+      return;
+    }
+    try {
+      await taskCategoryApi.update(renameTarget.id, { name });
+      message.success("已重命名");
+      setRenameTarget(null);
+      await reloadCategories();
+    } catch (e) {
+      message.error(`重命名失败：${e}`);
+    }
+  }
+
   return (
-    <div className="flex flex-col h-full" style={{ overflow: "hidden" }}>
+    <div
+      className="flex flex-col h-full"
+      style={{ overflow: "hidden" }}
+      // 本面板纯导航 + 没有 input 元素 → 顶层兜底吞掉 WebView 默认菜单。
+      // 已接入自定义菜单的子元素（分类行）会在子级 onContextMenu 自己处理；
+      // 其他智能筛选行 / "分类"标题 / "未分类"行右键无反应（桌面应用一致行为）
+      onContextMenu={(e) => e.preventDefault()}
+    >
       {/* 视图标题 */}
       <div
         className="flex items-center gap-2 px-3 py-2.5 shrink-0"
@@ -334,6 +427,7 @@ export function TasksPanel() {
           <SmartRow
             key={c.id}
             active={currentCategory === String(c.id)}
+            contextActive={ctx.state.payload?.id === c.id}
             icon={
               <span
                 style={{
@@ -348,6 +442,10 @@ export function TasksPanel() {
             label={c.name}
             count={categoryCounts.byId.get(c.id) ?? 0}
             onClick={() => goToCategory(c.id)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              ctx.open(e.nativeEvent, { id: c.id, name: c.name });
+            }}
             token={token}
           />
         ))}
@@ -385,12 +483,37 @@ export function TasksPanel() {
       <TaskCategoryManageModal
         open={manageOpen}
         onClose={() => setManageOpen(false)}
-        onChanged={async () => {
-          // 重拉分类列表（任务列表里的 category_id 不会变，无需重拉任务）
-          const list = await taskCategoryApi.list().catch(() => [] as TaskCategory[]);
-          setCategories(list);
-        }}
+        onChanged={reloadCategories}
       />
+
+      {/* 分类右键菜单 */}
+      <ContextMenuOverlay
+        open={!!ctx.state.payload}
+        x={ctx.state.x}
+        y={ctx.state.y}
+        items={categoryMenuItems}
+        onClose={ctx.close}
+      />
+
+      {/* 重命名分类 Modal */}
+      <Modal
+        open={!!renameTarget}
+        title="重命名分类"
+        okText="保存"
+        cancelText="取消"
+        onCancel={() => setRenameTarget(null)}
+        onOk={submitRename}
+        destroyOnHidden
+      >
+        <Input
+          value={renameInput}
+          onChange={(e) => setRenameInput(e.target.value)}
+          onPressEnter={submitRename}
+          placeholder="新分类名"
+          maxLength={32}
+          autoFocus
+        />
+      </Modal>
     </div>
   );
 }
@@ -420,19 +543,24 @@ function GroupLabel({
 
 function SmartRow({
   active,
+  contextActive,
   icon,
   label,
   count,
   danger,
   onClick,
+  onContextMenu,
   token,
 }: {
   active: boolean;
+  /** 右键菜单当前指向本行 → 加蓝色描边 */
+  contextActive?: boolean;
   icon: React.ReactNode;
   label: string;
   count?: number;
   danger?: boolean;
   onClick: () => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
   token: {
     colorPrimary: string;
     colorError: string;
@@ -444,6 +572,7 @@ function SmartRow({
   return (
     <div
       onClick={onClick}
+      onContextMenu={onContextMenu}
       className="cursor-pointer"
       style={{
         display: "flex",
@@ -455,7 +584,9 @@ function SmartRow({
         color: active ? token.colorPrimary : token.colorText,
         fontWeight: active ? 500 : undefined,
         fontSize: 13,
-        transition: "background .15s",
+        outline: contextActive ? `1px solid ${token.colorPrimary}` : "none",
+        outlineOffset: -1,
+        transition: "background .15s, outline .1s",
       }}
     >
       <span
