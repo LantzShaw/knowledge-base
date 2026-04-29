@@ -151,6 +151,15 @@ interface AppStore {
   /** "全局新建笔记"时自动附加的默认标签 ids；空数组 = 不附加 */
   defaultTagIds: number[];
   /**
+   * 每篇笔记被折叠的 heading anchors（按 noteId 分桶）。
+   *
+   * 业界主流（Obsidian）做法：折叠态是"视图偏好"，本机持久化但不写进笔记内容、
+   * 不参与跨设备同步。anchor = slug + occurrence index（详见 components/editor/headingAnchor）。
+   *
+   * 整张表懒加载到 Map：noteId → Set<anchor>；持久化序列化为 Record<string, string[]>。
+   */
+  notesHeadingFolded: Record<number, string[]>;
+  /**
    * NotesPanel 首次进入是否已执行"全部折叠初始化"（持久化）。
    * false = 用户从未打开过侧栏（或老版本升级），首次拿到 folders 时把全部 id 灌进 collapsed。
    * true = 已初始化，后续完全由用户操作驱动展开/折叠。
@@ -244,6 +253,10 @@ interface AppStore {
   setDefaultFolderId: (folderId: number | null) => Promise<void>;
   /** 设置默认标签集（空数组 = 清除）+ 持久化到 app_config */
   setDefaultTagIds: (tagIds: number[]) => Promise<void>;
+  /** 切换某条笔记某个 heading anchor 的折叠态（toggle） */
+  toggleNoteHeadingFold: (noteId: number, anchor: string) => void;
+  /** 整体替换某条笔记的折叠 anchors（极少用，多用 toggle） */
+  setNoteHeadingFolded: (noteId: number, anchors: string[]) => void;
   /**
    * 启动时预取的文件夹树缓存。
    * 让 NotesPanel 第一次 mount 时立即拿到种子数据，避免"点笔记 → 等 invoke"的空白闪烁。
@@ -291,6 +304,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   notesFoldersInitialCollapseDone: false,
   defaultFolderId: null,
   defaultTagIds: [],
+  notesHeadingFolded: {},
   instanceInfo: null,
   loadInstanceInfo: async () => {
     try {
@@ -465,6 +479,21 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // 同上
     }
   },
+  toggleNoteHeadingFold: (noteId, anchor) =>
+    set((s) => {
+      const current = s.notesHeadingFolded[noteId] ?? [];
+      const next = current.includes(anchor)
+        ? current.filter((a) => a !== anchor)
+        : [...current, anchor];
+      return { notesHeadingFolded: { ...s.notesHeadingFolded, [noteId]: next } };
+    }),
+  setNoteHeadingFolded: (noteId, anchors) =>
+    set((s) => ({
+      notesHeadingFolded: {
+        ...s.notesHeadingFolded,
+        [noteId]: Array.from(new Set(anchors)),
+      },
+    })),
   prefetchedFolders: null,
   prefetchFolders: async () => {
     try {
@@ -593,6 +622,17 @@ export async function loadThemeFromStore() {
     if (typeof nficd === "boolean") {
       useAppStore.setState({ notesFoldersInitialCollapseDone: nficd });
     }
+    const nhf = await store.get<Record<string, string[]>>("notesHeadingFolded");
+    if (nhf && typeof nhf === "object") {
+      const cleaned: Record<number, string[]> = {};
+      for (const [k, v] of Object.entries(nhf)) {
+        const id = Number(k);
+        if (Number.isFinite(id) && id > 0 && Array.isArray(v)) {
+          cleaned[id] = v.filter((x) => typeof x === "string" && x.length > 0);
+        }
+      }
+      useAppStore.setState({ notesHeadingFolded: cleaned });
+    }
   } catch {
     // 首次启动时 store 可能不存在
   } finally {
@@ -620,6 +660,7 @@ export async function saveThemeToStore() {
       notesCollapsedFolderKeys,
       notesUncategorizedExpanded,
       notesFoldersInitialCollapseDone,
+      notesHeadingFolded,
     } = useAppStore.getState();
     const store = await Store.load(STORE_FILE);
     await store.set("lightTheme", lightTheme);
@@ -639,6 +680,7 @@ export async function saveThemeToStore() {
       "notesFoldersInitialCollapseDone",
       notesFoldersInitialCollapseDone,
     );
+    await store.set("notesHeadingFolded", notesHeadingFolded);
     await store.save();
   } catch {
     // 静默失败
@@ -648,7 +690,10 @@ export async function saveThemeToStore() {
 // 监听主题 + 置顶 + SidePanel + 编辑器字体偏好变化自动保存
 let _prevPersistKey = "";
 useAppStore.subscribe((state) => {
-  const key = `${state.lightTheme}|${state.darkTheme}|${state.themeCategory}|${state.alwaysOnTop}|${state.sidePanelWidth}|${state.sidePanelVisible}|${state.recentSearches.join(",")}|${state.editorFontFamily}|${state.editorFontSize}|${state.editorLineHeight}|${state.outlineVisible}|${state.notesCollapsedFolderKeys.join(",")}|${state.notesUncategorizedExpanded}|${state.notesFoldersInitialCollapseDone}`;
+  // notesHeadingFolded 摘要：用 entries 数 + 总 anchor 数 简化对比，避免每次 stringify 大对象
+  const headingFoldEntries = Object.entries(state.notesHeadingFolded);
+  const headingFoldKey = `${headingFoldEntries.length}:${headingFoldEntries.reduce((acc, [, v]) => acc + v.length, 0)}:${headingFoldEntries.map(([k, v]) => `${k}=${v.join(",")}`).join("|")}`;
+  const key = `${state.lightTheme}|${state.darkTheme}|${state.themeCategory}|${state.alwaysOnTop}|${state.sidePanelWidth}|${state.sidePanelVisible}|${state.recentSearches.join(",")}|${state.editorFontFamily}|${state.editorFontSize}|${state.editorLineHeight}|${state.outlineVisible}|${state.notesCollapsedFolderKeys.join(",")}|${state.notesUncategorizedExpanded}|${state.notesFoldersInitialCollapseDone}|${headingFoldKey}`;
   if (key !== _prevPersistKey) {
     _prevPersistKey = key;
     saveThemeToStore();

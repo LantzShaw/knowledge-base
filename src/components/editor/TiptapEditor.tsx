@@ -21,6 +21,7 @@ import { Color } from "@tiptap/extension-color";
 import Superscript from "@tiptap/extension-superscript";
 import Subscript from "@tiptap/extension-subscript";
 import { FigureImage } from "./FigureExtension";
+import { HeadingFold, HEADING_FOLD_REFRESH, HEADING_FOLD_KEY } from "./HeadingFold";
 import { calcEditorStats } from "@/lib/textStats";
 import { FontSize, LineHeight, Indent } from "./TextStyleExtras";
 // tiptap-markdown 未提供 TS 声明，用 import 后以 any 访问
@@ -949,6 +950,19 @@ export function TiptapEditor({
         onClick: (title: string) => wikiClickRef.current?.(title),
       }),
       WikiLinkSuggestion,
+      // 标题折叠（H1–H3 左侧 chevron 折叠到下一同级标题；走 noteId 维度持久化）
+      HeadingFold.configure({
+        getFolded: () => {
+          if (noteId == null) return new Set<string>();
+          const arr = useAppStore.getState().notesHeadingFolded[noteId] ?? [];
+          return new Set(arr);
+        },
+        onToggle: (anchor) => {
+          if (noteId == null) return;
+          useAppStore.getState().toggleNoteHeadingFold(noteId, anchor);
+        },
+        maxLevel: 3,
+      }),
       // Markdown 序列化/反序列化：setContent 吃 Markdown，editor.storage.markdown.getMarkdown() 吐 Markdown
       Markdown.configure({
         html: true,               // 允许内联 HTML 片段（表格等复杂结构）
@@ -1298,6 +1312,19 @@ export function TiptapEditor({
     onEditorReady(editor);
     return () => onEditorReady(null);
   }, [editor, onEditorReady]);
+
+  // HeadingFold：当用户点 chevron 改变折叠集合时，dispatch 一个 meta 让 plugin 重算装饰
+  // （editor 的扩展 options.getFolded 总是读最新 store，但 plugin state 不会自动重算
+  //   除非有 tx 经过；这里 subscribe zustand 让 store 变化主动驱动一次重算）
+  const foldedForThisNote = useAppStore((s) =>
+    noteId != null ? s.notesHeadingFolded[noteId] : undefined,
+  );
+  useEffect(() => {
+    if (!editor || noteId == null) return;
+    editor.view.dispatch(
+      editor.view.state.tr.setMeta(HEADING_FOLD_KEY, HEADING_FOLD_REFRESH),
+    );
+  }, [editor, noteId, foldedForThisNote]);
 
   if (!editor) return null;
 

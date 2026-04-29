@@ -1454,6 +1454,46 @@ body,
   background-color: rgba(96, 165, 250, 0.32);
 }
 
+/* HeadingFold：H1–H3 左侧的折叠 chevron，hover 行出现，已折叠常亮 + 旋转 */
+.kb-heading-fold-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 4px;
+  margin-left: -22px; /* 视觉上挂在标题左侧外，不挤占文字位置 */
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--ant-color-text-quaternary, #bfbfbf);
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, transform 0.12s;
+  border-radius: 4px;
+  vertical-align: middle;
+  user-select: none;
+}
+.tiptap-wrapper h1:hover > .kb-heading-fold-chevron,
+.tiptap-wrapper h2:hover > .kb-heading-fold-chevron,
+.tiptap-wrapper h3:hover > .kb-heading-fold-chevron {
+  opacity: 0.55;
+}
+.kb-heading-fold-chevron:hover {
+  opacity: 1 !important;
+  color: var(--ant-color-text-secondary, #595959);
+  background: var(--ant-color-fill-tertiary, rgba(0, 0, 0, 0.06));
+}
+.kb-heading-fold-chevron.is-folded {
+  opacity: 1;
+  color: var(--ant-color-primary, #1677ff);
+  transform: rotate(-90deg); /* 折叠态箭头朝右，与 Notion/Obsidian 一致 */
+}
+
+/* 折叠态的"管辖范围"内容：直接 display:none 避免占位与误点 */
+.kb-heading-folded {
+  display: none !important;
+}
+
 /* 文件夹下拉树里的"设为默认"图钉按钮：行 hover 才出现，已默认常亮主题色 */
 .kb-folder-pin {
   display: inline-flex;
