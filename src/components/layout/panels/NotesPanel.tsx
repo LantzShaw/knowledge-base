@@ -20,19 +20,24 @@ import {
   ChevronRight,
   Edit3,
   Trash,
+  Trash2,
   Plus,
   FolderOpen,
   Folder as FolderIcon,
   FileText,
   ChevronsDownUp,
   LayoutTemplate,
+  ExternalLink,
+  Copy,
+  Pin,
+  PinOff,
 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { FolderFilled } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
 import { useAppStore } from "@/store";
 import { useTabsStore } from "@/store/tabs";
-import { folderApi, importApi, noteApi } from "@/lib/api";
+import { folderApi, importApi, noteApi, trashApi } from "@/lib/api";
 import type { Folder, Note, ScannedFile } from "@/types";
 import { parseEmojiPrefix } from "@/lib/treeIcons";
 import { NewNoteButton } from "@/components/NewNoteButton";
@@ -869,6 +874,80 @@ export function NotesPanel() {
 
   function buildMenuItems(key: string, name: string): ContextMenuEntry[] {
     const close = () => setContextMenu(null);
+
+    // ─── 笔记叶子菜单 ───
+    if (isNoteKey(key)) {
+      const noteId = noteIdFromKey(key);
+      const note = findNoteById(noteId);
+      const isPinned = note?.is_pinned ?? false;
+      return [
+        {
+          key: "open",
+          icon: <ExternalLink size={14} />,
+          label: "打开",
+          onClick: () => {
+            navigate(`/notes/${noteId}`);
+            close();
+          },
+        },
+        {
+          key: "rename",
+          icon: <Edit3 size={14} />,
+          label: "重命名",
+          onClick: () => {
+            startRename(key, name);
+            close();
+          },
+        },
+        {
+          key: "copy-wiki",
+          icon: <Copy size={14} />,
+          label: "复制 wiki 链接",
+          onClick: () => {
+            navigator.clipboard
+              .writeText(`[[${name}]]`)
+              .then(() => message.success("已复制"))
+              .catch((err) => message.error(String(err)));
+            close();
+          },
+        },
+        {
+          key: "toggle-pin",
+          icon: isPinned ? <PinOff size={14} /> : <Pin size={14} />,
+          label: isPinned ? "取消置顶" : "置顶",
+          onClick: async () => {
+            close();
+            try {
+              const next = await noteApi.togglePin(noteId);
+              message.success(next ? "已置顶" : "已取消置顶");
+              useAppStore.getState().bumpNotesRefresh();
+            } catch (e) {
+              message.error(String(e));
+            }
+          },
+        },
+        { type: "divider" },
+        {
+          key: "soft-delete",
+          icon: <Trash2 size={14} />,
+          label: "移到回收站",
+          danger: true,
+          onClick: async () => {
+            close();
+            try {
+              await trashApi.softDelete(noteId);
+              useTabsStore.getState().closeTab(noteId);
+              message.success("已移到回收站");
+              useAppStore.getState().bumpNotesRefresh();
+            } catch (e) {
+              message.error(String(e));
+            }
+          },
+        },
+      ];
+    }
+
+    // ─── 文件夹菜单（原有逻辑） ───
     const folderId = Number(key);
     return [
       // ─── 创建：高频操作放第一位 ───
@@ -1427,10 +1506,16 @@ export function NotesPanel() {
                   event.stopPropagation();
                   const key = String(node.key);
                   if (key.startsWith(NEW_NODE_PREFIX)) return;
-                  // 笔记叶节点暂不提供右键菜单（v1）
-                  if (isNoteKey(key)) return;
-                  const name = findFolderName(folders, Number(key));
-                  if (name === null) return;
+                  // 笔记叶节点：用 note.title 作为 name 传给菜单
+                  let name: string | null;
+                  if (isNoteKey(key)) {
+                    const note = findNoteById(noteIdFromKey(key));
+                    if (!note) return;
+                    name = note.title;
+                  } else {
+                    name = findFolderName(folders, Number(key));
+                    if (name === null) return;
+                  }
                   setContextMenu({
                     key,
                     name,

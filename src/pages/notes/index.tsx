@@ -33,18 +33,26 @@ import {
   LayoutGrid,
   Clock,
   Pin,
+  PinOff,
   Calendar,
   Folder as FolderIcon,
   CornerUpLeft,
   Filter as FilterIcon,
   Bot,
   ChevronDown,
+  ExternalLink,
+  Copy,
 } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ColumnsType } from "antd/es/table";
 import { open as openDialog, save } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { noteApi, exportApi, folderApi, tagApi } from "@/lib/api";
+import { noteApi, exportApi, folderApi, tagApi, trashApi } from "@/lib/api";
+import { useContextMenu } from "@/hooks/useContextMenu";
+import {
+  ContextMenuOverlay,
+  type ContextMenuEntry,
+} from "@/components/ui/ContextMenuOverlay";
 import { useTabsStore } from "@/store/tabs";
 import { useAppStore } from "@/store";
 import { stripHtml, relativeTime } from "@/lib/utils";
@@ -837,6 +845,124 @@ export default function NoteListPage() {
     [loadNotes],
   );
 
+  // ─── 列表行右键菜单 ──────────────────────────
+  const noteCtx = useContextMenu<Note>();
+  const [renameTarget, setRenameTarget] = useState<Note | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+
+  const handleSoftDelete = useCallback(
+    async (id: number) => {
+      try {
+        await trashApi.softDelete(id);
+        useTabsStore.getState().closeTab(id);
+        message.success("已移到回收站");
+        useAppStore.getState().bumpNotesRefresh();
+        loadNotes(data.page);
+      } catch (e) {
+        message.error(String(e));
+      }
+    },
+    [data.page, loadNotes],
+  );
+
+  const handleTogglePin = useCallback(
+    async (id: number) => {
+      try {
+        const next = await noteApi.togglePin(id);
+        message.success(next ? "已置顶" : "已取消置顶");
+        useAppStore.getState().bumpNotesRefresh();
+        loadNotes(data.page);
+      } catch (e) {
+        message.error(String(e));
+      }
+    },
+    [data.page, loadNotes],
+  );
+
+  const handleRenameSubmit = useCallback(async () => {
+    if (!renameTarget) return;
+    const newTitle = renameValue.trim();
+    if (!newTitle) {
+      message.warning("标题不能为空");
+      return;
+    }
+    if (newTitle === renameTarget.title) {
+      setRenameTarget(null);
+      return;
+    }
+    try {
+      await noteApi.update(renameTarget.id, {
+        title: newTitle,
+        content: renameTarget.content,
+        folder_id: renameTarget.folder_id,
+      });
+      message.success("已重命名");
+      setRenameTarget(null);
+      useAppStore.getState().bumpNotesRefresh();
+      loadNotes(data.page);
+    } catch (e) {
+      message.error(String(e));
+    }
+  }, [renameTarget, renameValue, data.page, loadNotes]);
+
+  const noteCtxMenuItems = useMemo<ContextMenuEntry[]>(() => {
+    const note = noteCtx.state.payload;
+    if (!note) return [];
+    return [
+      {
+        key: "open",
+        label: "打开",
+        icon: <ExternalLink size={13} />,
+        onClick: () => {
+          noteCtx.close();
+          navigate(`/notes/${note.id}`);
+        },
+      },
+      {
+        key: "rename",
+        label: "重命名",
+        icon: <Edit3 size={13} />,
+        onClick: () => {
+          noteCtx.close();
+          setRenameTarget(note);
+          setRenameValue(note.title);
+        },
+      },
+      {
+        key: "copy-wiki",
+        label: "复制 wiki 链接",
+        icon: <Copy size={13} />,
+        onClick: () => {
+          noteCtx.close();
+          navigator.clipboard
+            .writeText(`[[${note.title}]]`)
+            .then(() => message.success("已复制"))
+            .catch((err) => message.error(String(err)));
+        },
+      },
+      {
+        key: "toggle-pin",
+        label: note.is_pinned ? "取消置顶" : "置顶",
+        icon: note.is_pinned ? <PinOff size={13} /> : <Pin size={13} />,
+        onClick: () => {
+          noteCtx.close();
+          handleTogglePin(note.id);
+        },
+      },
+      { type: "divider" },
+      {
+        key: "soft-delete",
+        label: "移到回收站",
+        icon: <Trash2 size={13} />,
+        danger: true,
+        onClick: () => {
+          noteCtx.close();
+          handleSoftDelete(note.id);
+        },
+      },
+    ];
+  }, [noteCtx, navigate, handleTogglePin, handleSoftDelete]);
+
   const columns: ColumnsType<Note> = useMemo(
     () => [
       {
@@ -1199,6 +1325,15 @@ export default function NoteListPage() {
                 onChange: (keys) => setSelectedIds(keys.map((k) => Number(k))),
                 columnWidth: 40,
               }}
+              onRow={(record) => ({
+                onContextMenu: (e) => {
+                  e.preventDefault();
+                  noteCtx.open(
+                    { clientX: e.clientX, clientY: e.clientY },
+                    record,
+                  );
+                },
+              })}
             />
           </div>
           <div
@@ -1495,6 +1630,34 @@ export default function NoteListPage() {
       )}
 
       {/* "新建笔记"入口已统一到 NewNoteButton 分段按钮 */}
+
+      {/* 列表行右键菜单（list 视图） */}
+      <ContextMenuOverlay
+        open={!!noteCtx.state.payload}
+        x={noteCtx.state.x}
+        y={noteCtx.state.y}
+        items={noteCtxMenuItems}
+        onClose={noteCtx.close}
+      />
+
+      {/* 重命名弹窗 */}
+      <Modal
+        title="重命名笔记"
+        open={!!renameTarget}
+        onOk={handleRenameSubmit}
+        onCancel={() => setRenameTarget(null)}
+        okText="确定"
+        cancelText="取消"
+        destroyOnClose
+      >
+        <Input
+          value={renameValue}
+          onChange={(e) => setRenameValue(e.target.value)}
+          onPressEnter={handleRenameSubmit}
+          placeholder="新标题"
+          autoFocus
+        />
+      </Modal>
     </div>
   );
 }
