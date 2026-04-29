@@ -1,5 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import type { Editor } from "@tiptap/react";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { Button, Input, Popover, Tooltip, message, theme as antdTheme } from "antd";
 import {
   Sparkles,
@@ -48,6 +50,43 @@ function renderIcon(name: string | null, size: number): React.ReactNode {
   return <Wand2 size={size} />; // 用户自定义没填图标时的默认占位
 }
 
+/**
+ * 伪选区 Plugin：在 AI 菜单弹出（流式中 / 结果区显示 / 自定义 Popover 打开）时，
+ * 给当前选区位置加一个 inline class，靠 CSS 渲染高亮。
+ *
+ * 解决的问题：弹窗 / Popover 里的输入框抢焦点后，编辑器失焦，浏览器原生
+ * `::selection` 蓝底就消失了，用户视觉上"看不到自己选的什么"。本 plugin
+ * 维持一个独立于浏览器原生 selection 的视觉装饰，焦点不在编辑器也仍可见。
+ */
+const FAKE_SELECTION_KEY = new PluginKey<DecorationSet>("ai-write-fake-selection");
+
+function createFakeSelectionPlugin(): Plugin<DecorationSet> {
+  return new Plugin<DecorationSet>({
+    key: FAKE_SELECTION_KEY,
+    state: {
+      init: () => DecorationSet.empty,
+      apply(tr, deco) {
+        const meta = tr.getMeta(FAKE_SELECTION_KEY);
+        if (meta === "clear") return DecorationSet.empty;
+        if (meta && typeof meta === "object" && "from" in meta) {
+          const { from, to } = meta as { from: number; to: number };
+          if (from === to) return DecorationSet.empty;
+          return DecorationSet.create(tr.doc, [
+            Decoration.inline(from, to, { class: "kb-fake-selection" }),
+          ]);
+        }
+        // 文档变化时同步映射坐标，避免编辑后高亮范围错位
+        return deco.map(tr.mapping, tr.doc);
+      },
+    },
+    props: {
+      decorations(state) {
+        return FAKE_SELECTION_KEY.getState(state) ?? DecorationSet.empty;
+      },
+    },
+  });
+}
+
 export function AiWriteMenu({ editor, onAskAi }: AiWriteMenuProps) {
   const { token } = antdTheme.useToken();
   const [visible, setVisible] = useState(false);
@@ -67,6 +106,8 @@ export function AiWriteMenu({ editor, onAskAi }: AiWriteMenuProps) {
   // null = 还未发起 / 已关闭；"" = 加载中；非空 = 已就绪；undefined = 失败/不可用
   const [suggestion, setSuggestion] = useState<string | undefined | null>(null);
   const suggestSeqRef = useRef(0); // 选区/Popover 切换时丢弃过期请求
+  // 当前用户选区范围：用于 fake-selection 装饰；selectionUpdate 时同步更新
+  const selectionRangeRef = useRef<{ from: number; to: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const unlistenRefs = useRef<UnlistenFn[]>([]);
   // 最近一次 mouseup 的坐标（拖选完毕时记下来，让 AI 菜单贴在鼠标附近而不是
@@ -120,6 +161,7 @@ export function AiWriteMenu({ editor, onAskAi }: AiWriteMenuProps) {
       if (text.trim().length < 2) return;
 
       setSelectedText(text);
+      selectionRangeRef.current = { from, to };
 
       // 计算菜单位置：
       //   1) 鼠标拖选 → 紧贴 mouseup 位置（最贴近用户视线）
@@ -215,6 +257,34 @@ export function AiWriteMenu({ editor, onAskAi }: AiWriteMenuProps) {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [streaming, customOpen]);
+
+  // 注册 / 注销伪选区 Plugin（生命周期跟随组件 mount）
+  useEffect(() => {
+    const plugin = createFakeSelectionPlugin();
+    editor.registerPlugin(plugin);
+    return () => {
+      editor.unregisterPlugin(FAKE_SELECTION_KEY);
+    };
+  }, [editor]);
+
+  // 编辑器失焦的场景下（Popover 打开 / 流式中 / 结果区可见）维持伪选区高亮，
+  // 让用户视觉上仍能看到 "AI 在处理哪段文字"
+  useEffect(() => {
+    const shouldShow = customOpen || streaming || !!result;
+    const range = selectionRangeRef.current;
+    if (shouldShow && range && range.from !== range.to) {
+      editor.view.dispatch(
+        editor.state.tr.setMeta(FAKE_SELECTION_KEY, {
+          from: range.from,
+          to: range.to,
+        }),
+      );
+    } else {
+      editor.view.dispatch(
+        editor.state.tr.setMeta(FAKE_SELECTION_KEY, "clear"),
+      );
+    }
+  }, [customOpen, streaming, result, editor]);
 
   // Popover 打开时根据选区 + 上下文拉一条 AI 建议指令；关闭时清空
   // 失败（未配置模型 / 离线 / 限流等）静默：suggestion=undefined → UI 不渲染建议区
