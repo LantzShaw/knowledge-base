@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Markdown from "react-markdown";
 import {
   Button,
@@ -31,6 +31,8 @@ import {
   Paperclip,
   Save,
   X,
+  Copy,
+  Quote,
 } from "lucide-react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -38,6 +40,11 @@ import { aiChatApi, aiModelApi, noteApi } from "@/lib/api";
 import type { AiConversation, AiMessage, AiModel, Note, SkillCall } from "@/types";
 import { relativeTime } from "@/lib/utils";
 import { stripPseudoToolCalls } from "@/lib/aiFilter";
+import { useContextMenu } from "@/hooks/useContextMenu";
+import {
+  ContextMenuOverlay,
+  type ContextMenuEntry,
+} from "@/components/ui/ContextMenuOverlay";
 
 const { TextArea } = Input;
 
@@ -120,6 +127,46 @@ export default function AiChatPage() {
   const [archiving, setArchiving] = useState(false);
   // 流式过程中 AI 调用的工具列表（带 running/ok/error 状态）；done 后并入 messages 清空
   const [streamingSkillCalls, setStreamingSkillCalls] = useState<SkillCall[]>([]);
+
+  // ─── 消息气泡右键菜单 ────────────────────────
+  const msgCtx = useContextMenu<AiMessage>();
+
+  const msgMenuItems: ContextMenuEntry[] = useMemo(() => {
+    const m = msgCtx.state.payload;
+    if (!m) return [];
+    return [
+      {
+        key: "copy",
+        label: "复制内容",
+        icon: <Copy size={13} />,
+        onClick: () => {
+          msgCtx.close();
+          navigator.clipboard
+            .writeText(m.content)
+            .then(() => message.success("已复制"))
+            .catch((e) => message.error(`复制失败：${e}`));
+        },
+      },
+      {
+        key: "copy-quote",
+        label: "复制为引用块",
+        icon: <Quote size={13} />,
+        onClick: () => {
+          msgCtx.close();
+          // 每行前加 "> " 转 markdown 引用，方便贴回笔记保留出处
+          const quoted = m.content
+            .split("\n")
+            .map((line) => `> ${line}`)
+            .join("\n");
+          navigator.clipboard
+            .writeText(quoted)
+            .then(() => message.success("已复制为引用"))
+            .catch((e) => message.error(`复制失败：${e}`));
+        },
+      },
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [msgCtx.state.payload]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const unlistenRefs = useRef<UnlistenFn[]>([]);
@@ -778,6 +825,8 @@ export default function AiChatPage() {
                   key={msg.id}
                   message={msg}
                   token={token}
+                  onContextMenu={(e, m) => msgCtx.open(e.nativeEvent, m)}
+                  contextActive={msgCtx.state.payload?.id === msg.id}
                 />
               ))}
 
@@ -936,6 +985,14 @@ export default function AiChatPage() {
           />
         </div>
       </Modal>
+
+      <ContextMenuOverlay
+        open={!!msgCtx.state.payload}
+        x={msgCtx.state.x}
+        y={msgCtx.state.y}
+        items={msgMenuItems}
+        onClose={msgCtx.close}
+      />
     </div>
   );
 }
@@ -1013,9 +1070,13 @@ function AttachNotesModal({
 function MessageBubble({
   message: msg,
   token,
+  onContextMenu,
+  contextActive,
 }: {
   message: AiMessage;
   token: any;
+  onContextMenu?: (e: React.MouseEvent, m: AiMessage) => void;
+  contextActive?: boolean;
 }) {
   const isUser = msg.role === "user";
   const refs: number[] = msg.references
@@ -1034,6 +1095,14 @@ function MessageBubble({
   return (
     <div
       className={`flex gap-3 mb-4 ${isUser ? "flex-row-reverse" : ""}`}
+      onContextMenu={
+        onContextMenu
+          ? (e) => {
+              e.preventDefault();
+              onContextMenu(e, msg);
+            }
+          : undefined
+      }
     >
       {/* 头像 */}
       <div
@@ -1064,6 +1133,9 @@ function MessageBubble({
             // （如 DOI / URL）也能在任意字符处断行，避免气泡被撑开溢出聊天区
             overflowWrap: "anywhere",
             maxWidth: "100%",
+            outline: contextActive ? `1px solid ${token.colorPrimary}` : "none",
+            outlineOffset: 2,
+            transition: "outline .1s",
           }}
         >
           {isUser ? msg.content : <Markdown>{msg.content}</Markdown>}
