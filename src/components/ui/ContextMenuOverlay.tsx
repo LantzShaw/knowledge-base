@@ -27,7 +27,21 @@ export interface ContextMenuDivider {
   type: "divider";
 }
 
-export type ContextMenuEntry = ContextMenuItemDef | ContextMenuDivider;
+/**
+ * 自定义 section —— 在菜单里嵌入任意 React 节点（色板 grid、缩略图...）。
+ * - render 内的点击事件**不会**让菜单自动关闭（点击 mousedown 时落在 overlay 内被忽略）
+ * - 调用方需要在交互完成后**主动**调 onClose 关闭菜单
+ */
+export interface ContextMenuCustom {
+  type: "custom";
+  key: string;
+  render: () => React.ReactNode;
+}
+
+export type ContextMenuEntry =
+  | ContextMenuItemDef
+  | ContextMenuDivider
+  | ContextMenuCustom;
 
 interface Props {
   /** 是否显示。建议传 `!!ctx.state.payload` */
@@ -139,6 +153,10 @@ export function ContextMenuOverlay({
               }}
             />
           );
+        }
+        if ("type" in entry && entry.type === "custom") {
+          // 自定义 section（例如内嵌色板 grid）。整段不做 hover 高亮、点击关闭由调用方 onClose 控制
+          return <div key={entry.key}>{entry.render()}</div>;
         }
         const item = entry as ContextMenuItemDef;
         return (
