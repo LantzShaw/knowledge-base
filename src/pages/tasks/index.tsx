@@ -1149,13 +1149,15 @@ function TaskRow({
             : `1px solid ${token.colorBorderSecondary}`,
         background:
           multiSelect && isSelected ? token.colorPrimaryBg : "transparent",
-        cursor: multiSelect ? "pointer" : "default",
+        cursor: "pointer",
         outline: contextActive ? `1px solid ${token.colorPrimary}` : "none",
         outlineOffset: -1,
         transition: "background .15s, outline .1s",
       }}
       onClick={
-        multiSelect ? () => onToggleSelect?.(task.id) : undefined
+        multiSelect
+          ? () => onToggleSelect?.(task.id)
+          : () => onEdit(task)
       }
       onContextMenu={onContextMenu}
     >
@@ -1192,7 +1194,10 @@ function TaskRow({
       ) : (
         <Tooltip title={done ? "标记为未完成" : "标记为已完成"}>
           <button
-            onClick={() => onToggle(task)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggle(task);
+            }}
             className="mt-0.5 rounded-full flex items-center justify-center transition cursor-pointer shrink-0"
             style={{
               width: 18,
@@ -1327,7 +1332,10 @@ function TaskRow({
             {task.links.map((l) => (
               <button
                 key={l.id}
-                onClick={() => onOpenLink(l)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenLink(l);
+                }}
                 className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] hover:opacity-80 transition cursor-pointer"
                 style={{
                   background: token.colorFillTertiary,
@@ -1349,7 +1357,10 @@ function TaskRow({
 
       {/* hover 操作（多选态下隐藏，避免误触） */}
       {!multiSelect && (
-        <div className="opacity-0 group-hover:opacity-100 transition flex items-center gap-1 shrink-0">
+        <div
+          className="opacity-0 group-hover:opacity-100 transition flex items-center gap-1 shrink-0"
+          onClick={(e) => e.stopPropagation()}
+        >
           <Tooltip title="编辑">
             <Button
               type="text"

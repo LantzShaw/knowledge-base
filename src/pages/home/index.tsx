@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Card,
@@ -33,6 +33,8 @@ import {
   Edit3,
   Trash2,
   ExternalLink,
+  ChevronRight,
+  ChevronDown,
 } from "lucide-react";
 import { Tooltip as AntTooltip } from "antd";
 import {
@@ -61,6 +63,7 @@ import type {
   Task,
   AiConversation,
 } from "@/types";
+import { SubtaskList } from "@/components/tasks/SubtaskList";
 
 const { Text, Paragraph } = Typography;
 
@@ -108,6 +111,10 @@ export default function HomePage() {
   const [aiQuestion, setAiQuestion] = useState("");
   /** 待办详情弹窗 */
   const [taskDetail, setTaskDetail] = useState<Task | null>(null);
+  /** 行内展开子任务的任务 id 集合（仅 widget 内存态，不持久化） */
+  const [expandedTodoIds, setExpandedTodoIds] = useState<Set<number>>(
+    () => new Set(),
+  );
 
   // ─── 加载 ─────────────────────────────────────────
   const loadDashboard = useCallback(async () => {
@@ -593,9 +600,11 @@ export default function HomePage() {
                       : token.colorTextTertiary;
                 const desc = task.description?.trim();
                 const ctxActive = taskCtx.state.payload?.id === task.id;
+                const hasSubtasks = task.subtask_total > 0;
+                const expanded = expandedTodoIds.has(task.id);
                 return (
+                  <Fragment key={task.id}>
                   <li
-                    key={task.id}
                     className="flex items-start gap-2.5"
                     style={{
                       padding: "4px 6px",
@@ -608,9 +617,41 @@ export default function HomePage() {
                       taskCtx.open(e.nativeEvent, task);
                     }}
                   >
+                    {/* ▶ 展开按钮（仅含子任务时显示），不冒泡到行级 setTaskDetail */}
+                    {hasSubtasks ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setExpandedTodoIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(task.id)) next.delete(task.id);
+                            else next.add(task.id);
+                            return next;
+                          });
+                        }}
+                        className="flex items-center justify-center hover:bg-black/5 rounded transition cursor-pointer"
+                        style={{
+                          width: 16,
+                          height: 16,
+                          marginTop: 3,
+                          flexShrink: 0,
+                          color: token.colorTextTertiary,
+                        }}
+                        title={expanded ? "折叠子任务" : "展开子任务"}
+                      >
+                        {expanded ? (
+                          <ChevronDown size={12} />
+                        ) : (
+                          <ChevronRight size={12} />
+                        )}
+                      </button>
+                    ) : (
+                      <span style={{ width: 16, flexShrink: 0 }} />
+                    )}
                     <input
                       type="checkbox"
                       onChange={() => handleToggleTask(task.id)}
+                      onClick={(e) => e.stopPropagation()}
                       style={{ cursor: "pointer", flexShrink: 0, marginTop: 4 }}
                     />
                     <span
@@ -671,6 +712,34 @@ export default function HomePage() {
                       </Text>
                     </div>
                   </li>
+                  {/* 行内展开子任务（与 /tasks 一致） */}
+                  {expanded && hasSubtasks && (
+                    <li
+                      className="list-none"
+                      style={{
+                        padding: "6px 10px 8px 38px",
+                        background: token.colorFillQuaternary,
+                        borderRadius: 4,
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <SubtaskList
+                        parentTaskId={task.id}
+                        compact
+                        onChanged={(done, total) => {
+                          // 局部 patch 当前 todayTasks 项的 subtask_done/total
+                          setTodayTasks((prev) =>
+                            prev.map((t) =>
+                              t.id === task.id
+                                ? { ...t, subtask_done: done, subtask_total: total }
+                                : t,
+                            ),
+                          );
+                        }}
+                      />
+                    </li>
+                  )}
+                  </Fragment>
                 );
               })}
             </ul>
