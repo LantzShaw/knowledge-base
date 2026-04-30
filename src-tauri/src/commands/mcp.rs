@@ -12,11 +12,70 @@
 //!   2) 后续接外部 MCP server 时（GitHub / Filesystem / 高德地图…）可以走同样的 client API
 //!   3) 协议统一，UI 不需要区分"原生工具"和"外部工具"
 
+use std::path::PathBuf;
+
 use rmcp::model::CallToolRequestParams;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 
 use crate::state::AppState;
+
+/// 主应用编译时被 tauri-build 注入的 target triple，
+/// 用来构造 sidecar binary 名字（与 scripts/build-mcp.mjs 的命名一致）
+const TARGET_TRIPLE: &str = env!("TAURI_ENV_TARGET_TRIPLE");
+
+/// 设置页 "MCP 服务器" 卡片的运行时信息
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpRuntimeInfo {
+    /// in-memory MCP server 是否就绪
+    pub internal_ready: bool,
+    /// kb-mcp sidecar binary 在本机的绝对路径（None 表示找不到，提示用户先 pnpm build:mcp）
+    pub sidecar_binary_path: Option<String>,
+    /// 知识库 db 绝对路径，给 Claude Desktop config JSON 用
+    pub db_path: String,
+    /// Host target triple（如 x86_64-pc-windows-msvc）
+    pub target_triple: String,
+    /// 当前操作系统（"windows" / "macos" / "linux"），方便前端选择对应的配置示例
+    pub os: String,
+}
+
+/// 设置页用：拿 sidecar 路径 + db 路径，生成客户端配置 JSON
+#[tauri::command]
+pub fn mcp_runtime_info(state: tauri::State<'_, AppState>) -> Result<McpRuntimeInfo, String> {
+    // db 路径：与 lib.rs setup 里 Database::init 用的同一逻辑
+    let prefix = if cfg!(debug_assertions) { "dev-" } else { "" };
+    let db_path = state.data_dir.join(format!("{}app.db", prefix));
+
+    Ok(McpRuntimeInfo {
+        internal_ready: state.mcp_internal.is_some(),
+        sidecar_binary_path: locate_sidecar_binary().map(|p| p.to_string_lossy().into_owned()),
+        db_path: db_path.to_string_lossy().into_owned(),
+        target_triple: TARGET_TRIPLE.to_string(),
+        os: std::env::consts::OS.to_string(),
+    })
+}
+
+/// 找 kb-mcp binary：优先主 exe 同目录（externalBin 打包后位置 = cargo workspace target/<profile>/）
+/// dev 期主 exe 与 sidecar 都在 target/debug/，安装后 externalBin 也在主 exe 旁边
+fn locate_sidecar_binary() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+
+    let exe_suffix = if cfg!(target_os = "windows") { ".exe" } else { "" };
+    // 候选 1：dev 期 cargo build -p kb-mcp 出来的产物（无 triple 后缀）
+    let dev_path = dir.join(format!("kb-mcp{}", exe_suffix));
+    if dev_path.exists() {
+        return Some(dev_path);
+    }
+    // 候选 2：Tauri externalBin 打包后通常去掉 triple 直接放主 exe 旁边
+    // 但少数版本会保留带 triple 的名字，加 fallback
+    let triple_path = dir.join(format!("kb-mcp-{}{}", TARGET_TRIPLE, exe_suffix));
+    if triple_path.exists() {
+        return Some(triple_path);
+    }
+    None
+}
 
 /// tools/list 返回的单条工具描述（裁剪过，前端只需要必要字段）
 #[derive(Debug, Serialize)]

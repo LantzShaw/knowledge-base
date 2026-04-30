@@ -47,6 +47,7 @@ import { DataDirSection } from "@/components/settings/DataDirSection";
 import OrphanAssetsPanel from "@/components/settings/OrphanAssetsPanel";
 import { HiddenPinSection } from "@/components/hidden/HiddenPinSection";
 import { ShortcutsSection } from "@/components/settings/ShortcutsSection";
+import { MCPServerSection } from "@/components/settings/MCPServerSection";
 import { TiptapEditor } from "@/components/editor";
 import type { Folder } from "@/types";
 
@@ -1570,6 +1571,9 @@ export default function SettingsPage() {
       <div id="settings-sync">
         <SyncTabs />
       </div>
+
+      {/* MCP 服务器：接入 Claude Desktop / Cursor / Cherry Studio */}
+      <MCPServerSection />
 
       {/* 维护：孤儿素材清理（5 类素材统一） */}
       <Card

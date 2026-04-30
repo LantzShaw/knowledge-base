@@ -736,6 +736,7 @@ pub fn run() {
             // MCP 内置 server（kb-core 12 工具）
             commands::mcp::mcp_internal_list_tools,
             commands::mcp::mcp_internal_call_tool,
+            commands::mcp::mcp_runtime_info,
             // 系统模块
             commands::system::greet,
             commands::system::get_system_info,
