@@ -676,21 +676,37 @@ impl Database {
         let mut combined: Vec<(i64, String, String)> = Vec::new();
         let mut seen = std::collections::HashSet::new();
 
-        // ─── 主通道：LIKE + 命中数排序 ────────────────────
+        // ─── 主通道：LIKE + 标题加权命中数排序 ────────────────────
         if !like_keywords.is_empty() {
-            // 按命中不同关键词的个数降序（SUM(CASE WHEN ... THEN 1 ELSE 0 END) AS hits）
-            let hit_exprs: Vec<String> = like_keywords
+            // 加权打分：title 命中 ×5，content 命中 ×1
+            //
+            // 历史教训（2026-04-30 用户反馈）：
+            // 平权打分（title 与 content 等权）会让"语义噪声"压过"主题命中"。
+            // 例：用户问华为，bigram 拆出 20+ 关键词（华为/政府/关系/发展/历程/...）。
+            // 政治学论文（《中县干部》《做官》）内容含一堆"政府/关系/发展/历程"
+            // 但完全没提华为 → hits ≈ 10；《小聊华为》title 含华为 + content 含
+            // 政府/关系 → hits ≈ 5 → 反而被挤出 top 5。
+            //
+            // 加权后《小聊华为》: title.华为(5) + content.政府(1) + content.关系(1) = 7
+            // 《中县干部》: content.政府(1) + content.关系(1) + ... = 10 但每项只 1 分
+            // 真正命中主题词的笔记（专有名词进 title）会显著上升。
+            //
+            // 业界做法：BM25 / TF-IDF 中 title 字段一般给 boost 系数 3-5。
+            let title_exprs: Vec<String> = like_keywords
                 .iter()
                 .enumerate()
-                .map(|(i, _)| {
-                    format!(
-                        "(CASE WHEN n.title LIKE ?{0} OR n.content LIKE ?{0} \
-                         THEN 1 ELSE 0 END)",
-                        i + 1
-                    )
-                })
+                .map(|(i, _)| format!("(CASE WHEN n.title LIKE ?{0} THEN 5 ELSE 0 END)", i + 1))
                 .collect();
-            let hits_sum = hit_exprs.join(" + ");
+            let content_exprs: Vec<String> = like_keywords
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("(CASE WHEN n.content LIKE ?{0} THEN 1 ELSE 0 END)", i + 1))
+                .collect();
+            let score_sum = format!(
+                "({}) + ({})",
+                title_exprs.join(" + "),
+                content_exprs.join(" + "),
+            );
             let where_clauses: Vec<String> = like_keywords
                 .iter()
                 .enumerate()
@@ -701,12 +717,12 @@ impl Database {
 
             // T-003: RAG 检索结果不包含隐藏笔记（否则 AI 对话会泄露隐藏内容到历史）
             let sql = format!(
-                "SELECT n.id, n.title, n.content, ({hits}) AS hits
+                "SELECT n.id, n.title, n.content, ({score}) AS score
                  FROM notes n
                  WHERE n.is_deleted = 0 AND n.is_hidden = 0 AND ({where_})
-                 ORDER BY hits DESC, n.updated_at DESC
+                 ORDER BY score DESC, n.updated_at DESC
                  LIMIT ?{limit_param}",
-                hits = hits_sum,
+                score = score_sum,
                 where_ = where_clauses.join(" OR "),
                 limit_param = like_keywords.len() + 1,
             );

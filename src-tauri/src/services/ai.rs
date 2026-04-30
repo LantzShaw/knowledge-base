@@ -897,20 +897,72 @@ impl AiService {
         );
 
         // 3. RAG: 检索相关笔记
+        //
+        // 上下文预算策略（2026-04-30 重写）：
+        // - 旧版：硬编码 top 5 × 4000 字符 = 20K 字符。在 DeepSeek/Claude/GPT 等
+        //   长上下文模型下用率仅 10-15%，且单篇被强制截断常丢关键内容。
+        // - 新版：top 15 候选，按 model.max_context × 0.5 × 1.5（CJK 估算）
+        //   分配总预算；单篇能塞下全文就塞全文，超出再用 smart window 截窗。
+        //   预算用完即停。
+        //
+        // 60K token 模型 → 45000 字符预算可塞 ~5 篇全文或 30+ 条窗口
+        // 200K token 模型 → 150000 字符预算几乎能塞完整个候选列表
+        const RAG_BUDGET_RATIO: f64 = 0.5; // RAG 占 max_context 的 50%（留 50% 给系统提示+历史+输出）
+        const CHARS_PER_TOKEN_CJK: f64 = 1.5; // CJK 1 token ≈ 1.5 字符（粗略估算）
+        const SINGLE_NOTE_HARD_CAP: usize = 16000; // 单篇硬上限，防一篇撑爆预算
+        const RAG_TOP_N: usize = 15; // 候选数（旧版固定 5；提高让长上下文模型用满预算）
+
         let mut rag_context = String::new();
         let mut ref_ids: Vec<i64> = Vec::new();
         if use_rag {
-            let notes = db.search_notes_for_rag(user_message, 5)?;
+            let notes = db.search_notes_for_rag(user_message, RAG_TOP_N)?;
             if !notes.is_empty() {
+                let total_budget = ((model.max_context as f64) * RAG_BUDGET_RATIO * CHARS_PER_TOKEN_CJK)
+                    .max(8000.0) as usize;
+                let mut used = 0usize;
+                let mut included = 0usize;
+
                 rag_context.push_str(
-                    "以下是通过关键词检索到的笔记内容（可能相关，也可能无关）：\n\n",
+                    "以下是通过关键词检索到的笔记内容（可能相关，也可能无关），\
+                     已按相关度排序：\n\n",
                 );
+
                 for (id, title, content) in &notes {
+                    let remaining = total_budget.saturating_sub(used);
+                    if remaining < 500 {
+                        // 预算用完，剩余候选不再纳入
+                        break;
+                    }
+
                     let plain = strip_html(content);
-                    let snippet = extract_window_for_rag(&plain, user_message, 4000);
-                    rag_context.push_str(&format!("---\n标题: {}\n内容: {}\n\n", title, snippet));
+                    let plain_chars = plain.chars().count();
+                    let single_max = SINGLE_NOTE_HARD_CAP.min(remaining);
+
+                    let snippet = if plain_chars <= single_max {
+                        // 全文放得下：直接全文塞入（避免任何信息丢失）
+                        plain
+                    } else {
+                        // 全文放不下：smart window 截窗（围绕命中关键词）
+                        extract_window_for_rag(&plain, user_message, single_max)
+                    };
+
+                    used += snippet.chars().count();
+                    rag_context.push_str(&format!(
+                        "---\n标题: {}\n内容: {}\n\n",
+                        title, snippet,
+                    ));
                     ref_ids.push(*id);
+                    included += 1;
                 }
+
+                log::debug!(
+                    "[RAG] candidates={} included={} chars_used={}/{} (model_ctx={} tokens)",
+                    notes.len(),
+                    included,
+                    used,
+                    total_budget,
+                    model.max_context,
+                );
             }
         }
 
