@@ -3034,16 +3034,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "kb-mcp"
+name = "kb-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap",
  "rmcp",
  "rusqlite",
  "serde",
  "serde_json",
  "sha2",
+ "tokio",
+]
+
+[[package]]
+name = "kb-mcp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "kb-core",
+ "rmcp",
  "tokio",
 ]
 
@@ -3073,6 +3083,7 @@ dependencies = [
  "futures",
  "hostname",
  "html2md",
+ "kb-core",
  "log",
  "pdf-extract",
  "pdfium-render",
@@ -3080,6 +3091,7 @@ dependencies = [
  "rand 0.8.5",
  "regex",
  "reqwest 0.12.28",
+ "rmcp",
  "rusqlite",
  "rust-s3",
  "serde",
@@ -4952,6 +4964,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-stream",
  "tokio-util",
  "tracing",
 ]
