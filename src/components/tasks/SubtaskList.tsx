@@ -16,8 +16,11 @@ import type { Task } from "@/types";
 interface Props {
   /** 主任务 ID（必传，组件只在编辑模式下渲染） */
   parentTaskId: number;
-  /** 子任务任何变更（增/删/勾选）后触发，父组件可借此刷新主列表的进度徽章 */
-  onChanged?: () => void;
+  /**
+   * 子任务任何变更（增/删/勾选）后触发，**带最新 done/total**。
+   * 父组件用此局部 patch 主任务的进度徽章，避免全量 reload 主列表造成闪烁。
+   */
+  onChanged?: (done: number, total: number) => void;
 }
 
 export function SubtaskList({ parentTaskId, onChanged }: Props) {
@@ -55,8 +58,10 @@ export function SubtaskList({ parentTaskId, onChanged }: Props) {
         parent_task_id: parentTaskId,
       });
       setDraft("");
-      await refresh();
-      onChanged?.();
+      const list = await taskApi.listSubtasks(parentTaskId);
+      setItems(list);
+      const done = list.filter((t) => t.status === 1).length;
+      onChanged?.(done, list.length);
     } catch (e) {
       message.error(`添加失败：${e}`);
     } finally {
@@ -67,8 +72,10 @@ export function SubtaskList({ parentTaskId, onChanged }: Props) {
   async function handleToggle(id: number) {
     try {
       await taskApi.toggleStatus(id);
-      await refresh();
-      onChanged?.();
+      const list = await taskApi.listSubtasks(parentTaskId);
+      setItems(list);
+      const done = list.filter((t) => t.status === 1).length;
+      onChanged?.(done, list.length);
     } catch (e) {
       message.error(`切换状态失败：${e}`);
     }
@@ -77,8 +84,10 @@ export function SubtaskList({ parentTaskId, onChanged }: Props) {
   async function handleDelete(id: number) {
     try {
       await taskApi.delete(id);
-      await refresh();
-      onChanged?.();
+      const list = await taskApi.listSubtasks(parentTaskId);
+      setItems(list);
+      const done = list.filter((t) => t.status === 1).length;
+      onChanged?.(done, list.length);
     } catch (e) {
       message.error(`删除失败：${e}`);
     }

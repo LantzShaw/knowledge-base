@@ -53,10 +53,11 @@ interface Props {
   /** 主任务"保存按钮"成功后触发（父组件通常会同时关闭 Modal） */
   onSaved: () => void;
   /**
-   * 子任务变更（增/删/勾选）后触发——**不关闭** Modal，只让父组件刷新主列表
-   * 进度徽章。父组件通常传 loadTasks。不传 = 不刷新。
+   * 子任务变更（增/删/勾选）后触发——**不关闭** Modal，仅供父组件局部 patch
+   * 当前主任务的 subtask_done/total 进度徽章（避免全量 reload 造成列表闪烁）。
+   * 不传 = 父组件不更新进度徽章（用户切回主列表时自然刷新）。
    */
-  onSubtaskChanged?: () => void;
+  onSubtaskChanged?: (done: number, total: number) => void;
 }
 
 export function CreateTaskModal({

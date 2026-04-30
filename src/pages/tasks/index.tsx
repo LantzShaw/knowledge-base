@@ -847,8 +847,17 @@ export default function TasksPage() {
           setEditing(null);
           loadTasks();
         }}
-        // 子任务变更只刷新主列表进度徽章，不关闭 Modal（用户还在编辑主任务）
-        onSubtaskChanged={loadTasks}
+        // 子任务变更：局部 patch 当前编辑任务的进度徽章（避免全量 reload 闪烁）
+        onSubtaskChanged={(done, total) => {
+          if (!editing) return;
+          setTasks((prev) =>
+            prev.map((t) =>
+              t.id === editing.id
+                ? { ...t, subtask_done: done, subtask_total: total }
+                : t,
+            ),
+          );
+        }}
       />
       {/* AI 规划 / 添加待办的三个 Modal 已封装进 NewTodoButton；本页面不再单独挂 */}
     </div>
