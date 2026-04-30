@@ -977,7 +977,11 @@ export function TiptapEditor({
         tightLists: true,         // 紧凑列表
         bulletListMarker: "-",
         linkify: true,
-        breaks: false,
+        // 单换行 → <br>。markdown 严格语义（false 时单换行 = 空格）对非技术用户
+        // 反直觉：导入 .md 段内多行内容 / 复制粘贴文本，都会因"换行被吃掉"困惑。
+        // 改 true 后所见即所得（与 Notion / Logseq / GitHub Issue 一致），写回原文件
+        // 时 hard break 序列化为 "  \n"（两空格+换行），下次读取还原相同视觉。
+        breaks: true,
         transformPastedText: true,
         transformCopiedText: false,
       }),
