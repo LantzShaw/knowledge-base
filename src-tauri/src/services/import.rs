@@ -326,17 +326,14 @@ impl ImportService {
                     // 写入 canonical path，下次导入同一文件即可按 path 去重命中
                     // 注意：Duplicate 策略新建的副本也挂 canonical_path —— 这样下次
                     // 再导入同文件仍会命中 path，按用户当时选的策略处理，不会无限新建
-                    //
-                    // 重要：source_file_type 故意留 None。批量导入是「单向」（搬进来就完事），
-                    // 不应触发外部 .md 双向同步写回（editor.tsx 的 writeBack 仅在
-                    // source_file_type === "md" 时触发，否则跳过）。设为 None 后，
-                    // 即使用户编辑保存也不会覆盖原文件。
-                    // 真正的双向同步走 `import_single_markdown` 流程（"打开 .md"）—— 那里
-                    // 才会显式 set type="md" 启用写回。
+                    let src_type = match ext_lower(file_path).as_str() {
+                        "txt" => "txt",
+                        _ => "md", // markdown / md 统一记 md
+                    };
                     let _ = db.set_note_source_file(
                         note.id,
                         Some(&canonical_path),
-                        None,
+                        Some(src_type),
                     );
 
                     // ─── T-009: 把 frontmatter 中的标签关联到这条笔记 ───
