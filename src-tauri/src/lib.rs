@@ -666,6 +666,7 @@ pub fn run() {
             commands::system::get_writing_trend,
             commands::system::get_multi_instance_enabled,
             commands::system::set_multi_instance_enabled,
+            commands::system::write_text_file,
             commands::system::resolve_asset_absolute_path,
             // 配置模块
             commands::config::get_all_config,

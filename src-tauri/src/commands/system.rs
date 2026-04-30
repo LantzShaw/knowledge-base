@@ -88,3 +88,15 @@ pub fn set_multi_instance_enabled(
     let dir = crate::framework_app_data_dir(&app).map_err(|e| e.to_string())?;
     crate::set_multi_instance_enabled(&dir, enabled).map_err(|e| e.to_string())
 }
+
+/// 把任意文本写入指定路径（UTF-8）。前端"导出 SVG"等小工具用。
+///
+/// Tauri 2 的 WebView 默认拦截 `<a download>` 触发的下载，所以只读视图里的
+/// "导出"按钮无法走纯前端方案，必须经 Rust 写盘。前端先调 `tauri-plugin-dialog`
+/// 的 `save()` 获取目标路径，再把内容传到这里。
+///
+/// 安全：路径由用户在原生 Save 对话框中选定，不接受相对路径或拼接；调用方传啥写啥。
+#[tauri::command]
+pub fn write_text_file(path: String, content: String) -> Result<(), String> {
+    std::fs::write(&path, content).map_err(|e| format!("写入文件失败 {}: {}", path, e))
+}

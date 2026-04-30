@@ -20,7 +20,7 @@ import {
   App as AntdApp,
   theme as antdTheme,
 } from "antd";
-import { ArrowLeft, Save, Trash2, Pin, FolderOpen, Tags, Link2, Share, Maximize2, Minimize2, FileText as FileTextIcon, ChevronRight, ChevronDown, CornerUpLeft, Folder as FolderIcon, Eye, EyeOff, Lock, Unlock, MessageSquare, ListTree } from "lucide-react";
+import { ArrowLeft, Save, Trash2, Pin, FolderOpen, Tags, Link2, Share, Maximize2, Minimize2, FileText as FileTextIcon, ChevronRight, ChevronDown, CornerUpLeft, Folder as FolderIcon, Eye, EyeOff, Lock, Unlock, MessageSquare, ListTree, Network } from "lucide-react";
 import { useAppStore } from "@/store";
 import { useTabsStore } from "@/store/tabs";
 import { noteApi, tagApi, folderApi, linkApi, exportApi, sourceFileApi, vaultApi, sourceWritebackApi } from "@/lib/api";
@@ -33,6 +33,7 @@ import { TiptapEditor } from "@/components/editor";
 import { EditorOutline } from "@/components/editor/EditorOutline";
 import { TagColorPicker } from "@/components/TagColorPicker";
 import { NoteAiDrawer } from "@/components/ai/NoteAiDrawer";
+import { MindMapView } from "@/components/notes/MindMapView";
 import type { Note, Tag, Folder, NoteLink } from "@/types";
 
 const { Text } = Typography;
@@ -595,6 +596,8 @@ export default function NoteEditorPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  /** 思维导图视图弹窗：渲染当前 markdown 的标题层级（只读） */
+  const [mindMapOpen, setMindMapOpen] = useState(false);
 
   // 标签状态
   const [noteTags, setNoteTags] = useState<Tag[]>([]);
@@ -1385,6 +1388,12 @@ export default function NoteEditorPage() {
               onClick={toggleOutline}
             />
           </Tooltip>
+          <Tooltip title="思维导图（只读视图）">
+            <Button
+              icon={<Network size={16} />}
+              onClick={() => setMindMapOpen(true)}
+            />
+          </Tooltip>
           <Tooltip
             title={
               backlinks.length > 0
@@ -1670,6 +1679,14 @@ export default function NoteEditorPage() {
         open={aiDrawerOpen}
         onClose={() => setAiDrawerOpen(false)}
         pendingSelection={aiSelection}
+      />
+
+      {/* 思维导图（只读）：把当前笔记 markdown 标题层级渲染成 mindmap */}
+      <MindMapView
+        open={mindMapOpen}
+        onClose={() => setMindMapOpen(false)}
+        markdown={content}
+        title={title}
       />
 
       <VaultModal

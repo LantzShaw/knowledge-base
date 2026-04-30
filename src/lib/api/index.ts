@@ -100,6 +100,9 @@ export const systemApi = {
   /** 切换"允许多开"开关，下次启动生效 */
   setMultiInstanceEnabled: (enabled: boolean) =>
     invoke<void>("set_multi_instance_enabled", { enabled }),
+  /** 把任意文本写入指定路径（UTF-8）。配合 dialog.save() 用于前端导出 SVG/JSON 等。 */
+  writeTextFile: (path: string, content: string) =>
+    invoke<void>("write_text_file", { path, content }),
 };
 
 /** 更新相关 API */
