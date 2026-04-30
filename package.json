@@ -11,7 +11,9 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "build:mcp": "node scripts/build-mcp.mjs",
+    "build:mcp:debug": "node scripts/build-mcp.mjs --debug"
   },
   "dependencies": {
     "@ant-design/icons": "^6.1.0",
