@@ -93,6 +93,18 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
+      # ─── kb-mcp sidecar：MCP server binary，由 Tauri externalBin 带进安装包 ───
+      # 必须在 tauri build 之前完成，否则 bundle 阶段找不到 binaries/kb-mcp-<triple>(.exe)
+      # macOS 矩阵会传 --target，让 sidecar binary 与 tauri build 同 triple 对齐
+      - name: Build kb-mcp sidecar
+        shell: bash
+        run: |
+          if [ -n "${{ matrix.target }}" ]; then
+            pnpm build:mcp --target ${{ matrix.target }}
+          else
+            pnpm build:mcp
+          fi
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
