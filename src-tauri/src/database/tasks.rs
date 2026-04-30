@@ -613,17 +613,21 @@ impl super::Database {
             .lock()
             .map_err(|e| AppError::Custom(e.to_string()))?;
 
-        // SELECT 必须包含 18 个映射用到的列（索引 0..=17），最后一个 source_batch_id
-        // 之前缺这列，导致 row.get(18)? 抛 InvalidColumnIndex —— 调度器每次 tick 都失败，
-        // 提醒从未触发（看似"调度器静默"）。修复：补全 SELECT 列对齐 row.get 索引。
+        // SELECT 列必须与下方 row.get(N) 索引严格对齐。
+        // 历史教训：
+        // - v30 加 category_id 字段时漏改 SELECT，导致 row.get(19)? 抛 InvalidColumnIndex
+        // - v32 加 parent_task_id 字段时同样漏改，符号继续退化为"reminder tick 每秒报错"
+        // 修复：补齐 category_id + parent_task_id 两列；只看主任务（parent_task_id IS NULL），
+        // 子任务不参与提醒（步骤本身不是"独立项"，应跟随主任务的提醒）。
         let sql = "
             SELECT id, title, description, priority, important, status, due_date,
                    completed_at, created_at, updated_at, remind_before_minutes, reminded_at,
                    repeat_kind, repeat_interval, repeat_weekdays, repeat_until,
-                   repeat_count, repeat_done_count, source_batch_id
+                   repeat_count, repeat_done_count, source_batch_id, category_id, parent_task_id
             FROM tasks
             WHERE status = 0
               AND reminded_at IS NULL
+              AND parent_task_id IS NULL
               AND due_date IS NOT NULL
               AND remind_before_minutes IS NOT NULL
               AND datetime(
@@ -657,7 +661,7 @@ impl super::Database {
                     repeat_done_count: row.get(17)?,
                     source_batch_id: row.get(18)?,
                     category_id: row.get(19)?,
-                    parent_task_id: None,
+                    parent_task_id: row.get(20)?,
                     subtask_done: 0,
                     subtask_total: 0,
                     links: Vec::new(),

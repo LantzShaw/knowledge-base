@@ -1189,8 +1189,8 @@ function TaskRow({
       }
       onContextMenu={onContextMenu}
     >
-      {/* 展开/折叠 ▶ ▼：仅有子任务时显示，多选态不显示（避免误操作） */}
-      {hasSubtasks && !multiSelect ? (
+      {/* 展开/折叠 ▶ ▼：仅有子任务时显示。多选态下也保留（按钮已 stopPropagation 不会误触发选中），避免布局跳动 */}
+      {hasSubtasks ? (
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -1207,8 +1207,8 @@ function TaskRow({
           {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </button>
       ) : (
-        // 占位保持对齐（非主任务的行不显示 ▶，但留 18px 空位让标题列对齐）
-        !multiSelect && <span className="shrink-0" style={{ width: 18 }} />
+        // 占位保持对齐（无子任务的行不显示 ▶，但留 18px 空位让标题列对齐）
+        <span className="shrink-0" style={{ width: 18 }} />
       )}
 
       {/* 多选态：复选框；普通态：完成勾选 */}
