@@ -10,55 +10,67 @@ impl super::Database {
     // ─── 查询 ─────────────────────────────────────
 
     /// 列表（按 priority ASC → due_date NULL LAST → updated_at DESC 排序，附带 links）
+    ///
+    /// **只返回主任务**（parent_task_id IS NULL）。子任务请通过 `list_subtasks(parent_id)`
+    /// 单独取。每行附带 subtask_done / subtask_total（LEFT JOIN 子查询统计）。
     pub fn list_tasks(&self, query: TaskQuery) -> Result<Vec<Task>, AppError> {
         let conn = self
             .conn
             .lock()
             .map_err(|e| AppError::Custom(e.to_string()))?;
 
-        let mut where_clauses: Vec<String> = Vec::new();
+        // 主任务过滤永远生效（子任务列表走 list_subtasks）
+        let mut where_clauses: Vec<String> = vec!["t.parent_task_id IS NULL".into()];
         let mut binds: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         if let Some(s) = query.status {
-            where_clauses.push("status = ?".into());
+            where_clauses.push("t.status = ?".into());
             binds.push(Box::new(s));
         }
         if let Some(p) = query.priority {
-            where_clauses.push("priority = ?".into());
+            where_clauses.push("t.priority = ?".into());
             binds.push(Box::new(p));
         }
         if let Some(k) = query.keyword.as_ref().and_then(|s| {
             let t = s.trim();
             (!t.is_empty()).then(|| format!("%{}%", t))
         }) {
-            where_clauses.push("(title LIKE ? OR IFNULL(description, '') LIKE ?)".into());
+            where_clauses.push("(t.title LIKE ? OR IFNULL(t.description, '') LIKE ?)".into());
             binds.push(Box::new(k.clone()));
             binds.push(Box::new(k));
         }
         // 分类筛选：category_id 优先；否则看 uncategorized
         if let Some(cid) = query.category_id {
-            where_clauses.push("category_id = ?".into());
+            where_clauses.push("t.category_id = ?".into());
             binds.push(Box::new(cid));
         } else if query.uncategorized.unwrap_or(false) {
-            where_clauses.push("category_id IS NULL".into());
+            where_clauses.push("t.category_id IS NULL".into());
         }
-        let where_sql = if where_clauses.is_empty() {
-            String::new()
-        } else {
-            format!("WHERE {}", where_clauses.join(" AND "))
-        };
+        let where_sql = format!("WHERE {}", where_clauses.join(" AND "));
 
+        // LEFT JOIN 子查询：每个主任务的子任务完成数 / 总数
         let sql = format!(
-            "SELECT id, title, description, priority, important, status, due_date,
-                    completed_at, created_at, updated_at, remind_before_minutes, reminded_at,
-                    repeat_kind, repeat_interval, repeat_weekdays, repeat_until,
-                    repeat_count, repeat_done_count, source_batch_id, category_id
-             FROM tasks
+            "SELECT t.id, t.title, t.description, t.priority, t.important, t.status, t.due_date,
+                    t.completed_at, t.created_at, t.updated_at, t.remind_before_minutes, t.reminded_at,
+                    t.repeat_kind, t.repeat_interval, t.repeat_weekdays, t.repeat_until,
+                    t.repeat_count, t.repeat_done_count, t.source_batch_id, t.category_id,
+                    t.parent_task_id,
+                    COALESCE(s.done, 0)  AS subtask_done,
+                    COALESCE(s.total, 0) AS subtask_total
+             FROM tasks t
+             LEFT JOIN (
+                 SELECT parent_task_id,
+                        SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) AS done,
+                        COUNT(*) AS total
+                 FROM tasks
+                 WHERE parent_task_id IS NOT NULL
+                 GROUP BY parent_task_id
+             ) s ON s.parent_task_id = t.id
              {}
-             ORDER BY status ASC,
-                      priority ASC,
-                      (due_date IS NULL) ASC,
-                      due_date ASC,
-                      updated_at DESC",
+             ORDER BY t.status ASC,
+                      t.priority ASC,
+                      (t.due_date IS NULL) ASC,
+                      t.due_date ASC,
+                      t.updated_at DESC",
             where_sql,
         );
 
@@ -86,6 +98,9 @@ impl super::Database {
                     repeat_done_count: row.get(17)?,
                     source_batch_id: row.get(18)?,
                     category_id: row.get(19)?,
+                    parent_task_id: row.get(20)?,
+                    subtask_done: row.get(21)?,
+                    subtask_total: row.get(22)?,
                     links: Vec::new(),
                 })
             })?
@@ -136,11 +151,15 @@ impl super::Database {
         // 会被原样向上抛，避免静默吞掉问题、误导前端。
         let task: Option<Task> = conn
             .query_row(
-                "SELECT id, title, description, priority, important, status, due_date,
-                        completed_at, created_at, updated_at, remind_before_minutes, reminded_at,
-                        repeat_kind, repeat_interval, repeat_weekdays, repeat_until,
-                        repeat_count, repeat_done_count, source_batch_id, category_id
-                 FROM tasks WHERE id = ?1",
+                "SELECT t.id, t.title, t.description, t.priority, t.important, t.status, t.due_date,
+                        t.completed_at, t.created_at, t.updated_at, t.remind_before_minutes, t.reminded_at,
+                        t.repeat_kind, t.repeat_interval, t.repeat_weekdays, t.repeat_until,
+                        t.repeat_count, t.repeat_done_count, t.source_batch_id, t.category_id,
+                        t.parent_task_id,
+                        COALESCE((SELECT SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END)
+                                  FROM tasks WHERE parent_task_id = t.id), 0) AS subtask_done,
+                        COALESCE((SELECT COUNT(*) FROM tasks WHERE parent_task_id = t.id), 0) AS subtask_total
+                 FROM tasks t WHERE t.id = ?1",
                 params![id],
                 |row| {
                     Ok(Task {
@@ -164,6 +183,9 @@ impl super::Database {
                         repeat_done_count: row.get(17)?,
                         source_batch_id: row.get(18)?,
                         category_id: row.get(19)?,
+                        parent_task_id: row.get(20)?,
+                        subtask_done: row.get(21)?,
+                        subtask_total: row.get(22)?,
                         links: Vec::new(),
                     })
                 },
@@ -189,6 +211,59 @@ impl super::Database {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Some(task))
+    }
+
+    /// 列出某主任务的子任务（按创建时间正序，符合"步骤"语义）
+    ///
+    /// 与 list_tasks 的区别：list_tasks 只返回 parent_task_id IS NULL 的主任务；
+    /// 这里专门返回某 parent_id 的所有子任务。子任务自身的 subtask_done/total
+    /// 都会查为 0（避免无意义的递归统计 + UI 也只展示一层）。
+    pub fn list_subtasks(&self, parent_id: i64) -> Result<Vec<Task>, AppError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
+
+        let mut stmt = conn.prepare(
+            "SELECT id, title, description, priority, important, status, due_date,
+                    completed_at, created_at, updated_at, remind_before_minutes, reminded_at,
+                    repeat_kind, repeat_interval, repeat_weekdays, repeat_until,
+                    repeat_count, repeat_done_count, source_batch_id, category_id,
+                    parent_task_id
+             FROM tasks WHERE parent_task_id = ?1
+             ORDER BY status ASC, created_at ASC, id ASC",
+        )?;
+        let rows = stmt
+            .query_map(params![parent_id], |row| {
+                Ok(Task {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    description: row.get(2)?,
+                    priority: row.get(3)?,
+                    important: row.get::<_, i32>(4)? != 0,
+                    status: row.get(5)?,
+                    due_date: row.get(6)?,
+                    completed_at: row.get(7)?,
+                    created_at: row.get(8)?,
+                    updated_at: row.get(9)?,
+                    remind_before_minutes: row.get(10)?,
+                    reminded_at: row.get(11)?,
+                    repeat_kind: row.get(12)?,
+                    repeat_interval: row.get(13)?,
+                    repeat_weekdays: row.get(14)?,
+                    repeat_until: row.get(15)?,
+                    repeat_count: row.get(16)?,
+                    repeat_done_count: row.get(17)?,
+                    source_batch_id: row.get(18)?,
+                    category_id: row.get(19)?,
+                    parent_task_id: row.get(20)?,
+                    subtask_done: 0,
+                    subtask_total: 0,
+                    links: Vec::new(),
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     /// 顶栏 Ctrl+K 搜索：按 title / description LIKE，未完成优先，高优先级靠前
@@ -254,8 +329,8 @@ impl super::Database {
             "INSERT INTO tasks (title, description, priority, important, due_date,
                                 remind_before_minutes, repeat_kind, repeat_interval,
                                 repeat_weekdays, repeat_until, repeat_count,
-                                source_batch_id, category_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                                source_batch_id, category_id, parent_task_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 input.title,
                 input.description,
@@ -270,6 +345,7 @@ impl super::Database {
                 input.repeat_count,
                 input.source_batch_id,
                 input.category_id,
+                input.parent_task_id,
             ],
         )?;
         let task_id = tx.last_insert_rowid();
@@ -581,6 +657,9 @@ impl super::Database {
                     repeat_done_count: row.get(17)?,
                     source_batch_id: row.get(18)?,
                     category_id: row.get(19)?,
+                    parent_task_id: None,
+                    subtask_done: 0,
+                    subtask_total: 0,
                     links: Vec::new(),
                 })
             })?

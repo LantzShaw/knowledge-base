@@ -758,6 +758,9 @@ export const dataDirApi = {
 export const taskApi = {
   list: (query?: TaskQuery) => invoke<Task[]>("list_tasks", { query }),
   get: (id: number) => invoke<Task>("get_task", { id }),
+  /** 列出某主任务的所有子任务（按创建时间正序） */
+  listSubtasks: (parentId: number) =>
+    invoke<Task[]>("list_subtasks", { parentId }),
   create: (input: CreateTaskInput) => invoke<number>("create_task", { input }),
   update: (id: number, input: UpdateTaskInput) =>
     invoke<boolean>("update_task", { id, input }),

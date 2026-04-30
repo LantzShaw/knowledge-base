@@ -789,6 +789,12 @@ export interface Task {
   source_batch_id: string | null;
   /** 一级分类 ID；null = 未分类 */
   category_id: number | null;
+  /** 父任务 ID；null = 主任务，非 null = 子任务 */
+  parent_task_id: number | null;
+  /** 已完成子任务数（仅主任务有意义；子任务恒为 0） */
+  subtask_done: number;
+  /** 总子任务数 */
+  subtask_total: number;
   links: TaskLink[];
 }
 
@@ -815,6 +821,8 @@ export interface CreateTaskInput {
   source_batch_id?: string | null;
   /** 一级分类 ID；不传或 null = 未分类 */
   category_id?: number | null;
+  /** 父任务 ID；传则创建为该任务的子任务，不传 = 创建主任务 */
+  parent_task_id?: number | null;
 }
 
 export interface UpdateTaskInput {

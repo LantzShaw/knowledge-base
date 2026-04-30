@@ -32,6 +32,7 @@ import type {
   UpdateTaskInput,
   CreateTaskInput,
 } from "@/types";
+import { SubtaskList } from "./SubtaskList";
 
 type RepeatMode = "none" | "daily" | "weekdays" | "weekly" | "monthly" | "custom";
 type EndMode = "never" | "until" | "count";
@@ -904,6 +905,11 @@ export function CreateTaskModal({
             )}
           </div>
         </div>
+
+        {/* 子任务区——仅编辑现有"主任务"时显示（子任务不嵌套） */}
+        {isEdit && editing && !editing.parent_task_id && (
+          <SubtaskList parentTaskId={editing.id} onChanged={onSaved} />
+        )}
       </div>
     </Modal>
   );

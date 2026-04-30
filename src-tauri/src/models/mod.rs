@@ -726,6 +726,14 @@ pub struct Task {
     pub source_batch_id: Option<String>,
     /// 一级分类 ID；None = 未分类
     pub category_id: Option<i64>,
+    /// 父任务 ID；None = 主任务，Some(id) = 子任务
+    pub parent_task_id: Option<i64>,
+    /// 已完成子任务数（仅主任务有意义；子任务恒为 0）
+    #[serde(default)]
+    pub subtask_done: i32,
+    /// 总子任务数（同上）
+    #[serde(default)]
+    pub subtask_total: i32,
     pub links: Vec<TaskLink>,
 }
 
@@ -749,6 +757,8 @@ pub struct CreateTaskInput {
     pub source_batch_id: Option<String>,
     /// 一级分类 ID；None = 未分类
     pub category_id: Option<i64>,
+    /// 父任务 ID（创建子任务时传）；None = 创建主任务
+    pub parent_task_id: Option<i64>,
 }
 
 /// 更新任务入参（字段缺省表示不改动）

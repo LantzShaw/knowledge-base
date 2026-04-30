@@ -863,6 +863,7 @@ pub fn run() {
             // 待办模块
             commands::tasks::list_tasks,
             commands::tasks::get_task,
+            commands::tasks::list_subtasks,
             commands::tasks::create_task,
             commands::tasks::update_task,
             commands::tasks::toggle_task_status,

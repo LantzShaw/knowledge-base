@@ -27,6 +27,15 @@ pub fn get_task(state: State<'_, AppState>, id: i64) -> Result<Task, String> {
         .ok_or_else(|| format!("任务 {} 不存在", id))
 }
 
+/// 列出某主任务的子任务
+#[tauri::command]
+pub fn list_subtasks(
+    state: State<'_, AppState>,
+    parent_id: i64,
+) -> Result<Vec<Task>, String> {
+    TaskService::list_subtasks(&state.db, parent_id).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn create_task(state: State<'_, AppState>, input: CreateTaskInput) -> Result<i64, String> {
     let id = TaskService::create(&state.db, input).map_err(|e| e.to_string())?;

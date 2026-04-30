@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use crate::error::AppError;
 
 /// 当前 Schema 版本
-pub const SCHEMA_VERSION: i32 = 31;
+pub const SCHEMA_VERSION: i32 = 32;
 
 /// 获取数据库版本
 pub fn get_version(conn: &Connection) -> Result<i32, AppError> {
@@ -61,6 +61,7 @@ pub fn migrate(conn: &Connection) -> Result<(), AppError> {
             28 => migrate_v28_to_v29(conn)?,
             29 => migrate_v29_to_v30(conn)?,
             30 => migrate_v30_to_v31(conn)?,
+            31 => migrate_v31_to_v32(conn)?,
             _ => {
                 return Err(AppError::Custom(format!(
                     "未知的数据库版本: {}",
@@ -1301,5 +1302,35 @@ fn migrate_v30_to_v31(conn: &Connection) -> Result<(), AppError> {
     )?;
 
     set_version(conn, 31)?;
+    Ok(())
+}
+
+/// v31 -> v32: tasks 加 parent_task_id（子任务支持）
+///
+/// 设计：
+/// - parent_task_id NULL → 主任务（出现在主列表）
+/// - parent_task_id 非 NULL → 子任务（在主任务详情下显示）
+/// - ON DELETE CASCADE：删主任务自动删所有子任务，避免孤儿
+/// - 部分索引只覆盖子任务（非 NULL），节省空间
+///
+/// 不限制嵌套层级（DB 层允许多层），但前端 UI 默认只展示 1 层 —— 与
+/// Microsoft To Do / Things 一致的"步骤"模型，足够个人使用。
+fn migrate_v31_to_v32(conn: &Connection) -> Result<(), AppError> {
+    log::info!("数据库迁移: v31 -> v32 (tasks.parent_task_id 子任务)");
+
+    let cols = list_columns(conn, "tasks")?;
+    if !cols.iter().any(|c| c == "parent_task_id") {
+        conn.execute_batch(
+            "ALTER TABLE tasks ADD COLUMN parent_task_id INTEGER
+                REFERENCES tasks(id) ON DELETE CASCADE;",
+        )?;
+    }
+
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_tasks_parent
+            ON tasks(parent_task_id) WHERE parent_task_id IS NOT NULL;",
+    )?;
+
+    set_version(conn, 32)?;
     Ok(())
 }

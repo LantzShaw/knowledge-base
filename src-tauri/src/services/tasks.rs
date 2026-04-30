@@ -18,6 +18,11 @@ impl TaskService {
         db.get_task(id)
     }
 
+    /// 列出某主任务的子任务
+    pub fn list_subtasks(db: &Database, parent_id: i64) -> Result<Vec<Task>, AppError> {
+        db.list_subtasks(parent_id)
+    }
+
     pub fn create(db: &Database, input: CreateTaskInput) -> Result<i64, AppError> {
         let title = input.title.trim();
         if title.is_empty() {

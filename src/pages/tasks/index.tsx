@@ -1199,6 +1199,24 @@ function TaskRow({
               {describeRepeat(task)}
             </span>
           )}
+          {task.subtask_total > 0 && (
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded inline-flex items-center gap-1"
+              style={{
+                background:
+                  task.subtask_done === task.subtask_total
+                    ? token.colorSuccessBg
+                    : token.colorFillSecondary,
+                color:
+                  task.subtask_done === task.subtask_total
+                    ? token.colorSuccess
+                    : token.colorTextSecondary,
+              }}
+              title={`子任务进度：${task.subtask_done}/${task.subtask_total}`}
+            >
+              {task.subtask_done}/{task.subtask_total}
+            </span>
+          )}
           {category && (
             <span
               className="inline-flex items-center gap-1 text-[10px]"
