@@ -112,9 +112,10 @@ fn build_claude_md_template() -> String {
 
 ## 可用工具
 
-**读工具（默认可用，11 个）**：
+**读工具（默认可用，13 个）**：
 - `search_notes(query, limit?)` — 全文搜索笔记
 - `get_note(id)` — 按 id 读笔记全文
+- `list_recent_notes(limit?)` — 按更新时间列最近笔记（无关键词时用）
 - `list_folders` — 所有文件夹结构 + 各自笔记数
 - `list_notes_by_folder(folder_id?, includeDescendants?, limit?)` — 按文件夹列笔记（folder_id=null 表示未分类）
 - `list_tags` — 所有标签 + 笔记数
@@ -123,12 +124,29 @@ fn build_claude_md_template() -> String {
 - `list_daily_notes(days?, limit?)` — 最近 N 天日记
 - `list_tasks(status?, keyword?, limit?)` — 主任务列表
 - `get_prompt(id?, builtin_code?)` — Prompt 模板
+- `list_templates` — 笔记模板（会议记录/读书笔记/周报 等）
+- `list_trash(limit?)` — 回收站里的笔记（可恢复）
 
-**写工具（需 `--writable` 启动开关，需用户授权，4 个）**：
-- `create_note(title, content, folder_id?)` — 创建新笔记
+**写工具（需 `--writable` 启动开关，需用户授权，11 个）**：
+
+*笔记类*：
+- `create_note(title, content, folder_id?)` — 创建空白笔记
+- `create_note_from_template(template_id, title?, folder_id?)` — 按模板建笔记（先 list_templates 取 id）
 - `update_note(id, title?, content?, folder_id?)` — 修改笔记
-- `add_tag_to_note(note_id, tag)` — 给笔记加标签
+- `delete_note(id)` — 软删到回收站（可恢复，**LLM 撤销创建错误用这个**）
+- `restore_note_from_trash(id)` — 把回收站里的笔记还原
 - `move_notes_batch(ids, folder_id?)` — 批量移动笔记到指定文件夹
+
+*文件夹类*：
+- `create_folder(name, parent_id?)` — 建归档桶（parent_id=null 顶级）
+
+*标签类*：
+- `add_tag_to_note(note_id, tag)` — 给笔记加标签（标签不存在自动建）
+- `remove_tag_from_note(note_id, tag)` — 撤回错误添加的标签
+
+*任务类*：
+- `create_task(title, description?, priority?, important?, due_date?)` — 加待办（priority: 0=紧急/1=普通/2=低）
+- `update_task(id, title?, description?, priority?, important?, due_date?, mark_done?)` — 改任务字段或打钩（mark_done=true 标记完成）
 
 ## 行为准则
 
@@ -184,6 +202,22 @@ fn build_claude_md_template() -> String {
 - 加错标签 → `remove_tag_from_note(note_id, tag)`（不影响其他笔记的同名标签）
 - 改错笔记内容 → 没有 undo，告诉用户「内容已写入，要恢复请去主应用回收站找老版本」
 - 任务建错 → 没有 delete_task；引导用户主应用 UI 删，或者 `update_task(mark_done=true)` 标完结归档
+
+### 「按模板建结构化笔记」
+> 用户说"建个会议记录"/"开始本周周报"等，优先用模板而不是 create_note 空白创建。
+
+1. `list_templates` 看可用模板（id / name / description / preview）
+2. 选最匹配的模板，与用户确认（"用「会议记录」模板？"）
+3. `create_note_from_template(template_id=X)` — 不传 title 时自动用「会议记录 · 2026-05-01」
+4. 报告："已按 X 模板创建 #ID，去打开吧"
+
+### 「从回收站恢复」
+> 用户说"找回某条笔记"/"上次删的那个"。
+
+1. `list_trash(limit=20)` 看最近删的
+2. 与用户确认要恢复的 id
+3. `restore_note_from_trash(id)` 一键还原
+4. 报告：「ID #X 已从回收站恢复」
 
 ### 「从对话提取待办」
 > 用户在对话里随口说"明天 9 点交报告"/"下周一带电脑"时，主动提议建任务。
