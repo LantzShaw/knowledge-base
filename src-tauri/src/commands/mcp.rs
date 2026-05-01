@@ -497,8 +497,9 @@ pub fn mcp_install_to_client(
     }
     let servers_obj = servers.as_object_mut().unwrap();
 
-    // 检查是否覆盖已有
-    let overwritten = servers_obj.contains_key("knowledge-base");
+    // 检查是否覆盖已有 + 提取已有 entry 里我们不应该动的字段（学 tauri-cc flatten extra 模式）
+    let existing = servers_obj.get("knowledge-base").cloned();
+    let overwritten = existing.is_some();
 
     // 拼新配置
     let mut args = vec![
@@ -508,10 +509,24 @@ pub fn mcp_install_to_client(
     if writable {
         args.push(serde_json::Value::String("--writable".to_string()));
     }
-    let kb_entry = serde_json::json!({
+    let mut kb_entry = serde_json::json!({
         "command": sidecar_str,
         "args": args,
     });
+
+    // 保留已有 entry 里我们不认识 / 不该覆盖的字段（disabled / type / url / 用户自加 description 等）
+    // 参考 tauri-cc::McpServerEntry 的 #[serde(flatten)] extra 模式：
+    // 用户/其它工具可能在 entry 里加了字段，覆盖前应该原样保留
+    if let Some(serde_json::Value::Object(old)) = existing {
+        let kb_obj = kb_entry.as_object_mut().unwrap();
+        for (key, value) in old {
+            // command / args 我们重写；env 用户没传我们不留（避免 stale env）
+            if key != "command" && key != "args" && key != "env" {
+                kb_obj.insert(key, value);
+            }
+        }
+    }
+
     servers_obj.insert("knowledge-base".to_string(), kb_entry);
 
     // 写回，pretty print 2 空格
@@ -562,4 +577,114 @@ fn locate_cursor_config() -> Option<PathBuf> {
         let home = std::env::var("HOME").ok()?;
         Some(PathBuf::from(home).join(".cursor/mcp.json"))
     }
+}
+
+/// 卸载结果
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UninstallResult {
+    pub config_path: String,
+    /// 是否真的删除了（false = 文件里本来就没有 knowledge-base 条目）
+    pub removed: bool,
+}
+
+/// 一键从客户端配置中移除 knowledge-base 条目（保留其它 server）
+#[tauri::command]
+pub fn mcp_uninstall_from_client(target: InstallTarget) -> Result<UninstallResult, String> {
+    let config_path = match target {
+        InstallTarget::ClaudeDesktop => locate_claude_desktop_config()
+            .ok_or_else(|| "无法定位 Claude Desktop 配置目录".to_string())?,
+        InstallTarget::Cursor => locate_cursor_config()
+            .ok_or_else(|| "无法定位 Cursor 配置目录".to_string())?,
+    };
+
+    if !config_path.exists() {
+        return Ok(UninstallResult {
+            config_path: config_path.to_string_lossy().into_owned(),
+            removed: false,
+        });
+    }
+
+    let raw = std::fs::read_to_string(&config_path)
+        .map_err(|e| format!("读取 {} 失败: {}", config_path.display(), e))?;
+    let mut root: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|e| format!("解析 JSON 失败: {}", e))?;
+
+    let removed = root
+        .get_mut("mcpServers")
+        .and_then(|s| s.as_object_mut())
+        .and_then(|o| o.remove("knowledge-base"))
+        .is_some();
+
+    if removed {
+        let pretty = serde_json::to_string_pretty(&root)
+            .map_err(|e| format!("序列化 JSON 失败: {e}"))?;
+        std::fs::write(&config_path, pretty)
+            .map_err(|e| format!("写入 {} 失败: {}", config_path.display(), e))?;
+    }
+
+    Ok(UninstallResult {
+        config_path: config_path.to_string_lossy().into_owned(),
+        removed,
+    })
+}
+
+/// 检查指定客户端是否已安装 knowledge-base，前端拿来决定按钮状态
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientInstallStatus {
+    pub config_path: String,
+    pub config_exists: bool,
+    pub installed: bool,
+    /// 已装的话，args 里是否带 --writable
+    pub writable: bool,
+}
+
+#[tauri::command]
+pub fn mcp_check_install_status(target: InstallTarget) -> Result<ClientInstallStatus, String> {
+    let config_path = match target {
+        InstallTarget::ClaudeDesktop => locate_claude_desktop_config()
+            .ok_or_else(|| "无法定位 Claude Desktop 配置目录".to_string())?,
+        InstallTarget::Cursor => locate_cursor_config()
+            .ok_or_else(|| "无法定位 Cursor 配置目录".to_string())?,
+    };
+
+    let config_path_str = config_path.to_string_lossy().into_owned();
+    if !config_path.exists() {
+        return Ok(ClientInstallStatus {
+            config_path: config_path_str,
+            config_exists: false,
+            installed: false,
+            writable: false,
+        });
+    }
+
+    let raw = std::fs::read_to_string(&config_path).unwrap_or_default();
+    let root: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::json!({}));
+
+    let kb_entry = root
+        .get("mcpServers")
+        .and_then(|s| s.get("knowledge-base"));
+
+    let (installed, writable) = match kb_entry {
+        Some(entry) => {
+            let writable = entry
+                .get("args")
+                .and_then(|a| a.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .any(|v| v.as_str().map(|s| s == "--writable").unwrap_or(false))
+                })
+                .unwrap_or(false);
+            (true, writable)
+        }
+        None => (false, false),
+    };
+
+    Ok(ClientInstallStatus {
+        config_path: config_path_str,
+        config_exists: true,
+        installed,
+        writable,
+    })
 }
