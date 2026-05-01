@@ -78,8 +78,9 @@ tauri-plugin-clipboard-manager = "2"
 # kb-core: 共享的 MCP server 实现（KbDb + KbServer + 12 工具），
 # 主应用在进程内 spawn KbServer，让自家 AI 对话页通过 MCP 协议消费同一套工具
 kb-core = { path = "kb-core" }
-# rmcp client：通过 in-memory transport 调用同进程的 KbServer
-rmcp = { version = "1.5", features = ["client"] }
+# rmcp client：通过 in-memory transport 调用同进程的 KbServer，
+# 同时通过 child-process transport spawn 外部 MCP server（M5-2 用户加的 GitHub / Filesystem 等）
+rmcp = { version = "1.5", features = ["client", "transport-child-process"] }
 # Excel / ODS 解析（纯 Rust，零系统依赖；AI 智能规划"Excel 导入"模式用）
 calamine = "0.28"
 # T-020 笔记导出为 Word：纯 Rust 生成 .docx；零系统依赖

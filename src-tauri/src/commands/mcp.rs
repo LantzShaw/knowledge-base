@@ -18,6 +18,7 @@ use rmcp::model::CallToolRequestParams;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 
+use crate::models::{McpServer, McpServerInput};
 use crate::state::AppState;
 
 /// 主应用编译时被 tauri-build 注入的 target triple，
@@ -157,6 +158,156 @@ pub async fn mcp_internal_call_tool(
         .map_err(|e| format!("call_tool({name}) 失败: {e}"))?;
 
     // 把 content 列表里的 text block 拼起来返回（12 工具都是单段 text）
+    let mut out = String::new();
+    for c in &result.content {
+        if let Some(text) = c.as_text() {
+            out.push_str(&text.text);
+        }
+    }
+    if result.is_error.unwrap_or(false) {
+        return Err(format!("工具返回错误: {out}"));
+    }
+    Ok(out)
+}
+
+// ─── M5-2: 外部 MCP server CRUD + 调用代理 ─────────────────────
+
+/// 列出所有用户加的外部 MCP server
+#[tauri::command]
+pub fn mcp_list_servers(state: tauri::State<'_, AppState>) -> Result<Vec<McpServer>, String> {
+    state.db.list_mcp_servers().map_err(|e| e.to_string())
+}
+
+/// 创建一个新的 MCP server
+#[tauri::command]
+pub fn mcp_create_server(
+    state: tauri::State<'_, AppState>,
+    input: McpServerInput,
+) -> Result<McpServer, String> {
+    state
+        .db
+        .create_mcp_server(&input)
+        .map_err(|e| e.to_string())
+}
+
+/// 更新已有 server 配置；同时让正在运行的 client 失效（下次访问会用新配置 spawn）
+#[tauri::command]
+pub async fn mcp_update_server(
+    state: tauri::State<'_, AppState>,
+    id: i64,
+    input: McpServerInput,
+) -> Result<McpServer, String> {
+    let server = state
+        .db
+        .update_mcp_server(id, &input)
+        .map_err(|e| e.to_string())?;
+    state.mcp_external.disconnect(id).await;
+    Ok(server)
+}
+
+/// 删除 server，同时清掉 client 缓存（子进程会被回收）
+#[tauri::command]
+pub async fn mcp_delete_server(
+    state: tauri::State<'_, AppState>,
+    id: i64,
+) -> Result<bool, String> {
+    state.mcp_external.disconnect(id).await;
+    state.db.delete_mcp_server(id).map_err(|e| e.to_string())
+}
+
+/// 启用/禁用 server。禁用时清掉 client 缓存，确保下次访问会拒掉
+#[tauri::command]
+pub async fn mcp_set_server_enabled(
+    state: tauri::State<'_, AppState>,
+    id: i64,
+    enabled: bool,
+) -> Result<(), String> {
+    state
+        .db
+        .set_mcp_server_enabled(id, enabled)
+        .map_err(|e| e.to_string())?;
+    if !enabled {
+        state.mcp_external.disconnect(id).await;
+    }
+    Ok(())
+}
+
+/// 列出指定外部 server 暴露的工具（首次会触发 spawn + 握手）
+#[tauri::command]
+pub async fn mcp_external_list_tools(
+    state: tauri::State<'_, AppState>,
+    server_id: i64,
+) -> Result<Vec<McpToolInfo>, String> {
+    let server = state
+        .db
+        .get_mcp_server(server_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("MCP server {} 不存在", server_id))?;
+
+    let client = state
+        .mcp_external
+        .get_or_spawn(&server)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let tools = client
+        .list_all_tools()
+        .await
+        .map_err(|e| format!("list_tools 失败: {e}"))?;
+
+    let infos = tools
+        .into_iter()
+        .map(|t| McpToolInfo {
+            name: t.name.into(),
+            description: t.description.map(|d| d.into()),
+            input_schema: JsonValue::Object((*t.input_schema).clone()),
+        })
+        .collect();
+
+    Ok(infos)
+}
+
+/// 调用指定外部 server 的工具
+#[tauri::command]
+pub async fn mcp_external_call_tool(
+    state: tauri::State<'_, AppState>,
+    server_id: i64,
+    name: String,
+    arguments: Option<JsonValue>,
+) -> Result<String, String> {
+    let server = state
+        .db
+        .get_mcp_server(server_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("MCP server {} 不存在", server_id))?;
+
+    let client = state
+        .mcp_external
+        .get_or_spawn(&server)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let args_object = match arguments {
+        Some(JsonValue::Object(m)) => Some(m),
+        Some(JsonValue::Null) | None => None,
+        Some(other) => {
+            return Err(format!(
+                "arguments 必须是 JSON object 或 null，收到: {}",
+                other
+            ));
+        }
+    };
+
+    let mut req = CallToolRequestParams::new(name.clone());
+    if let Some(obj) = args_object {
+        req = req.with_arguments(obj);
+    }
+
+    let result = client
+        .call_tool(req)
+        .await
+        .map_err(|e| format!("call_tool({name}) 失败: {e}"))?;
+
     let mut out = String::new();
     for c in &result.content {
         if let Some(text) = c.as_text() {

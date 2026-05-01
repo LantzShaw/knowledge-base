@@ -36,6 +36,9 @@ pub struct AppState {
     /// In-memory MCP client（指向同进程内的 KbServer）。
     /// `Option` 是因为初始化失败不应阻断主应用启动 —— None 时 mcp_internal_* 命令会报"未就绪"。
     pub mcp_internal: Option<Arc<InternalMcpClient>>,
+    /// 外部 MCP server client 缓存（M5-2）。每个用户加的 server 对应一个子进程 + client。
+    /// 进程级单例：第一次访问时 spawn，后续请求复用。
+    pub mcp_external: Arc<crate::services::mcp_client::McpClientManager>,
     /// 实例锁文件句柄（保持存活以维持独占锁，进程退出时自动释放）
     _lock_file: Option<File>,
 }
@@ -58,6 +61,7 @@ impl AppState {
             pending_open_md_path: Mutex::new(None),
             vault: RwLock::new(VaultState::default()),
             mcp_internal,
+            mcp_external: Arc::new(crate::services::mcp_client::McpClientManager::new()),
             _lock_file: lock_file,
         }
     }

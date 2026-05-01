@@ -46,3 +46,4 @@ pub mod template;
 pub mod vault;
 pub mod video;
 pub mod webdav;
+pub mod mcp_client;
