@@ -52,6 +52,14 @@ impl McpClientManager {
         // 第一次访问：spawn 子进程
         let mut cmd = tokio::process::Command::new(&server.command);
         cmd.args(&server.args);
+
+        // macOS / Linux GUI app 启动时 PATH 只有 /usr/bin:/bin:/usr/sbin:/sbin，
+        // 不读 ~/.zshrc / ~/.bashrc，导致 spawn `npx` / `node` / brew 装的 binary 找不到。
+        // 在用户自定义 env 之前先注入"用户登录 shell 解析后的真实 PATH"，
+        // 用户在 server.env 里再覆盖也行。
+        if let Some(path) = enriched_path() {
+            cmd.env("PATH", path);
+        }
         for (k, v) in &server.env {
             cmd.env(k, v);
         }
@@ -98,4 +106,60 @@ impl McpClientManager {
         guard.clear();
         log::info!("[mcp-external] disconnected all ({} clients)", count);
     }
+}
+
+// ─── macOS / Linux GUI app PATH 修复 ─────────────────────────────
+//
+// 已知坑：macOS GUI app 启动时不读 ~/.zshrc，PATH 只有系统默认 4 个路径。
+// 用户从设置页加 "command: npx" 类型的 MCP server 时，spawn 直接 ENOENT。
+// 借鉴 VS Code 的 fixZshHome 思路：先 fork 一次用户的 login + interactive shell，
+// 让 shell 把 ~/.zshrc / .bashrc / nvm / brew 的 PATH 都解析好，echo 出来缓存。
+// 用 marker 包裹 echo 内容，避免 shell banner（oh-my-zsh / fortune 等）污染。
+
+/// 取用户登录 shell 解析后的 PATH。失败时返回 None（spawn 会继续用 GUI 默认 PATH）。
+/// 进程级缓存：只在第一次 spawn 时跑一次 shell。
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn enriched_path() -> Option<&'static str> {
+    use std::process::Stdio;
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<Option<String>> = OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            let shell = std::env::var("SHELL").ok()?;
+            const MARKER_START: &str = "<<MCP_PATH_START>>";
+            const MARKER_END: &str = "<<MCP_PATH_END>>";
+            // -l: login shell（读 .zprofile / .bash_profile）
+            // -i: interactive shell（读 .zshrc / .bashrc，覆盖 nvm 这种只在 interactive 才设的工具）
+            // -c: 执行命令后退出
+            // marker 包裹避免 shell banner 污染 stdout
+            let probe = format!("printf '{MARKER_START}%s{MARKER_END}' \"$PATH\"");
+            let output = std::process::Command::new(&shell)
+                .args(["-l", "-i", "-c", &probe])
+                .stdin(Stdio::null()) // 防止 shell 等用户输入卡死
+                .output()
+                .ok()?;
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let start = stdout.find(MARKER_START)? + MARKER_START.len();
+            let end = stdout.find(MARKER_END)?;
+            if start >= end {
+                return None;
+            }
+            let path = stdout[start..end].trim();
+            if path.is_empty() {
+                None
+            } else {
+                log::info!(
+                    "[mcp-external] enriched PATH from login shell ({} entries)",
+                    path.split(':').count()
+                );
+                Some(path.to_string())
+            }
+        })
+        .as_deref()
+}
+
+/// Windows GUI app 的 PATH 跟系统 PATH 一致（HKLM/HKCU 注册表），不需要修复
+#[cfg(target_os = "windows")]
+fn enriched_path() -> Option<&'static str> {
+    None
 }
