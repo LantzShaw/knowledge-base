@@ -166,6 +166,69 @@ struct AddTagArgs {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct DeleteNoteArgs {
+    /// 笔记 id
+    id: i64,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct RemoveTagArgs {
+    /// 笔记 id
+    note_id: i64,
+    /// 标签名
+    tag: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct ListRecentArgs {
+    /// 上限条数，默认 20，最大 100
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct CreateTaskArgs {
+    /// 任务标题（必填）
+    title: String,
+    /// 描述（可选）
+    #[serde(default)]
+    description: Option<String>,
+    /// 优先级：0=紧急 / 1=普通(默认) / 2=低
+    #[serde(default)]
+    priority: Option<i64>,
+    /// 是否重要（艾森豪威尔矩阵的"重要性"维度），默认 false
+    #[serde(default)]
+    important: Option<bool>,
+    /// 截止日期，格式 YYYY-MM-DD
+    #[serde(default)]
+    due_date: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct UpdateTaskArgs {
+    /// 任务 id
+    id: i64,
+    /// 新标题（不传则不变）
+    #[serde(default)]
+    title: Option<String>,
+    /// 新描述
+    #[serde(default)]
+    description: Option<String>,
+    /// 新优先级
+    #[serde(default)]
+    priority: Option<i64>,
+    /// 新重要性
+    #[serde(default)]
+    important: Option<bool>,
+    /// 新截止日期，格式 YYYY-MM-DD；显式传 null 不支持，要清空请去主应用 UI
+    #[serde(default)]
+    due_date: Option<String>,
+    /// 是否标记完成。true → status=1 + completed_at=now；false → status=0 + completed_at=null
+    #[serde(default)]
+    mark_done: Option<bool>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct ListNotesByFolderArgs {
     /// 文件夹 id；不传或 null 表示「未分类」（folder_id IS NULL）
     #[serde(default)]
@@ -518,6 +581,27 @@ impl KbServer {
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
+    // ─── list_recent_notes：按更新时间最近的笔记 ──────────────
+    #[tool(description = "列出最近更新的笔记（按 updated_at 降序），不限文件夹和标签。\
+                          用于「我最近写了啥」这类无关键词查询。\
+                          自动过滤回收站 / 隐藏 / 加密。")]
+    fn list_recent_notes(
+        &self,
+        Parameters(args): Parameters<ListRecentArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let limit = args.limit.unwrap_or(20).clamp(1, 100);
+        let conn = self
+            .db
+            .conn
+            .lock()
+            .map_err(|e| McpError::internal_error(format!("db lock: {e}"), None))?;
+        let hits = list_recent_notes(&conn, limit)
+            .map_err(|e| McpError::internal_error(format!("list_recent: {e}"), None))?;
+        let json = serde_json::to_string(&hits)
+            .map_err(|e| McpError::internal_error(format!("serialize: {e}"), None))?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
     // ─── list_folders：文件夹结构 ──────────────────────────────
     #[tool(description = "列出所有文件夹（含层级 parent_id 和未删除笔记数）。\
                           按 sort_order 排序。LLM 决定把笔记放哪个文件夹前先看这个。")]
@@ -590,6 +674,152 @@ impl KbServer {
         }))
         .map_err(|e| McpError::internal_error(format!("serialize: {e}"), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    // ─── ✏️ 写工具：delete_note（软删到回收站） ─────────────────
+    #[tool(description = "把笔记软删到回收站（is_deleted=1）。原数据仍在，可在主应用 UI 回收站恢复。\
+                          拒绝删除加密笔记。仅 --writable 模式可用。\
+                          这是 LLM 处理「创建错了」/「不要这条了」的标准撤销方式。")]
+    fn delete_note(
+        &self,
+        Parameters(args): Parameters<DeleteNoteArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        self.ensure_writable()?;
+        let conn = self
+            .db
+            .conn
+            .lock()
+            .map_err(|e| McpError::internal_error(format!("db lock: {e}"), None))?;
+        let affected = soft_delete_note(&conn, args.id)
+            .map_err(|e| McpError::internal_error(format!("delete_note: {e}"), None))?;
+        if affected == 0 {
+            return Err(McpError::invalid_params(
+                format!("笔记 {} 不存在或是加密笔记", args.id),
+                None,
+            ));
+        }
+        Ok(CallToolResult::success(vec![Content::text(
+            format!("{{\"id\":{},\"deleted\":true}}", args.id),
+        )]))
+    }
+
+    // ─── ✏️ 写工具：remove_tag_from_note ─────────────────────────
+    #[tool(description = "撤回笔记的某个标签（仅删 note_tags 关联，不删 tags 表里的标签本身）。\
+                          仅 --writable 模式可用。LLM 处理「加错标签」时用。")]
+    fn remove_tag_from_note(
+        &self,
+        Parameters(args): Parameters<RemoveTagArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        self.ensure_writable()?;
+        let tag = args.tag.trim();
+        if tag.is_empty() {
+            return Err(McpError::invalid_params(
+                "tag 不能为空".to_string(),
+                None,
+            ));
+        }
+        let conn = self
+            .db
+            .conn
+            .lock()
+            .map_err(|e| McpError::internal_error(format!("db lock: {e}"), None))?;
+        let removed = remove_tag_from_note(&conn, args.note_id, tag)
+            .map_err(|e| McpError::internal_error(format!("remove_tag: {e}"), None))?;
+        Ok(CallToolResult::success(vec![Content::text(
+            format!(
+                "{{\"note_id\":{},\"tag\":\"{}\",\"removed\":{}}}",
+                args.note_id,
+                tag.replace('"', "\\\""),
+                removed
+            ),
+        )]))
+    }
+
+    // ─── ✏️ 写工具：create_task ──────────────────────────────────
+    #[tool(description = "创建一个新任务（主任务，不带子任务）。\
+                          priority: 0=紧急/1=普通(默认)/2=低；status 自动 0=todo。\
+                          仅 --writable 模式可用。返回 {id, title}。")]
+    fn create_task(
+        &self,
+        Parameters(args): Parameters<CreateTaskArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        self.ensure_writable()?;
+        let title = args.title.trim();
+        if title.is_empty() {
+            return Err(McpError::invalid_params(
+                "title 不能为空".to_string(),
+                None,
+            ));
+        }
+        let conn = self
+            .db
+            .conn
+            .lock()
+            .map_err(|e| McpError::internal_error(format!("db lock: {e}"), None))?;
+        let id = create_task(
+            &conn,
+            title,
+            args.description.as_deref(),
+            args.priority.unwrap_or(1),
+            args.important.unwrap_or(false),
+            args.due_date.as_deref(),
+        )
+        .map_err(|e| McpError::internal_error(format!("create_task: {e}"), None))?;
+        let json = serde_json::to_string(&serde_json::json!({
+            "id": id,
+            "title": title,
+        }))
+        .map_err(|e| McpError::internal_error(format!("serialize: {e}"), None))?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    // ─── ✏️ 写工具：update_task ──────────────────────────────────
+    #[tool(description = "更新任务字段或标记完成。所有字段都可选，只更新传入的。\
+                          mark_done=true → 同时设 status=1 + completed_at=now；\
+                          mark_done=false → 重置为未完成。\
+                          仅 --writable 模式可用。")]
+    fn update_task(
+        &self,
+        Parameters(args): Parameters<UpdateTaskArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        self.ensure_writable()?;
+        if args.title.is_none()
+            && args.description.is_none()
+            && args.priority.is_none()
+            && args.important.is_none()
+            && args.due_date.is_none()
+            && args.mark_done.is_none()
+        {
+            return Err(McpError::invalid_params(
+                "至少要传一个字段".to_string(),
+                None,
+            ));
+        }
+        let conn = self
+            .db
+            .conn
+            .lock()
+            .map_err(|e| McpError::internal_error(format!("db lock: {e}"), None))?;
+        let affected = update_task(
+            &conn,
+            args.id,
+            args.title.as_deref(),
+            args.description.as_deref(),
+            args.priority,
+            args.important,
+            args.due_date.as_deref(),
+            args.mark_done,
+        )
+        .map_err(|e| McpError::internal_error(format!("update_task: {e}"), None))?;
+        if affected == 0 {
+            return Err(McpError::invalid_params(
+                format!("任务 {} 不存在", args.id),
+                None,
+            ));
+        }
+        Ok(CallToolResult::success(vec![Content::text(
+            format!("{{\"id\":{},\"updated\":true}}", args.id),
+        )]))
     }
 
     // ─── ✏️ 写工具：create_note ─────────────────────────────────
@@ -702,10 +932,11 @@ impl ServerHandler for KbServer {
             .with_protocol_version(ProtocolVersion::V_2024_11_05)
             .with_instructions(format!(
                 "本 MCP server 暴露本地知识库（笔记 / 标签 / 双链 / 任务 / 日记 / Prompt / 文件夹）。\
-                 读工具：search_notes / get_note / list_tags / search_by_tag / \
+                 读工具：search_notes / get_note / list_recent_notes / list_tags / search_by_tag / \
                  get_backlinks / list_daily_notes / list_tasks / get_prompt / \
                  list_folders / list_notes_by_folder。\
-                 写工具：create_note / update_note / add_tag_to_note / move_notes_batch（{}）。\
+                 写工具：create_note / update_note / delete_note / move_notes_batch / \
+                 add_tag_to_note / remove_tag_from_note / create_task / update_task（{}）。\
                  默认过滤回收站、隐藏、加密笔记，保护隐私。",
                 if self.writable { "已启用" } else { "当前禁用，启动加 --writable 开启" }
             ))
@@ -1071,6 +1302,24 @@ fn get_prompt(
     Ok(r)
 }
 
+/// 按 updated_at 降序列最近笔记（不限文件夹/标签）
+fn list_recent_notes(
+    conn: &Connection,
+    limit: usize,
+) -> Result<Vec<SearchHit>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT n.id, n.title, substr(n.content, 1, 140), n.updated_at, n.folder_id
+         FROM notes n
+         WHERE n.is_deleted = 0 AND n.is_hidden = 0 AND n.is_encrypted = 0
+         ORDER BY n.updated_at DESC
+         LIMIT ?1",
+    )?;
+    let rows = stmt
+        .query_map(params![limit as i64], map_note_row)?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
 /// 列所有文件夹 + 直接子项笔记数（不递归）
 fn list_folders(conn: &Connection) -> Result<Vec<FolderInfo>, rusqlite::Error> {
     let mut stmt = conn.prepare(
@@ -1286,6 +1535,109 @@ fn move_notes_batch(
     for id in ids {
         binds.push(Box::new(*id));
     }
+    let bind_refs: Vec<&dyn rusqlite::ToSql> = binds.iter().map(|b| b.as_ref()).collect();
+    conn.execute(&sql, &*bind_refs)
+}
+
+/// 软删笔记（is_deleted=1，原数据保留，可在主应用回收站恢复）。
+/// 拒绝改加密笔记。返回受影响行数。
+fn soft_delete_note(conn: &Connection, id: i64) -> Result<usize, rusqlite::Error> {
+    conn.execute(
+        "UPDATE notes
+         SET is_deleted = 1,
+             updated_at = datetime('now', 'localtime')
+         WHERE id = ?1
+           AND is_deleted = 0
+           AND is_encrypted = 0",
+        params![id],
+    )
+}
+
+/// 撤回笔记的某个标签关联（不删 tags 表，只清 note_tags 关联）。
+/// 返回是否真删除了一行。
+fn remove_tag_from_note(
+    conn: &Connection,
+    note_id: i64,
+    tag: &str,
+) -> Result<bool, rusqlite::Error> {
+    let affected = conn.execute(
+        "DELETE FROM note_tags
+         WHERE note_id = ?1
+           AND tag_id = (SELECT id FROM tags WHERE name = ?2)",
+        params![note_id, tag],
+    )?;
+    Ok(affected > 0)
+}
+
+/// 创建任务（主任务，parent_task_id=NULL）。返回新 id。
+fn create_task(
+    conn: &Connection,
+    title: &str,
+    description: Option<&str>,
+    priority: i64,
+    important: bool,
+    due_date: Option<&str>,
+) -> Result<i64, rusqlite::Error> {
+    conn.execute(
+        "INSERT INTO tasks (title, description, priority, important, status, due_date)
+         VALUES (?1, ?2, ?3, ?4, 0, ?5)",
+        params![title, description, priority, important as i32, due_date],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// 更新任务字段。任意字段为 None 表示不变。
+/// `mark_done = Some(true)` → status=1 + completed_at=now；
+/// `mark_done = Some(false)` → status=0 + completed_at=null。
+fn update_task(
+    conn: &Connection,
+    id: i64,
+    title: Option<&str>,
+    description: Option<&str>,
+    priority: Option<i64>,
+    important: Option<bool>,
+    due_date: Option<&str>,
+    mark_done: Option<bool>,
+) -> Result<usize, rusqlite::Error> {
+    let mut set_parts: Vec<String> = Vec::new();
+    let mut binds: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    if let Some(t) = title {
+        set_parts.push("title = ?".into());
+        binds.push(Box::new(t.to_string()));
+    }
+    if let Some(d) = description {
+        set_parts.push("description = ?".into());
+        binds.push(Box::new(d.to_string()));
+    }
+    if let Some(p) = priority {
+        set_parts.push("priority = ?".into());
+        binds.push(Box::new(p));
+    }
+    if let Some(imp) = important {
+        set_parts.push("important = ?".into());
+        binds.push(Box::new(imp as i32));
+    }
+    if let Some(dd) = due_date {
+        set_parts.push("due_date = ?".into());
+        binds.push(Box::new(dd.to_string()));
+    }
+    if let Some(done) = mark_done {
+        if done {
+            set_parts.push("status = 1".into());
+            set_parts.push("completed_at = datetime('now', 'localtime')".into());
+        } else {
+            set_parts.push("status = 0".into());
+            set_parts.push("completed_at = NULL".into());
+        }
+    }
+    set_parts.push("updated_at = datetime('now', 'localtime')".into());
+
+    let sql = format!(
+        "UPDATE tasks SET {} WHERE id = ?",
+        set_parts.join(", ")
+    );
+    binds.push(Box::new(id));
+
     let bind_refs: Vec<&dyn rusqlite::ToSql> = binds.iter().map(|b| b.as_ref()).collect();
     conn.execute(&sql, &*bind_refs)
 }
