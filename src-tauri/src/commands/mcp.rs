@@ -177,13 +177,31 @@ fn build_claude_md_template() -> String {
 3. `get_note` 判断主题
 4. `add_tag_to_note` 复用现有标签
 
+### 「撤销 / 修正错误」
+> 用户说"删了"/"不要这个了"/"改错了"时，按下面回退。
+
+- 创建笔记后用户反悔 → `delete_note(id)`（软删到回收站，可恢复）
+- 加错标签 → `remove_tag_from_note(note_id, tag)`（不影响其他笔记的同名标签）
+- 改错笔记内容 → 没有 undo，告诉用户「内容已写入，要恢复请去主应用回收站找老版本」
+- 任务建错 → 没有 delete_task；引导用户主应用 UI 删，或者 `update_task(mark_done=true)` 标完结归档
+
+### 「从对话提取待办」
+> 用户在对话里随口说"明天 9 点交报告"/"下周一带电脑"时，主动提议建任务。
+
+1. 识别意图后 **先问用户**："要我加到待办里吗？标题：xxx，截止 yyy"
+2. 用户确认后 `create_task(title="...", due_date="2026-05-02", priority=1)`
+3. 报告："已加 #ID 到待办"
+4. 用户后续说"做完了" → `list_tasks(keyword=...)` 找到 → `update_task(id, mark_done=true)`
+
 ## 安全边界（重要）
 
-- **批量改 5 条以上**：先列计划报给用户，等"确认"字样再执行（move_notes_batch 一样要先确认）
+- **批量改 5 条以上**：先列计划报给用户，等"确认"字样再执行（move_notes_batch / 多个 delete_note / 多个 add_tag 都要先确认）
 - **加密笔记**：content 已脱敏，不要追问、不要绕过
 - **隐藏笔记**：search 自动过滤掉了，找不到属于预期
-- **没有的工具**：删除 / 清空 / 重置 — 工具集里就没有，遇到要求请引导回主应用 UI
+- **删除是软删**：`delete_note` 把笔记移到回收站（is_deleted=1），用户可在主应用 UI 恢复；不存在硬删
+- **没有的工具**：硬删 / 清空 / 重置 / delete_task / delete_folder — 工具集里就没有，遇到要求请引导回主应用 UI
 - **写权限**：调用写工具失败显示"未启用 --writable"时，告诉用户去设置页或客户端配置加这个 flag，不要硬试
+- **撤销链**：创建/修改后用户反悔，优先用 `delete_note` / `remove_tag_from_note` 撤回，而不是再 update_note 覆盖
 
 ## 个人偏好
 
