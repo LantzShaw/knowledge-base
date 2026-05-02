@@ -9,6 +9,7 @@ import {
   ContextMenuOverlay,
   type ContextMenuEntry,
 } from "@/components/ui/ContextMenuOverlay";
+import { DailyMonthCalendar } from "./DailyMonthCalendar";
 
 /**
  * DailyPanel —— Activity Bar 模式下"每日笔记"视图的主面板。
@@ -16,7 +17,8 @@ import {
  * 职责：
  *   · 顶部：视图标题 + 快速跳回今天
  *   · 月份切换：← 年-月 →
- *   · 日期列表：本月所有有日记的日期（倒序），选中态高亮
+ *   · 月历网格：紧凑 6×7 月视图，标记今天/选中/有日记/未来日；点击切换日期
+ *   · 日期列表：本月所有有日记的日期（倒序），与月历互补——列表显示日期细节（星期/标签）
  *
  * URL 约定：
  *   · /daily           → 默认今天（由主区 pages/daily 处理重定向）
@@ -97,6 +99,9 @@ export function DailyPanel() {
 
   // 倒序展示该月已有日记的日期
   const sortedDates = useMemo(() => [...dates].sort((a, b) => b.localeCompare(a)), [dates]);
+
+  // 月历网格用，O(1) 查询某日是否已有日记
+  const datesWithEntry = useMemo(() => new Set(dates), [dates]);
 
   function goToDate(date: string) {
     navigate(`/daily?date=${date}`);
@@ -241,6 +246,27 @@ export function DailyPanel() {
             setViewMonth((m) => shiftMonth(m.year, m.month, 1))
           }
           style={{ width: 24, height: 24, padding: 0 }}
+        />
+      </div>
+
+      {/* 月历网格：与下方列表互补——这里看月度全貌，下方列表看日期细节（星期/标签） */}
+      <div
+        style={{
+          borderBottom: `1px solid ${token.colorBorderSecondary}`,
+          paddingTop: 6,
+        }}
+      >
+        <DailyMonthCalendar
+          year={viewMonth.year}
+          month={viewMonth.month}
+          selectedDate={selectedDate}
+          today={today}
+          datesWithEntry={datesWithEntry}
+          onSelectDate={goToDate}
+          onContextMenuDate={(e, date, hasEntry) => {
+            e.preventDefault();
+            ctx.open(e.nativeEvent, { date, hasEntry });
+          }}
         />
       </div>
 
