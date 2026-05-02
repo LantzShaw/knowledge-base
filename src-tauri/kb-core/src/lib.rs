@@ -166,6 +166,15 @@ struct AddTagArgs {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct ListSubtasksArgs {
+    /// 父任务 id
+    parent_task_id: i64,
+    /// 上限条数，默认 50，最大 200
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct CreateFolderArgs {
     /// 文件夹名称（必填，前后空白会被 trim）
     name: String,
@@ -353,6 +362,17 @@ struct TaskRow {
     completed_at: Option<String>,
     created_at: String,
     updated_at: String,
+}
+
+#[derive(Debug, Serialize)]
+struct PromptInfo {
+    id: i64,
+    title: String,
+    description: String,
+    /// 内置模板代号（如 "summarize" / "translate"），用户自建为 null
+    builtin_code: Option<String>,
+    is_builtin: bool,
+    enabled: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -631,6 +651,44 @@ impl KbServer {
             .map_err(|e| McpError::internal_error(format!("get_prompt: {e}"), None))?
             .ok_or_else(|| McpError::invalid_params("提示词模板不存在".to_string(), None))?;
         let json = serde_json::to_string(&detail)
+            .map_err(|e| McpError::internal_error(format!("serialize: {e}"), None))?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    // ─── list_prompts：所有 Prompt 模板（轻量索引） ──────────
+    #[tool(description = "列出所有 Prompt 模板的索引（id / title / description / builtin_code / enabled），\
+                          不返回完整 prompt 内容（太长，按需 get_prompt(id) 取）。\
+                          内置在前，按 sort_order 排序。")]
+    fn list_prompts(&self) -> Result<CallToolResult, McpError> {
+        let conn = self
+            .db
+            .conn
+            .lock()
+            .map_err(|e| McpError::internal_error(format!("db lock: {e}"), None))?;
+        let prompts = list_prompts(&conn)
+            .map_err(|e| McpError::internal_error(format!("list_prompts: {e}"), None))?;
+        let json = serde_json::to_string(&prompts)
+            .map_err(|e| McpError::internal_error(format!("serialize: {e}"), None))?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    // ─── list_subtasks：某主任务的子任务 ──────────────────────
+    #[tool(description = "列出指定主任务的子任务（parent_task_id = X 的所有 tasks）。\
+                          配合 list_tasks 看主任务进度。\
+                          排序：未完成在前，priority ASC，created_at ASC。")]
+    fn list_subtasks(
+        &self,
+        Parameters(args): Parameters<ListSubtasksArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let limit = args.limit.unwrap_or(50).clamp(1, 200);
+        let conn = self
+            .db
+            .conn
+            .lock()
+            .map_err(|e| McpError::internal_error(format!("db lock: {e}"), None))?;
+        let rows = list_subtasks(&conn, args.parent_task_id, limit)
+            .map_err(|e| McpError::internal_error(format!("list_subtasks: {e}"), None))?;
+        let json = serde_json::to_string(&rows)
             .map_err(|e| McpError::internal_error(format!("serialize: {e}"), None))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
@@ -1109,8 +1167,9 @@ impl ServerHandler for KbServer {
             .with_instructions(format!(
                 "本 MCP server 暴露本地知识库（笔记 / 标签 / 双链 / 任务 / 日记 / Prompt / 文件夹）。\
                  读工具：search_notes / get_note / list_recent_notes / list_tags / search_by_tag / \
-                 get_backlinks / list_daily_notes / list_tasks / get_prompt / \
-                 list_folders / list_notes_by_folder / list_templates / list_trash。\
+                 get_backlinks / list_daily_notes / list_tasks / list_subtasks / \
+                 get_prompt / list_prompts / list_folders / list_notes_by_folder / \
+                 list_templates / list_trash。\
                  写工具：create_note / update_note / delete_note / move_notes_batch / \
                  add_tag_to_note / remove_tag_from_note / create_task / update_task / \
                  create_folder / create_note_from_template / restore_note_from_trash（{}）。\
@@ -1477,6 +1536,62 @@ fn get_prompt(
         })
         .ok();
     Ok(r)
+}
+
+/// 列所有 Prompt 模板的轻量索引（不带 prompt 内容）
+fn list_prompts(conn: &Connection) -> Result<Vec<PromptInfo>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT id, title, description, builtin_code, is_builtin, enabled
+         FROM prompt_templates
+         ORDER BY sort_order ASC, id ASC",
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(PromptInfo {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                description: row.get(2)?,
+                builtin_code: row.get(3)?,
+                is_builtin: row.get::<_, i32>(4)? != 0,
+                enabled: row.get::<_, i32>(5)? != 0,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+/// 列指定主任务的子任务（parent_task_id = X）
+/// 排序：未完成 → 已完成；同状态内 priority ASC → created_at ASC（保留用户输入顺序）
+fn list_subtasks(
+    conn: &Connection,
+    parent_task_id: i64,
+    limit: usize,
+) -> Result<Vec<TaskRow>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT t.id, t.title, t.description, t.priority, t.important, t.status,
+                t.due_date, t.completed_at, t.created_at, t.updated_at
+         FROM tasks t
+         WHERE t.parent_task_id = ?1
+         ORDER BY t.status ASC, t.priority ASC, t.created_at ASC
+         LIMIT ?2",
+    )?;
+    let rows = stmt
+        .query_map(params![parent_task_id, limit as i64], |row| {
+            Ok(TaskRow {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                description: row.get(2)?,
+                priority: row.get(3)?,
+                important: row.get::<_, i32>(4)? != 0,
+                status: row.get(5)?,
+                due_date: row.get(6)?,
+                completed_at: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
 }
 
 /// 列出所有 note_templates（按 id 升序，内置在前）
