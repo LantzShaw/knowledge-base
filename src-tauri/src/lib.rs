@@ -169,8 +169,12 @@ fn early_app_data_dir() -> PathBuf {
 
 /// 尝试以独占方式打开锁文件
 /// Windows: FILE_FLAG_DELETE_ON_CLOSE + share_mode(0)，进程退出时锁文件自动删除
-/// macOS: flock LOCK_EX | LOCK_NB
-/// 其他平台: create_new (简易方案)
+/// Unix (macOS / Linux / *BSD): flock LOCK_EX | LOCK_NB —— 内核在 fd 关闭时自动释放，
+///   进程崩溃 / 被 kill 也会释放，避免锁文件残留导致下次启动误判"已运行"
+///
+/// ⚠️ flock 在 NFS / SMB 等网络文件系统上语义不可靠（老内核根本不跨节点）。
+///    本应用 data_dir 默认 `~/.local/share`，本地 ext4/btrfs 没问题；
+///    如果用户把 data_dir 改到网络挂载，单实例语义可能退化。
 fn try_exclusive_lock(path: &Path) -> Result<File, ()> {
     use std::fs::OpenOptions;
 
@@ -187,7 +191,11 @@ fn try_exclusive_lock(path: &Path) -> Result<File, ()> {
             .map_err(|_| ())
     }
 
-    #[cfg(target_os = "macos")]
+    // Unix 一律走 flock：文件存在与否不重要（create:true 兜底），关键是 advisory lock。
+    // 历史教训：Linux 之前用 create_new(true)，进程退出后锁文件不会消失，导致用户每次
+    // 启动都被误判成"默认实例已运行"，要么走 ping_default_to_focus 直接退出（看不到窗口），
+    // 要么不停往后分配 instance-N（zombie 实例堆积）。
+    #[cfg(unix)]
     {
         let file = OpenOptions::new()
             .write(true)
@@ -209,7 +217,7 @@ fn try_exclusive_lock(path: &Path) -> Result<File, ()> {
         }
     }
 
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(not(any(windows, unix)))]
     {
         OpenOptions::new()
             .write(true)
