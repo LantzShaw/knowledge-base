@@ -217,11 +217,7 @@ export function MCPServerSection() {
                     ? "已覆盖原有的 knowledge-base 配置（其它 MCP server 保留）"
                     : "已合并到现有配置（其它 MCP server 保留）"
               }
-            />
-            <Alert
-              type="info"
-              showIcon
-              message={`重启 ${label} 后生效${writable ? "（已开启可写模式，LLM 能修改你的笔记）" : ""}`}
+              description={`重启 ${label} 后生效${writable ? "（已开启可写模式，LLM 能修改你的笔记）" : ""}`}
             />
           </div>
         ),
