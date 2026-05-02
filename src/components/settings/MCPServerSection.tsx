@@ -945,7 +945,7 @@ function ClaudeCodeBlock({ tpl, onCopy, onSaveAs, onOpenClaudeDir, onInstall }: 
 
       {/* CLAUDE.md 块 */}
       <div>
-        <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center justify-between mb-2">
           <Text strong style={{ fontSize: 13 }}>
             📄 CLAUDE.md（行为指引，纯文字）
           </Text>
@@ -979,7 +979,7 @@ function ClaudeCodeBlock({ tpl, onCopy, onSaveAs, onOpenClaudeDir, onInstall }: 
 
       {/* settings.json 片段（只读 / 可写两种） */}
       <div>
-        <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center justify-between mb-2">
           <Text strong style={{ fontSize: 13 }}>
             ⚙️ settings.json 片段（MCP 能力）
           </Text>
