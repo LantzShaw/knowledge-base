@@ -150,6 +150,17 @@ fn wrap_template(title: &str, body: &str) -> String {
     padding: 0 1px;
     border-radius: 2px;
   }}
+  /* 嵌入视频 iframe（B站 / YouTube / 腾讯 / 优酷）：16:9 响应式 */
+  iframe[data-embed-url] {{
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    height: auto;
+    border: 0;
+    border-radius: 6px;
+    margin: 1em 0;
+    background: #000;
+  }}
 </style>
 </head>
 <body>

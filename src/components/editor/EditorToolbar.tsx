@@ -30,6 +30,7 @@ import {
   ImagePlus,
   Captions,
   Film,
+  Globe,
   Paperclip,
   MapPin,
   Table as TableIcon,
@@ -48,6 +49,7 @@ import { insertVideoTimestamp } from "./VideoTimestamp";
 import { EditorStats } from "./EditorStats";
 import { EmojiPicker } from "./EmojiPicker";
 import { AnnotationButton } from "./AnnotationButton";
+import { parseEmbedUrl, SUPPORTED_PROVIDERS } from "./embedVideoProviders";
 
 interface ToolbarProps {
   editor: Editor;
@@ -79,6 +81,9 @@ export function EditorToolbar({ editor, noteId, ensureNoteId }: ToolbarProps) {
   const [captionModalOpen, setCaptionModalOpen] = useState(false);
   const [captionDraft, setCaptionDraft] = useState("");
   const [altDraft, setAltDraft] = useState("");
+  /** 嵌入网络视频弹窗：粘贴 B站/YouTube/腾讯/优酷链接 → iframe 节点 */
+  const [embedModalOpen, setEmbedModalOpen] = useState(false);
+  const [embedUrlInput, setEmbedUrlInput] = useState("");
 
   function openCaptionModal() {
     if (!editor.isActive("imageResize")) {
@@ -183,6 +188,34 @@ export function EditorToolbar({ editor, noteId, ensureNoteId }: ToolbarProps) {
         message.error(`视频插入失败: ${e}`);
       }
     }
+  }
+
+  /** 嵌入网络视频：解析 URL → iframe 节点。
+   *  与 insertVideo 不同，这里不落本地文件，纯靠 iframe 在线播放。
+   *  支持 B站 / YouTube / 腾讯视频 / 优酷（详见 embedVideoProviders.ts）。 */
+  function handleEmbedConfirm() {
+    const raw = embedUrlInput.trim();
+    if (!raw) {
+      message.warning("请输入视频链接");
+      return;
+    }
+    const parsed = parseEmbedUrl(raw);
+    if (!parsed) {
+      message.error(`无法识别的链接，目前支持：${SUPPORTED_PROVIDERS}`);
+      return;
+    }
+    editor
+      .chain()
+      .focus()
+      .setEmbedVideo({
+        src: parsed.embedUrl,
+        originalUrl: parsed.originalUrl,
+        provider: parsed.provider,
+      })
+      .run();
+    setEmbedUrlInput("");
+    setEmbedModalOpen(false);
+    message.success(`已嵌入${parsed.providerName}视频`);
   }
 
   /** 与 insertVideo 对称：从文件选择器选附件 → saveFromPath 零拷贝 →
@@ -806,6 +839,14 @@ export function EditorToolbar({ editor, noteId, ensureNoteId }: ToolbarProps) {
         action: insertVideo,
       },
       {
+        icon: <Globe size={15} />,
+        title: "嵌入网络视频（B站 / YouTube / 腾讯 / 优酷）",
+        action: () => {
+          setEmbedUrlInput("");
+          setEmbedModalOpen(true);
+        },
+      },
+      {
         icon: <MapPin size={15} />,
         title: "插入视频时间戳",
         action: openTimestampModal,
@@ -987,6 +1028,40 @@ export function EditorToolbar({ editor, noteId, ensureNoteId }: ToolbarProps) {
             <div className="mt-1 text-xs" style={{ color: "var(--ant-color-text-quaternary)" }}>
               提示：在视频块顶部点「📍 加时间戳」可一键采用当前播放位置
             </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* 嵌入网络视频弹窗：粘贴 URL → iframe */}
+      <Modal
+        title="嵌入网络视频"
+        open={embedModalOpen}
+        onOk={handleEmbedConfirm}
+        onCancel={() => setEmbedModalOpen(false)}
+        okText="嵌入"
+        cancelText="取消"
+        width={520}
+        destroyOnHidden
+      >
+        <div className="space-y-2">
+          <Input
+            value={embedUrlInput}
+            onChange={(e) => setEmbedUrlInput(e.target.value)}
+            onPressEnter={handleEmbedConfirm}
+            placeholder="粘贴视频链接，如 https://www.bilibili.com/video/BVxxx"
+            autoFocus
+          />
+          <div
+            className="text-xs"
+            style={{
+              color: "var(--ant-color-text-quaternary)",
+              lineHeight: 1.6,
+            }}
+          >
+            支持平台：{SUPPORTED_PROVIDERS}
+            <br />
+            提示：嵌入视频依赖联网播放，离线时无法观看；导出 HTML
+            会保留嵌入，导出 Markdown 也可保留 iframe 标签。
           </div>
         </div>
       </Modal>

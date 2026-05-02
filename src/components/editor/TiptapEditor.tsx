@@ -187,6 +187,7 @@ import { useEditorContextMenu } from "./useEditorContextMenu";
 import { ContextMenuOverlay } from "@/components/ui/ContextMenuOverlay";
 import { Video as VideoNode } from "./VideoNode";
 import { VideoTimestamp } from "./VideoTimestamp";
+import { EmbedVideo } from "./EmbedVideoNode";
 import { AllowFileLink } from "./AllowFileLink";
 import { Callout } from "./Callout";
 import { Toggle, ToggleSummary, ToggleContent } from "./Toggle";
@@ -1084,6 +1085,7 @@ export function TiptapEditor({
       }),
       VideoNode,
       VideoTimestamp,
+      EmbedVideo,
       Callout,
       Toggle,
       ToggleSummary,
