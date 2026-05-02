@@ -67,7 +67,13 @@ pub fn compute_local_manifest(
     // 拿 folders 全树（id → (parent_id, name)）— 用来反查文件夹路径
     let mut stmt2 = conn.prepare("SELECT id, parent_id, name FROM folders")?;
     let folder_rows: Vec<(i64, Option<i64>, String)> = stmt2
-        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<i64>>(1)?, row.get::<_, String>(2)?)))?
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Option<i64>>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?
         .collect::<Result<Vec<_>, _>>()?;
     drop(stmt2);
     drop(conn);

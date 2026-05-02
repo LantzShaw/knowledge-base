@@ -97,8 +97,8 @@ pub fn set_pin(
         // 直接调内部 verify（不走错误次数限制：修改场景下用户主动操作）
         let stored_hash = load_hash(db)?
             .ok_or_else(|| AppError::Custom("PIN 数据损坏：哈希存在但解码失败".into()))?;
-        let stored_salt = load_salt(db)?
-            .ok_or_else(|| AppError::Custom("PIN 数据损坏：盐缺失".into()))?;
+        let stored_salt =
+            load_salt(db)?.ok_or_else(|| AppError::Custom("PIN 数据损坏：盐缺失".into()))?;
         let ok = crypto::verify_pin(&old, &stored_salt, &stored_hash)?;
         if !ok {
             return Err(AppError::InvalidInput("当前 PIN 不正确".into()));
@@ -148,10 +148,10 @@ pub fn verify_pin(db: &Database, pin: String) -> Result<(), AppError> {
         )));
     }
 
-    let stored_hash = load_hash(db)?
-        .ok_or_else(|| AppError::Custom("PIN 数据损坏：哈希解码失败".into()))?;
-    let stored_salt = load_salt(db)?
-        .ok_or_else(|| AppError::Custom("PIN 数据损坏：盐缺失".into()))?;
+    let stored_hash =
+        load_hash(db)?.ok_or_else(|| AppError::Custom("PIN 数据损坏：哈希解码失败".into()))?;
+    let stored_salt =
+        load_salt(db)?.ok_or_else(|| AppError::Custom("PIN 数据损坏：盐缺失".into()))?;
     let ok = crypto::verify_pin(&pin, &stored_salt, &stored_hash)?;
 
     if ok {
@@ -172,10 +172,7 @@ pub fn verify_pin(db: &Database, pin: String) -> Result<(), AppError> {
         } else {
             db.set_config(KEY_FAIL_COUNT, &new_count.to_string())?;
             let left = MAX_FAIL - new_count;
-            Err(AppError::Custom(format!(
-                "PIN 错误，还可尝试 {} 次",
-                left
-            )))
+            Err(AppError::Custom(format!("PIN 错误，还可尝试 {} 次", left)))
         }
     }
 }

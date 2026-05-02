@@ -48,7 +48,10 @@ impl TrashService {
     pub fn soft_delete(db: &Database, id: i64) -> Result<(), AppError> {
         let deleted = db.soft_delete_note(id)?;
         if !deleted {
-            return Err(AppError::NotFound(format!("笔记 {} 不存在或已在回收站", id)));
+            return Err(AppError::NotFound(format!(
+                "笔记 {} 不存在或已在回收站",
+                id
+            )));
         }
         Ok(())
     }
@@ -71,11 +74,7 @@ impl TrashService {
     }
 
     /// 永久删除笔记（连带清理图片 + 源文件）
-    pub fn permanent_delete(
-        db: &Database,
-        data_dir: &Path,
-        id: i64,
-    ) -> Result<(), AppError> {
+    pub fn permanent_delete(db: &Database, data_dir: &Path, id: i64) -> Result<(), AppError> {
         // 先查 source_file_path（DB 行删掉后就拿不到了）
         let source = db.get_note_source_path(id)?;
 
@@ -173,7 +172,11 @@ impl TrashService {
             Self::cleanup_note_assets(data_dir, *id, source);
         }
 
-        log::info!("清空回收站: DB 删除 {} 条，清理 {} 个笔记的资产", affected, items.len());
+        log::info!(
+            "清空回收站: DB 删除 {} 条，清理 {} 个笔记的资产",
+            affected,
+            items.len()
+        );
         Ok(affected)
     }
 }

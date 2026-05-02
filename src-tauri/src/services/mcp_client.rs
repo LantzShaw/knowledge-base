@@ -9,8 +9,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use rmcp::ServiceExt;
 use rmcp::transport::TokioChildProcess;
+use rmcp::ServiceExt;
 use tokio::sync::Mutex;
 
 use crate::error::AppError;

@@ -55,9 +55,7 @@ impl LocalPathBackend {
         Self::ensure_dir(path)?;
         let tmp = path.with_extension(format!(
             "{}.tmp",
-            path.extension()
-                .and_then(|s| s.to_str())
-                .unwrap_or("")
+            path.extension().and_then(|s| s.to_str()).unwrap_or("")
         ));
         {
             let mut f = fs::File::create(&tmp)?;

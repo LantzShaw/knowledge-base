@@ -37,8 +37,9 @@ pub fn save_note_attachment(
     file_name: String,
     base64_data: String,
 ) -> Result<AttachmentInfo, String> {
-    let info = AttachmentService::save_from_base64(&state.data_dir, note_id, &file_name, &base64_data)
-        .map_err(|e| e.to_string())?;
+    let info =
+        AttachmentService::save_from_base64(&state.data_dir, note_id, &file_name, &base64_data)
+            .map_err(|e| e.to_string())?;
     rewrite_to_relative(&state, info)
 }
 

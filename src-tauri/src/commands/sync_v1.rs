@@ -34,7 +34,10 @@ pub fn sync_v1_create_backend(
     state: State<'_, AppState>,
     input: SyncBackendInput,
 ) -> Result<i64, String> {
-    state.db.create_sync_backend(&input).map_err(|e| e.to_string())
+    state
+        .db
+        .create_sync_backend(&input)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -56,10 +59,7 @@ pub fn sync_v1_delete_backend(state: State<'_, AppState>, id: i64) -> Result<boo
 
 /// 测试连接
 #[tauri::command]
-pub fn sync_v1_test_connection(
-    state: State<'_, AppState>,
-    id: i64,
-) -> Result<(), String> {
+pub fn sync_v1_test_connection(state: State<'_, AppState>, id: i64) -> Result<(), String> {
     let cfg = state
         .db
         .get_sync_backend(id)

@@ -22,7 +22,8 @@ fn row_to_ai_model(row: &rusqlite::Row) -> rusqlite::Result<AiModel> {
 }
 
 /// 标准 ai_models 查询列表达式（与 row_to_ai_model 对齐）
-const AI_MODEL_COLS: &str = "id, name, provider, api_url, api_key, model_id, is_default, max_context, created_at";
+const AI_MODEL_COLS: &str =
+    "id, name, provider, api_url, api_key, model_id, is_default, max_context, created_at";
 
 /// 把一行 ai_conversations 查询结果转成 AiConversation
 ///
@@ -31,8 +32,7 @@ const AI_MODEL_COLS: &str = "id, name, provider, api_url, api_key, model_id, is_
 fn row_to_ai_conversation(row: &rusqlite::Row) -> rusqlite::Result<AiConversation> {
     let attached_json: String = row.get(3)?;
     // 反序列化失败回退空数组（防御性：旧数据 / 手动改坏的情况下不让查询炸）
-    let attached_note_ids: Vec<i64> =
-        serde_json::from_str(&attached_json).unwrap_or_default();
+    let attached_note_ids: Vec<i64> = serde_json::from_str(&attached_json).unwrap_or_default();
     Ok(AiConversation {
         id: row.get(0)?,
         title: row.get(1)?,
@@ -58,11 +58,7 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let n = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let dir = std::env::temp_dir().join(format!(
-            "kb_test_{}_{}",
-            std::process::id(),
-            n
-        ));
+        let dir = std::env::temp_dir().join(format!("kb_test_{}_{}", std::process::id(), n));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("test.db");
         let db = Database::init(path.to_str().unwrap()).expect("init test db");
@@ -148,7 +144,10 @@ impl Database {
 
     /// 获取所有 AI 模型
     pub fn list_ai_models(&self) -> Result<Vec<AiModel>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let sql = format!(
             "SELECT {} FROM ai_models ORDER BY is_default DESC, created_at",
             AI_MODEL_COLS
@@ -162,7 +161,10 @@ impl Database {
 
     /// 获取单个 AI 模型
     pub fn get_ai_model(&self, id: i64) -> Result<AiModel, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let sql = format!("SELECT {} FROM ai_models WHERE id = ?1", AI_MODEL_COLS);
         let model = conn.query_row(&sql, [id], row_to_ai_model)?;
         Ok(model)
@@ -170,7 +172,10 @@ impl Database {
 
     /// 获取默认 AI 模型
     pub fn get_default_ai_model(&self) -> Result<AiModel, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         // 1) 优先查 is_default=1
         let sql_default = format!(
             "SELECT {} FROM ai_models WHERE is_default = 1 LIMIT 1",
@@ -189,9 +194,7 @@ impl Database {
         );
         let fallback: AiModel = conn
             .query_row(&sql_fallback, [], row_to_ai_model)
-            .map_err(|_| AppError::NotFound(
-                "尚未配置任何 AI 模型，请到设置页添加".into(),
-            ))?;
+            .map_err(|_| AppError::NotFound("尚未配置任何 AI 模型，请到设置页添加".into()))?;
         let _ = conn.execute(
             "UPDATE ai_models SET is_default = 1 WHERE id = ?1",
             [fallback.id],
@@ -200,12 +203,18 @@ impl Database {
             "[ai] 库内无默认标记，自动 promote #{} 为默认（兜底 T-B02）",
             fallback.id
         );
-        Ok(AiModel { is_default: true, ..fallback })
+        Ok(AiModel {
+            is_default: true,
+            ..fallback
+        })
     }
 
     /// 创建 AI 模型
     pub fn create_ai_model(&self, input: &AiModelInput) -> Result<AiModel, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         // max_context 缺省时走表 DEFAULT 32000
         let max_ctx = input.max_context.unwrap_or(32000).max(1000);
         conn.execute(
@@ -232,10 +241,7 @@ impl Database {
             )
             .unwrap_or(false);
         if !has_default {
-            conn.execute(
-                "UPDATE ai_models SET is_default = 1 WHERE id = ?1",
-                [id],
-            )?;
+            conn.execute("UPDATE ai_models SET is_default = 1 WHERE id = ?1", [id])?;
             log::info!(
                 "[ai] 库内无默认模型，已自动把新建 #{} 设为默认（修 T-B02）",
                 id
@@ -248,7 +254,10 @@ impl Database {
 
     /// 更新 AI 模型
     pub fn update_ai_model(&self, id: i64, input: &AiModelInput) -> Result<AiModel, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         // 用户没传 max_context 时保持原值，避免覆盖成默认 32000
         let max_ctx = input.max_context.unwrap_or(32000).max(1000);
         conn.execute(
@@ -256,8 +265,13 @@ impl Database {
                  model_id = ?5, max_context = ?6
              WHERE id = ?7",
             rusqlite::params![
-                input.name, input.provider, input.api_url, input.api_key,
-                input.model_id, max_ctx, id
+                input.name,
+                input.provider,
+                input.api_url,
+                input.api_key,
+                input.model_id,
+                max_ctx,
+                id
             ],
         )?;
         drop(conn);
@@ -273,7 +287,10 @@ impl Database {
     /// 全程在一个事务里跑：删 + 选下一个 + UPDATE 是原子的，
     /// 中途失败不会留下"全部 is_default=0"的状态。
     pub fn delete_ai_model(&self, id: i64) -> Result<(), AppError> {
-        let mut conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let tx = conn.transaction()?;
 
         // 先看待删的是不是当前默认
@@ -302,14 +319,8 @@ impl Database {
                 )
                 .ok();
             if let Some(next) = next_id {
-                tx.execute(
-                    "UPDATE ai_models SET is_default = 1 WHERE id = ?1",
-                    [next],
-                )?;
-                log::info!(
-                    "[ai] 删除默认模型 #{} 后，自动把 #{} 设为新默认",
-                    id, next
-                );
+                tx.execute("UPDATE ai_models SET is_default = 1 WHERE id = ?1", [next])?;
+                log::info!("[ai] 删除默认模型 #{} 后，自动把 #{} 设为新默认", id, next);
             } else {
                 log::info!("[ai] 删除最后一条 AI 模型 #{}，已无可用模型", id);
             }
@@ -321,7 +332,10 @@ impl Database {
 
     /// 设置默认 AI 模型
     pub fn set_default_ai_model(&self, id: i64) -> Result<(), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         conn.execute("UPDATE ai_models SET is_default = 0", [])?;
         conn.execute("UPDATE ai_models SET is_default = 1 WHERE id = ?1", [id])?;
         Ok(())
@@ -331,7 +345,10 @@ impl Database {
 
     /// 获取所有对话列表
     pub fn list_ai_conversations(&self) -> Result<Vec<AiConversation>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let sql = format!(
             "SELECT {} FROM ai_conversations ORDER BY updated_at DESC",
             AI_CONV_COLS
@@ -345,7 +362,10 @@ impl Database {
 
     /// 单条对话查询（给"挂载笔记"等需要读取附加列表的场景）
     pub fn get_ai_conversation(&self, id: i64) -> Result<AiConversation, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let sql = format!(
             "SELECT {} FROM ai_conversations WHERE id = ?1",
             AI_CONV_COLS
@@ -355,8 +375,15 @@ impl Database {
     }
 
     /// 创建对话
-    pub fn create_ai_conversation(&self, title: &str, model_id: i64) -> Result<AiConversation, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+    pub fn create_ai_conversation(
+        &self,
+        title: &str,
+        model_id: i64,
+    ) -> Result<AiConversation, AppError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         conn.execute(
             "INSERT INTO ai_conversations (title, model_id) VALUES (?1, ?2)",
             rusqlite::params![title, model_id],
@@ -381,7 +408,10 @@ impl Database {
     ) -> Result<(), AppError> {
         let json = serde_json::to_string(note_ids)
             .map_err(|e| AppError::Custom(format!("序列化 note_ids 失败: {}", e)))?;
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let affected = conn.execute(
             "UPDATE ai_conversations
                  SET attached_note_ids = ?1,
@@ -400,7 +430,10 @@ impl Database {
 
     /// 删除对话
     pub fn delete_ai_conversation(&self, id: i64) -> Result<(), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         conn.execute("DELETE FROM ai_conversations WHERE id = ?1", [id])?;
         Ok(())
     }
@@ -413,7 +446,10 @@ impl Database {
         &self,
         older_than_days: Option<i64>,
     ) -> Result<usize, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let affected = match older_than_days {
             None => conn.execute("DELETE FROM ai_conversations", [])?,
             Some(days) if days >= 0 => conn.execute(
@@ -428,7 +464,10 @@ impl Database {
 
     /// 重命名对话
     pub fn rename_ai_conversation(&self, id: i64, title: &str) -> Result<(), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         conn.execute(
             "UPDATE ai_conversations SET title = ?1, updated_at = datetime('now', 'localtime') WHERE id = ?2",
             rusqlite::params![title, id],
@@ -444,7 +483,10 @@ impl Database {
         id: i64,
         new_title: &str,
     ) -> Result<bool, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let affected = conn.execute(
             "UPDATE ai_conversations
              SET title = ?1, updated_at = datetime('now', 'localtime')
@@ -456,7 +498,10 @@ impl Database {
 
     /// 切换对话使用的 AI 模型
     pub fn update_ai_conversation_model(&self, id: i64, model_id: i64) -> Result<(), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let affected = conn.execute(
             "UPDATE ai_conversations SET model_id = ?1, updated_at = datetime('now', 'localtime') WHERE id = ?2",
             rusqlite::params![model_id, id],
@@ -469,7 +514,10 @@ impl Database {
 
     /// 更新对话的 updated_at
     pub fn touch_ai_conversation(&self, id: i64) -> Result<(), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         conn.execute(
             "UPDATE ai_conversations SET updated_at = datetime('now', 'localtime') WHERE id = ?1",
             [id],
@@ -481,7 +529,10 @@ impl Database {
 
     /// 获取对话的所有消息
     pub fn list_ai_messages(&self, conversation_id: i64) -> Result<Vec<AiMessage>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let mut stmt = conn.prepare(
             "SELECT id, conversation_id, role, content, references_json, skill_calls_json, created_at
              FROM ai_messages WHERE conversation_id = ?1 ORDER BY created_at",
@@ -525,7 +576,10 @@ impl Database {
         references: Option<&str>,
         skill_calls: Option<&str>,
     ) -> Result<AiMessage, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         conn.execute(
             "INSERT INTO ai_messages (conversation_id, role, content, references_json, skill_calls_json)
              VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -553,7 +607,10 @@ impl Database {
 
     /// 删除单条消息（用于 API 失败时回滚）
     pub fn delete_ai_message(&self, id: i64) -> Result<(), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         conn.execute("DELETE FROM ai_messages WHERE id = ?1", [id])?;
         Ok(())
     }
@@ -580,14 +637,84 @@ impl Database {
     pub(crate) fn extract_keywords(query: &str) -> Vec<String> {
         // 中文停用词（含常见疑问词、代词、虚词，避免 bigram 噪声）
         const STOP_WORDS: &[&str] = &[
-            "的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都", "一", "一个",
-            "上", "也", "很", "到", "说", "要", "去", "你", "会", "着", "没有", "看", "好",
-            "自己", "这", "他", "她", "它", "吗", "什么", "怎么", "哪", "那", "里", "面",
-            "里面", "这个", "那个", "还", "能", "可以", "被", "把", "给", "让", "用", "从",
-            "写", "中", "吧", "呢", "啊", "哦", "嗯", "请", "帮", "关于", "介绍", "描述",
-            "内容", "告诉", "解释", "如何", "为什么", "哪些", "什么样",
+            "的",
+            "了",
+            "在",
+            "是",
+            "我",
+            "有",
+            "和",
+            "就",
+            "不",
+            "人",
+            "都",
+            "一",
+            "一个",
+            "上",
+            "也",
+            "很",
+            "到",
+            "说",
+            "要",
+            "去",
+            "你",
+            "会",
+            "着",
+            "没有",
+            "看",
+            "好",
+            "自己",
+            "这",
+            "他",
+            "她",
+            "它",
+            "吗",
+            "什么",
+            "怎么",
+            "哪",
+            "那",
+            "里",
+            "面",
+            "里面",
+            "这个",
+            "那个",
+            "还",
+            "能",
+            "可以",
+            "被",
+            "把",
+            "给",
+            "让",
+            "用",
+            "从",
+            "写",
+            "中",
+            "吧",
+            "呢",
+            "啊",
+            "哦",
+            "嗯",
+            "请",
+            "帮",
+            "关于",
+            "介绍",
+            "描述",
+            "内容",
+            "告诉",
+            "解释",
+            "如何",
+            "为什么",
+            "哪些",
+            "什么样",
             // 高噪声 bigram（常与其他词粘连产生）
-            "看看", "帮我", "一下", "有没", "没有", "里的", "里面", "那些",
+            "看看",
+            "帮我",
+            "一下",
+            "有没",
+            "没有",
+            "里的",
+            "里面",
+            "那些",
         ];
 
         let mut keywords: Vec<String> = Vec::new();
@@ -658,7 +785,10 @@ impl Database {
         query: &str,
         limit: usize,
     ) -> Result<Vec<(i64, String, String)>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         let keywords = Self::extract_keywords(query);
 
@@ -710,9 +840,7 @@ impl Database {
             let where_clauses: Vec<String> = like_keywords
                 .iter()
                 .enumerate()
-                .map(|(i, _)| {
-                    format!("(n.title LIKE ?{0} OR n.content LIKE ?{0})", i + 1)
-                })
+                .map(|(i, _)| format!("(n.title LIKE ?{0} OR n.content LIKE ?{0})", i + 1))
                 .collect();
 
             // T-003: RAG 检索结果不包含隐藏笔记（否则 AI 对话会泄露隐藏内容到历史）

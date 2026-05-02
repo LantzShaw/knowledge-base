@@ -192,7 +192,11 @@ impl RenderState {
             r = r.strike();
         }
         if self.code > 0 {
-            r = r.fonts(RunFonts::new().east_asia("Courier New").ascii("Courier New"));
+            r = r.fonts(
+                RunFonts::new()
+                    .east_asia("Courier New")
+                    .ascii("Courier New"),
+            );
             r = r.color("c7254e");
         }
         if self.link_url.is_some() {
@@ -269,7 +273,7 @@ fn handle_event(event: Event, state: &mut RenderState, docx: &mut Docx) -> Resul
         }
         Event::End(TagEnd::CodeBlock) => {
             state.flush_paragraph(docx); // 先冲掉之前的内容
-            // 整个代码块当作一个等宽字体段落，灰底（手工 shading）
+                                         // 整个代码块当作一个等宽字体段落，灰底（手工 shading）
             let content = std::mem::take(&mut state.code_block_content);
             for line in content.lines() {
                 let p = Paragraph::new()
@@ -318,7 +322,9 @@ fn handle_event(event: Event, state: &mut RenderState, docx: &mut Docx) -> Resul
         }
 
         // ── 图片 ──
-        Event::Start(Tag::Image { dest_url, title: _, .. }) => {
+        Event::Start(Tag::Image {
+            dest_url, title: _, ..
+        }) => {
             // 先冲段落（避免图片插入与文本交错）
             state.flush_paragraph(docx);
             let url = dest_url.into_string();
@@ -374,8 +380,8 @@ fn handle_event(event: Event, state: &mut RenderState, docx: &mut Docx) -> Resul
         }
         Event::End(TagEnd::TableCell) => {
             let text = std::mem::take(&mut state.current_cell_text);
-            let cell = TableCell::new()
-                .add_paragraph(Paragraph::new().add_run(Run::new().add_text(text)));
+            let cell =
+                TableCell::new().add_paragraph(Paragraph::new().add_run(Run::new().add_text(text)));
             state.current_row_cells.push(cell);
         }
 
@@ -384,15 +390,16 @@ fn handle_event(event: Event, state: &mut RenderState, docx: &mut Docx) -> Resul
             state.pending_runs.push(Run::new().add_text(" "));
         }
         Event::HardBreak => {
-            state.pending_runs.push(Run::new().add_break(BreakType::TextWrapping));
+            state
+                .pending_runs
+                .push(Run::new().add_break(BreakType::TextWrapping));
         }
 
         // ── 水平线 ──
         Event::Rule => {
             state.flush_paragraph(docx);
-            *docx = std::mem::take(docx).add_paragraph(
-                Paragraph::new().add_run(Run::new().add_text("─".repeat(40))),
-            );
+            *docx = std::mem::take(docx)
+                .add_paragraph(Paragraph::new().add_run(Run::new().add_text("─".repeat(40))));
         }
 
         // ── 其他 ──
@@ -428,11 +435,7 @@ fn resolve_image(url: &str, assets_root: &Path) -> Option<Vec<u8>> {
     if let Some(stripped) = url.strip_prefix("data:") {
         if let Some(idx) = stripped.find(";base64,") {
             let b64 = &stripped[idx + 8..];
-            return base64::Engine::decode(
-                &base64::engine::general_purpose::STANDARD,
-                b64,
-            )
-            .ok();
+            return base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64).ok();
         }
     }
 

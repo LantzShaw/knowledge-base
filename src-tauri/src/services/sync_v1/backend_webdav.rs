@@ -55,10 +55,7 @@ impl SyncBackendImpl for WebdavBackend {
     }
 
     fn put_note(&self, path: &str, content: &str) -> Result<(), AppError> {
-        block_on(
-            self.client
-                .upload_bytes(path, content.as_bytes().to_vec()),
-        )
+        block_on(self.client.upload_bytes(path, content.as_bytes().to_vec()))
     }
 
     fn get_note(&self, path: &str) -> Result<Option<String>, AppError> {

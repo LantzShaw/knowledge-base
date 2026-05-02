@@ -91,9 +91,10 @@ pub fn pull<R: Runtime, E: Emitter<R>>(
         let body = match backend.get_note(&entry.remote_path)? {
             Some(s) => s,
             None => {
-                result
-                    .errors
-                    .push(format!("远端 manifest 有 {} 但 .md 文件丢失", entry.remote_path));
+                result.errors.push(format!(
+                    "远端 manifest 有 {} 但 .md 文件丢失",
+                    entry.remote_path
+                ));
                 continue;
             }
         };
@@ -132,7 +133,9 @@ pub fn pull<R: Runtime, E: Emitter<R>>(
                     }
                 }
                 Err(e) => {
-                    result.errors.push(format!("写入本地笔记失败 {}: {}", entry.title, e));
+                    result
+                        .errors
+                        .push(format!("写入本地笔记失败 {}: {}", entry.title, e));
                 }
             }
         } else {
@@ -168,7 +171,9 @@ pub fn pull<R: Runtime, E: Emitter<R>>(
                     );
                 }
                 Ok(false) => {} // 本地已没有
-                Err(e) => result.errors.push(format!("软删本地失败 {}: {}", entry.title, e)),
+                Err(e) => result
+                    .errors
+                    .push(format!("软删本地失败 {}: {}", entry.title, e)),
             }
         }
     }
@@ -193,9 +198,7 @@ pub fn pull<R: Runtime, E: Emitter<R>>(
                 }
             }
             Ok(None) => {}
-            Err(e) => result
-                .errors
-                .push(format!("拉远端冲突文件失败: {}", e)),
+            Err(e) => result.errors.push(format!("拉远端冲突文件失败: {}", e)),
         }
     }
 

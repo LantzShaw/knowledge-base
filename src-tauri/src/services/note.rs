@@ -82,7 +82,11 @@ impl NoteService {
     }
 
     /// 移动笔记到文件夹
-    pub fn move_to_folder(db: &Database, note_id: i64, folder_id: Option<i64>) -> Result<(), AppError> {
+    pub fn move_to_folder(
+        db: &Database,
+        note_id: i64,
+        folder_id: Option<i64>,
+    ) -> Result<(), AppError> {
         db.move_note_to_folder(note_id, folder_id)
     }
 
@@ -137,12 +141,8 @@ impl NoteService {
     ) -> Result<PageResult<Note>, AppError> {
         let page = page.unwrap_or(1).max(1);
         let page_size = page_size.unwrap_or(20).clamp(1, 100);
-        let (items, total) = db.list_hidden_notes(
-            page,
-            page_size,
-            folder_id,
-            uncategorized.unwrap_or(false),
-        )?;
+        let (items, total) =
+            db.list_hidden_notes(page, page_size, folder_id, uncategorized.unwrap_or(false))?;
         Ok(PageResult {
             items,
             total,
@@ -207,8 +207,7 @@ impl NoteService {
         let blob = db
             .get_encrypted_blob(id)?
             .ok_or_else(|| AppError::NotFound(format!("笔记 {} 未加密或不存在", id)))?;
-        let plaintext_bytes =
-            crate::services::vault::VaultService::decrypt_blob(vault, &blob)?;
+        let plaintext_bytes = crate::services::vault::VaultService::decrypt_blob(vault, &blob)?;
         String::from_utf8(plaintext_bytes)
             .map_err(|e| AppError::Custom(format!("密文解码为 UTF-8 失败: {}", e)))
     }
@@ -270,4 +269,3 @@ impl NoteService {
         Self::create(db, &input)
     }
 }
-

@@ -139,7 +139,9 @@ impl VaultService {
         let decrypted = crypto::aead_decrypt(&key, &verifier)
             .map_err(|_| AppError::Custom("主密码错误".to_string()))?;
         if decrypted != VERIFIER_PLAINTEXT {
-            return Err(AppError::Custom("主密码错误（verifier 不匹配）".to_string()));
+            return Err(AppError::Custom(
+                "主密码错误（verifier 不匹配）".to_string(),
+            ));
         }
 
         let mut guard = state

@@ -18,12 +18,11 @@ impl Database {
     // ─── 文件夹 DAO ───────────────────────────────
 
     /// 创建文件夹
-    pub fn create_folder(
-        &self,
-        name: &str,
-        parent_id: Option<i64>,
-    ) -> Result<Folder, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+    pub fn create_folder(&self, name: &str, parent_id: Option<i64>) -> Result<Folder, AppError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         conn.execute(
             "INSERT INTO folders (name, parent_id) VALUES (?1, ?2)",
@@ -50,7 +49,10 @@ impl Database {
         parent_id: Option<i64>,
         name: &str,
     ) -> Result<Option<i64>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         let result = match parent_id {
             Some(pid) => conn
@@ -73,7 +75,10 @@ impl Database {
 
     /// 重命名文件夹
     pub fn rename_folder(&self, id: i64, name: &str) -> Result<(), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         let affected = conn.execute(
             "UPDATE folders SET name = ?1 WHERE id = ?2",
@@ -89,7 +94,10 @@ impl Database {
 
     /// 删除文件夹（笔记的 folder_id 由 ON DELETE SET NULL 自动置空）
     pub fn delete_folder(&self, id: i64) -> Result<bool, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let affected = conn.execute("DELETE FROM folders WHERE id = ?1", params![id])?;
         Ok(affected > 0)
     }
@@ -102,7 +110,10 @@ impl Database {
     /// 嵌套深度也很浅，BFS 一两次 SELECT 就跑完。
     /// 返回包含 root 自身的 ID 列表（顺序：BFS 层序）。
     pub fn collect_descendant_folder_ids(&self, root_id: i64) -> Result<Vec<i64>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         let mut all_ids: Vec<i64> = vec![root_id];
         let mut frontier: Vec<i64> = vec![root_id];
@@ -118,8 +129,10 @@ impl Database {
                 placeholders
             );
             let mut stmt = conn.prepare(&sql)?;
-            let params_ref: Vec<&dyn rusqlite::types::ToSql> =
-                frontier.iter().map(|x| x as &dyn rusqlite::types::ToSql).collect();
+            let params_ref: Vec<&dyn rusqlite::types::ToSql> = frontier
+                .iter()
+                .map(|x| x as &dyn rusqlite::types::ToSql)
+                .collect();
             let next: Vec<i64> = stmt
                 .query_map(params_ref.as_slice(), |row| row.get(0))?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -142,7 +155,10 @@ impl Database {
     }
 
     pub fn folder_has_children(&self, id: i64) -> Result<bool, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         let sub_folders: i64 = conn.query_row(
             "SELECT COUNT(*) FROM folders WHERE parent_id = ?1",
@@ -166,7 +182,10 @@ impl Database {
         if ordered_ids.is_empty() {
             return Ok(());
         }
-        let mut conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let tx = conn.transaction()?;
         for (idx, id) in ordered_ids.iter().enumerate() {
             tx.execute(
@@ -181,7 +200,10 @@ impl Database {
     /// 修改文件夹父节点（拖拽移动）
     /// new_parent_id == None 表示移到根节点
     pub fn move_folder(&self, id: i64, new_parent_id: Option<i64>) -> Result<(), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         // 防循环：new_parent_id 不能是自己，也不能是自己的后代
         if let Some(pid) = new_parent_id {
@@ -221,7 +243,10 @@ impl Database {
 
     /// 获取所有文件夹（平铺查询，含每个文件夹的笔记数），构建为树形结构
     pub fn list_folders_tree(&self) -> Result<Vec<Folder>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         let mut stmt = conn.prepare(
             "SELECT f.id, f.name, f.parent_id, f.sort_order,

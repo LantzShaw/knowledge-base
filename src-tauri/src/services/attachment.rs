@@ -28,14 +28,17 @@ const ATTACHMENTS_DIR: &str = "attachments";
 /// Why: 附件走"任意 OS 文件拖放"入口，若允许 .exe/.bat/.dll 进入知识库，
 ///      用户把笔记同步给别人时可能携带恶意载荷；显式 block 掉最常见的几类。
 const BLOCKED_EXTS: &[&str] = &[
-    "exe", "msi", "bat", "cmd", "ps1", "vbs", "vbe", "js", "jse", "wsf", "wsh",
-    "sh", "app", "dmg", "scr", "com", "pif", "dll", "sys", "drv", "cpl", "hta",
-    "jar", "apk", "ipa", "deb", "rpm",
+    "exe", "msi", "bat", "cmd", "ps1", "vbs", "vbe", "js", "jse", "wsf", "wsh", "sh", "app", "dmg",
+    "scr", "com", "pif", "dll", "sys", "drv", "cpl", "hta", "jar", "apk", "ipa", "deb", "rpm",
 ];
 
 #[inline]
 fn assets_dir_name() -> &'static str {
-    if cfg!(debug_assertions) { ASSETS_DIR_DEV } else { ASSETS_DIR_PROD }
+    if cfg!(debug_assertions) {
+        ASSETS_DIR_DEV
+    } else {
+        ASSETS_DIR_PROD
+    }
 }
 
 pub struct AttachmentService;

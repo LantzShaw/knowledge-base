@@ -54,10 +54,7 @@ impl SourceFileService {
             "docx" => "docx",
             "doc" => "doc",
             other => {
-                return Err(AppError::Custom(format!(
-                    "不支持的文件类型: {}",
-                    other
-                )));
+                return Err(AppError::Custom(format!("不支持的文件类型: {}", other)));
             }
         };
         // 取原文件名（不含扩展名）；缺失时回退 untitled
@@ -66,9 +63,8 @@ impl SourceFileService {
             .and_then(|s| s.to_str())
             .unwrap_or("untitled");
         // 读源文件内容用于判重 + 写入。Word/PDF 通常 < 50MB，全量加载可接受。
-        let bytes = std::fs::read(source_path).map_err(|e| {
-            AppError::Custom(format!("读取源文件失败: {}", e))
-        })?;
+        let bytes = std::fs::read(source_path)
+            .map_err(|e| AppError::Custom(format!("读取源文件失败: {}", e)))?;
         let dst = safe_filename::save_unique(&abs_dir, stem, ext, &bytes)?;
         let file_name = dst
             .file_name()

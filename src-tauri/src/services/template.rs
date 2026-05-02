@@ -26,7 +26,11 @@ impl TemplateService {
     }
 
     /// 更新模板
-    pub fn update(db: &Database, id: i64, input: &NoteTemplateInput) -> Result<NoteTemplate, AppError> {
+    pub fn update(
+        db: &Database,
+        id: i64,
+        input: &NoteTemplateInput,
+    ) -> Result<NoteTemplate, AppError> {
         let name = input.name.trim();
         if name.is_empty() {
             return Err(AppError::InvalidInput("模板名称不能为空".into()));

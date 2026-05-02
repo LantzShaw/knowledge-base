@@ -77,9 +77,8 @@ pub fn push<R: Runtime, E: Emitter<R>>(
 
     // 把笔记内容批量读出
     let conn = db.conn_lock()?;
-    let mut stmt = conn.prepare(
-        "SELECT id, title, content, updated_at FROM notes WHERE is_deleted = 0",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT id, title, content, updated_at FROM notes WHERE is_deleted = 0")?;
     let local_notes: std::collections::HashMap<String, (i64, String, String, String)> = stmt
         .query_map([], |row| {
             Ok((
@@ -124,9 +123,10 @@ pub fn push<R: Runtime, E: Emitter<R>>(
         let (note_id, title, content, updated_at) = match local_notes.get(&entry.stable_id) {
             Some(v) => v.clone(),
             None => {
-                result
-                    .errors
-                    .push(format!("笔记 {} 在 manifest 里但 DB 里找不到", entry.stable_id));
+                result.errors.push(format!(
+                    "笔记 {} 在 manifest 里但 DB 里找不到",
+                    entry.stable_id
+                ));
                 continue;
             }
         };
@@ -144,14 +144,17 @@ pub fn push<R: Runtime, E: Emitter<R>>(
                     &updated_at,
                     false,
                 ) {
-                    result
-                        .errors
-                        .push(format!("upsert sync_remote_state 失败 (note {}): {}", note_id, e));
+                    result.errors.push(format!(
+                        "upsert sync_remote_state 失败 (note {}): {}",
+                        note_id, e
+                    ));
                 }
                 result.uploaded += 1;
             }
             Err(e) => {
-                result.errors.push(format!("上传失败 {}: {}", entry.title, e));
+                result
+                    .errors
+                    .push(format!("上传失败 {}: {}", entry.title, e));
             }
         }
     }

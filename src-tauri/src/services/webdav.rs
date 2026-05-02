@@ -21,8 +21,8 @@ pub struct WebDavClient {
 
 impl WebDavClient {
     pub fn new(url: &str, username: &str, password: &str) -> Self {
-        let auth = base64::engine::general_purpose::STANDARD
-            .encode(format!("{}:{}", username, password));
+        let auth =
+            base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", username, password));
         Self {
             // 复用全局 reqwest Client，避免每次 push/pull 都重建连接池 + TLS 会话
             client: crate::services::http_client::shared(),
@@ -107,9 +107,7 @@ impl WebDavClient {
                 "云端文件夹不存在，请先在 WebDAV 服务端创建".into(),
             ));
         }
-        if !status.is_success()
-            && status != StatusCode::CREATED
-            && status != StatusCode::NO_CONTENT
+        if !status.is_success() && status != StatusCode::CREATED && status != StatusCode::NO_CONTENT
         {
             let body = resp.text().await.unwrap_or_default();
             return Err(AppError::Custom(format!("上传失败 ({}): {}", status, body)));
@@ -129,11 +127,7 @@ impl WebDavClient {
 
     /// 流式下载到本地文件：逐块把响应体写入目标文件，
     /// 全程不把整份 ZIP 载入内存。上层调用方应确保目标目录存在且可写。
-    pub async fn download_to_file(
-        &self,
-        filename: &str,
-        dest_path: &Path,
-    ) -> Result<(), AppError> {
+    pub async fn download_to_file(&self, filename: &str, dest_path: &Path) -> Result<(), AppError> {
         let resp = Self::send_get(&self.client, &self.file_url(filename), &self.headers()).await?;
         let mut file = tokio::fs::File::create(dest_path)
             .await
@@ -141,8 +135,7 @@ impl WebDavClient {
 
         let mut stream = resp.bytes_stream();
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk
-                .map_err(|e| AppError::Custom(format!("下载过程中断: {}", e)))?;
+            let chunk = chunk.map_err(|e| AppError::Custom(format!("下载过程中断: {}", e)))?;
             file.write_all(&chunk)
                 .await
                 .map_err(|e| AppError::Custom(format!("写入本地文件失败: {}", e)))?;
@@ -272,10 +265,7 @@ impl WebDavClient {
     }
 
     /// T-024c: 下载文件，404 时返回 None（用于"远端没有 manifest 时安全返回 None"）
-    pub async fn download_bytes_optional(
-        &self,
-        path: &str,
-    ) -> Result<Option<Vec<u8>>, AppError> {
+    pub async fn download_bytes_optional(&self, path: &str) -> Result<Option<Vec<u8>>, AppError> {
         let resp = self
             .client
             .get(self.file_url(path))
@@ -321,7 +311,10 @@ impl WebDavClient {
             return Err(AppError::Custom("云端文件夹不存在".into()));
         }
         if !status.is_success() && status != StatusCode::MULTI_STATUS {
-            return Err(AppError::Custom(format!("列目录失败，服务器返回 {}", status)));
+            return Err(AppError::Custom(format!(
+                "列目录失败，服务器返回 {}",
+                status
+            )));
         }
 
         let body = resp
@@ -337,7 +330,7 @@ impl WebDavClient {
         let mut i = 0;
         while let Some(open) = lower[i..].find("href>") {
             let content_start = i + open + 5; // 跳过 "href>"
-            // 找对应的 </...href>
+                                              // 找对应的 </...href>
             let close_rel = match lower[content_start..].find("</") {
                 Some(p) => p,
                 None => break,

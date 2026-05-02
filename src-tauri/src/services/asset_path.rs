@@ -35,10 +35,7 @@ pub fn abs_to_rel(absolute: &Path, data_dir: &Path) -> Option<String> {
         if let Component::Normal(name) = c {
             if let Some(name_str) = name.to_str() {
                 if KNOWN_ASSET_SEGMENTS.contains(&name_str) {
-                    let tail: PathBuf = comps[i..]
-                        .iter()
-                        .map(|c| c.as_os_str())
-                        .collect();
+                    let tail: PathBuf = comps[i..].iter().map(|c| c.as_os_str()).collect();
                     return Some(to_posix(&tail));
                 }
             }
@@ -51,15 +48,29 @@ pub fn abs_to_rel(absolute: &Path, data_dir: &Path) -> Option<String> {
 ///
 /// 不验证文件是否存在 —— 调用方按需 `metadata()`。
 /// 安全：rel 含 `..` 会触发 `Err` 返回，避免逃逸 data_dir。
+///
+/// 注意：必须按 component 逐段 push，而不是直接 `data_dir.join(rel_path)`。
+/// 否则 Windows 上会保留 rel 里的 `/`，产出 `C:\foo\kb_assets/images/x.png` 这种混合分隔符路径，
+/// 把它再转成 String 喂给 `revealItemInDir` 时，Windows 的 `ILCreateFromPathW` 会拒收，
+/// 报 OS error 123 "文件名、目录名或卷标语法不正确"。
 pub fn rel_to_abs(rel: &str, data_dir: &Path) -> Result<PathBuf, String> {
     let rel = rel.trim_start_matches('/');
     let rel_path = Path::new(rel);
     for c in rel_path.components() {
-        if matches!(c, Component::ParentDir | Component::RootDir | Component::Prefix(_)) {
+        if matches!(
+            c,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        ) {
             return Err(format!("非法相对路径（含 .. 或绝对前缀）: {}", rel));
         }
     }
-    Ok(data_dir.join(rel_path))
+    let mut abs = data_dir.to_path_buf();
+    for c in rel_path.components() {
+        if let Component::Normal(seg) = c {
+            abs.push(seg);
+        }
+    }
+    Ok(abs)
 }
 
 /// 把 `Path` 转成 POSIX 风格字符串（`\` → `/`，剥掉 Windows verbatim 前缀）

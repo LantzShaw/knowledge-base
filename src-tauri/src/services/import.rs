@@ -7,8 +7,7 @@ use walkdir::WalkDir;
 use crate::database::Database;
 use crate::error::AppError;
 use crate::models::{
-    ImportConflictPolicy, ImportProgress, ImportResult, NoteInput, OpenMarkdownResult,
-    ScannedFile,
+    ImportConflictPolicy, ImportProgress, ImportResult, NoteInput, OpenMarkdownResult, ScannedFile,
 };
 use crate::services::hash::sha256_hex;
 use crate::services::quick_capture::{
@@ -80,9 +79,7 @@ impl ImportService {
             // .git 这类内部状态当成笔记导入。是否应跳过由 should_skip_dir_entry 判断。
             .filter_entry(|e| !should_skip_dir_entry(e))
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.file_type().is_file() && is_text_extension(&ext_lower(e.path()))
-            })
+            .filter(|e| e.file_type().is_file() && is_text_extension(&ext_lower(e.path())))
             .filter_map(|entry| {
                 let path = entry.path();
                 let name = path
@@ -94,8 +91,8 @@ impl ImportService {
 
                 // relative_dir：相对根的父目录，使用正斜杠统一
                 let parent = path.parent().unwrap_or(Path::new(""));
-                let parent_canonical: PathBuf = std::fs::canonicalize(parent)
-                    .unwrap_or_else(|_| parent.to_path_buf());
+                let parent_canonical: PathBuf =
+                    std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
                 let relative_dir = parent_canonical
                     .strip_prefix(&root_canonical)
                     .ok()
@@ -108,8 +105,8 @@ impl ImportService {
                     .unwrap_or_default();
 
                 // 扫描阶段就做去重判定 —— 前端预览需要
-                let (match_kind, existing_id) =
-                    detect_existing_match(db, path, &name).unwrap_or_else(|e| {
+                let (match_kind, existing_id) = detect_existing_match(db, path, &name)
+                    .unwrap_or_else(|e| {
                         log::warn!(
                             "[scan] 检测重复失败（当成 new 处理）: {} -> {}",
                             path.display(),
@@ -333,11 +330,7 @@ impl ImportService {
                         "txt" => "txt",
                         _ => "md", // markdown / md 统一记 md
                     };
-                    let _ = db.set_note_source_file(
-                        note.id,
-                        Some(&canonical_path),
-                        Some(src_type),
-                    );
+                    let _ = db.set_note_source_file(note.id, Some(&canonical_path), Some(src_type));
 
                     // ─── T-009: 把 frontmatter 中的标签关联到这条笔记 ───
                     if let Some(fm) = &front_matter {
@@ -351,7 +344,9 @@ impl ImportService {
                                 Err(e) => {
                                     log::warn!(
                                         "[import] 处理 frontmatter 标签失败 ({}/{}): {}",
-                                        final_title, tag_name, e
+                                        final_title,
+                                        tag_name,
+                                        e
                                     );
                                 }
                             }
@@ -382,16 +377,12 @@ impl ImportService {
                                 attachments_copied += rewrite.copied;
                             }
                             for m in rewrite.missing {
-                                attachments_missing
-                                    .push(format!("{}: {}", final_title, m));
+                                attachments_missing.push(format!("{}: {}", final_title, m));
                             }
                             current_body = rewrite.new_body;
                         }
                         Err(e) => {
-                            log::warn!(
-                                "[import] 笔记 {} 本地图片重写失败: {}",
-                                note.id, e
-                            );
+                            log::warn!("[import] 笔记 {} 本地图片重写失败: {}", note.id, e);
                         }
                     }
 
@@ -408,16 +399,12 @@ impl ImportService {
                                 attachments_copied += rewrite.copied;
                             }
                             for m in rewrite.missing {
-                                attachments_missing
-                                    .push(format!("{}: {}", final_title, m));
+                                attachments_missing.push(format!("{}: {}", final_title, m));
                             }
                             current_body = rewrite.new_body;
                         }
                         Err(e) => {
-                            log::warn!(
-                                "[import] 笔记 {} 外链图片下载失败: {}",
-                                note.id, e
-                            );
+                            log::warn!("[import] 笔记 {} 外链图片下载失败: {}", note.id, e);
                         }
                     }
 
@@ -434,16 +421,12 @@ impl ImportService {
                                 attachments_copied += rewrite.copied;
                             }
                             for m in rewrite.missing {
-                                attachments_missing
-                                    .push(format!("{}: {}", final_title, m));
+                                attachments_missing.push(format!("{}: {}", final_title, m));
                             }
                             current_body = rewrite.new_body;
                         }
                         Err(e) => {
-                            log::warn!(
-                                "[import] 笔记 {} 本地视频重写失败: {}",
-                                note.id, e
-                            );
+                            log::warn!("[import] 笔记 {} 本地视频重写失败: {}", note.id, e);
                         }
                     }
 
@@ -460,26 +443,19 @@ impl ImportService {
                                 attachments_copied += rewrite.copied;
                             }
                             for m in rewrite.missing {
-                                attachments_missing
-                                    .push(format!("{}: {}", final_title, m));
+                                attachments_missing.push(format!("{}: {}", final_title, m));
                             }
                             current_body = rewrite.new_body;
                         }
                         Err(e) => {
-                            log::warn!(
-                                "[import] 笔记 {} 外链视频下载失败: {}",
-                                note.id, e
-                            );
+                            log::warn!("[import] 笔记 {} 外链视频下载失败: {}", note.id, e);
                         }
                     }
 
                     // 内容真的变了才回写，省一次 DB 写
                     if current_body != input.content {
                         if let Err(e) = db.update_note_content(note.id, &current_body) {
-                            log::warn!(
-                                "[import] 笔记 {} 图片重写后回写失败: {}",
-                                note.id, e
-                            );
+                            log::warn!("[import] 笔记 {} 图片重写后回写失败: {}", note.id, e);
                         }
                     }
 
@@ -536,12 +512,14 @@ impl ImportService {
             .unwrap_or("未命名")
             .to_string();
 
-        let raw_content = read_text_auto_encoding(path).map_err(|e| {
-            AppError::Custom(format!("读取文件失败: {} ({})", file_path, e))
-        })?;
+        let raw_content = read_text_auto_encoding(path)
+            .map_err(|e| AppError::Custom(format!("读取文件失败: {} ({})", file_path, e)))?;
 
         if raw_content.trim().is_empty() {
-            return Err(AppError::InvalidInput(format!("文件内容为空: {}", file_path)));
+            return Err(AppError::InvalidInput(format!(
+                "文件内容为空: {}",
+                file_path
+            )));
         }
 
         // 去重：已有同 source_file_path 的活跃笔记 → 复用
@@ -551,13 +529,8 @@ impl ImportService {
             // 外部修改过文件 → 同步最新内容到笔记（含图片处理）
             let was_synced = existing_content != raw_content;
             if was_synced {
-                let (processed, mappings) = process_single_md_images(
-                    &raw_content,
-                    existing_id,
-                    path,
-                    app_data_dir,
-                )
-                .await;
+                let (processed, mappings) =
+                    process_single_md_images(&raw_content, existing_id, path, app_data_dir).await;
                 db.update_note_content(existing_id, &processed)?;
                 // 重新打开 = 重置 URL 映射（外部可能换了图床/路径）
                 let _ = db.clear_url_mappings(existing_id);
@@ -569,7 +542,8 @@ impl ImportService {
                 }
                 log::info!(
                     "[open-md] 检测到 {} 内容变化，已同步到笔记 #{}",
-                    canonical, existing_id
+                    canonical,
+                    existing_id
                 );
             }
             return Ok(OpenMarkdownResult {

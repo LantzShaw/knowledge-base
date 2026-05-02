@@ -192,7 +192,9 @@ impl super::Database {
             )
             .optional()?;
 
-        let Some(mut task) = task else { return Ok(None) };
+        let Some(mut task) = task else {
+            return Ok(None);
+        };
 
         let mut stmt = conn.prepare(
             "SELECT id, task_id, kind, target, label
@@ -335,7 +337,11 @@ impl super::Database {
                 input.title,
                 input.description,
                 input.priority.unwrap_or(1),
-                if input.important.unwrap_or(false) { 1 } else { 0 },
+                if input.important.unwrap_or(false) {
+                    1
+                } else {
+                    0
+                },
                 input.due_date,
                 input.remind_before_minutes,
                 kind,
@@ -448,10 +454,7 @@ impl super::Database {
         let sql = format!("UPDATE tasks SET {} WHERE id = ?", sets.join(", "));
         binds.push(Box::new(id));
 
-        let affected = conn.execute(
-            &sql,
-            params_from_iter(binds.iter().map(|b| b.as_ref())),
-        )?;
+        let affected = conn.execute(&sql, params_from_iter(binds.iter().map(|b| b.as_ref())))?;
         Ok(affected > 0)
     }
 
@@ -604,10 +607,7 @@ impl super::Database {
     ///
     /// 纯日期 due_date 的提醒基准时刻由 `all_day_base_time` 参数指定，
     /// 格式 'HH:MM:SS'（如 "09:00:00"）。对齐 Apple Reminders / MS To Do 的默认 09:00。
-    pub fn list_due_reminders(
-        &self,
-        all_day_base_time: &str,
-    ) -> Result<Vec<Task>, AppError> {
+    pub fn list_due_reminders(&self, all_day_base_time: &str) -> Result<Vec<Task>, AppError> {
         let conn = self
             .conn
             .lock()
@@ -674,10 +674,7 @@ impl super::Database {
     /// 查最早一条「待提醒」任务的 effective_remind_at（含已逾期的）。
     /// 返回字符串 'YYYY-MM-DD HH:MM:SS'（local），无待提醒任务时返回 None。
     /// 调度器据此 sleep_until 精准触发，避免轮询空跑。
-    pub fn peek_next_due_at(
-        &self,
-        all_day_base_time: &str,
-    ) -> Result<Option<String>, AppError> {
+    pub fn peek_next_due_at(&self, all_day_base_time: &str) -> Result<Option<String>, AppError> {
         let conn = self
             .conn
             .lock()
@@ -696,11 +693,9 @@ impl super::Database {
               AND remind_before_minutes IS NOT NULL
         ";
         // MIN 在无匹配行时返回一行 NULL，所以走 `Option<String>` 接收避免 InvalidColumnType
-        let next: Option<String> = conn.query_row(
-            sql,
-            params![all_day_base_time],
-            |row| row.get::<_, Option<String>>(0),
-        )?;
+        let next: Option<String> = conn.query_row(sql, params![all_day_base_time], |row| {
+            row.get::<_, Option<String>>(0)
+        })?;
         Ok(next)
     }
 
@@ -750,16 +745,14 @@ impl super::Database {
             .conn
             .lock()
             .map_err(|e| AppError::Custom(e.to_string()))?;
-        let total_todo: usize = conn.query_row(
-            "SELECT COUNT(*) FROM tasks WHERE status = 0",
-            [],
-            |row| row.get(0),
-        )?;
-        let total_done: usize = conn.query_row(
-            "SELECT COUNT(*) FROM tasks WHERE status = 1",
-            [],
-            |row| row.get(0),
-        )?;
+        let total_todo: usize =
+            conn.query_row("SELECT COUNT(*) FROM tasks WHERE status = 0", [], |row| {
+                row.get(0)
+            })?;
+        let total_done: usize =
+            conn.query_row("SELECT COUNT(*) FROM tasks WHERE status = 1", [], |row| {
+                row.get(0)
+            })?;
         let urgent_todo: usize = conn.query_row(
             "SELECT COUNT(*) FROM tasks WHERE status = 0 AND priority = 0",
             [],

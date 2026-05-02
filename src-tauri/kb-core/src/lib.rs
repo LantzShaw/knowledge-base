@@ -34,14 +34,13 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use rmcp::{
-    ErrorData as McpError, ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{
         CallToolResult, Content, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo,
     },
-    schemars, tool, tool_handler, tool_router,
+    schemars, tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler,
 };
-use rusqlite::{Connection, OpenFlags, params};
+use rusqlite::{params, Connection, OpenFlags};
 use serde::Serialize;
 
 // ─── 数据库连接（只读 + WAL 兼容） ─────────────────────────────────
@@ -458,7 +457,9 @@ impl KbServer {
     }
 
     // ─── ping：健康检查 ────────────────────────────────────────
-    #[tool(description = "健康检查。返回 'pong' + sidecar 版本。用于客户端验证 MCP server 已就绪。")]
+    #[tool(
+        description = "健康检查。返回 'pong' + sidecar 版本。用于客户端验证 MCP server 已就绪。"
+    )]
     fn ping(&self) -> Result<CallToolResult, McpError> {
         let msg = format!("pong (kb-core v{})", env!("CARGO_PKG_VERSION"));
         Ok(CallToolResult::success(vec![Content::text(msg)]))
@@ -569,8 +570,10 @@ impl KbServer {
     }
 
     // ─── get_backlinks：反向链接 ─────────────────────────────
-    #[tool(description = "获取目标笔记的所有反向链接（哪些笔记 [[链接]] 到了它）。\
-                          隐藏 / 已删除的源笔记不计入。")]
+    #[tool(
+        description = "获取目标笔记的所有反向链接（哪些笔记 [[链接]] 到了它）。\
+                          隐藏 / 已删除的源笔记不计入。"
+    )]
     fn get_backlinks(
         &self,
         Parameters(args): Parameters<GetBacklinksArgs>,
@@ -588,8 +591,10 @@ impl KbServer {
     }
 
     // ─── list_daily_notes：日记列表 ──────────────────────────
-    #[tool(description = "列出最近 N 天的日记（is_daily=1 的笔记），按 daily_date 降序。\
-                          默认最近 7 天、最多 30 条。")]
+    #[tool(
+        description = "列出最近 N 天的日记（is_daily=1 的笔记），按 daily_date 降序。\
+                          默认最近 7 天、最多 30 条。"
+    )]
     fn list_daily_notes(
         &self,
         Parameters(args): Parameters<ListDailyArgs>,
@@ -630,8 +635,10 @@ impl KbServer {
     }
 
     // ─── get_prompt：取单条提示词 ─────────────────────────────
-    #[tool(description = "按 id 或 builtin_code 取一条提示词模板（Prompt Library）。\
-                          二选一传参，至少一个；同时传以 id 优先。")]
+    #[tool(
+        description = "按 id 或 builtin_code 取一条提示词模板（Prompt Library）。\
+                          二选一传参，至少一个；同时传以 id 优先。"
+    )]
     fn get_prompt(
         &self,
         Parameters(args): Parameters<GetPromptArgs>,
@@ -656,9 +663,11 @@ impl KbServer {
     }
 
     // ─── list_prompts：所有 Prompt 模板（轻量索引） ──────────
-    #[tool(description = "列出所有 Prompt 模板的索引（id / title / description / builtin_code / enabled），\
+    #[tool(
+        description = "列出所有 Prompt 模板的索引（id / title / description / builtin_code / enabled），\
                           不返回完整 prompt 内容（太长，按需 get_prompt(id) 取）。\
-                          内置在前，按 sort_order 排序。")]
+                          内置在前，按 sort_order 排序。"
+    )]
     fn list_prompts(&self) -> Result<CallToolResult, McpError> {
         let conn = self
             .db
@@ -673,9 +682,11 @@ impl KbServer {
     }
 
     // ─── list_subtasks：某主任务的子任务 ──────────────────────
-    #[tool(description = "列出指定主任务的子任务（parent_task_id = X 的所有 tasks）。\
+    #[tool(
+        description = "列出指定主任务的子任务（parent_task_id = X 的所有 tasks）。\
                           配合 list_tasks 看主任务进度。\
-                          排序：未完成在前，priority ASC，created_at ASC。")]
+                          排序：未完成在前，priority ASC，created_at ASC。"
+    )]
     fn list_subtasks(
         &self,
         Parameters(args): Parameters<ListSubtasksArgs>,
@@ -694,8 +705,10 @@ impl KbServer {
     }
 
     // ─── list_templates：笔记模板库 ───────────────────────────
-    #[tool(description = "列出所有笔记模板（会议记录 / 读书笔记 / 周报 等内置 + 用户自建）。\
-                          配合 create_note_from_template 用来按模板建笔记。")]
+    #[tool(
+        description = "列出所有笔记模板（会议记录 / 读书笔记 / 周报 等内置 + 用户自建）。\
+                          配合 create_note_from_template 用来按模板建笔记。"
+    )]
     fn list_templates(&self) -> Result<CallToolResult, McpError> {
         let conn = self
             .db
@@ -731,9 +744,11 @@ impl KbServer {
     }
 
     // ─── list_recent_notes：按更新时间最近的笔记 ──────────────
-    #[tool(description = "列出最近更新的笔记（按 updated_at 降序），不限文件夹和标签。\
+    #[tool(
+        description = "列出最近更新的笔记（按 updated_at 降序），不限文件夹和标签。\
                           用于「我最近写了啥」这类无关键词查询。\
-                          自动过滤回收站 / 隐藏 / 加密。")]
+                          自动过滤回收站 / 隐藏 / 加密。"
+    )]
     fn list_recent_notes(
         &self,
         Parameters(args): Parameters<ListRecentArgs>,
@@ -790,19 +805,18 @@ impl KbServer {
     }
 
     // ─── ✏️ 写工具：move_notes_batch ───────────────────────────
-    #[tool(description = "批量把多条笔记移动到目标文件夹（folder_id=null 移到未分类）。\
+    #[tool(
+        description = "批量把多条笔记移动到目标文件夹（folder_id=null 移到未分类）。\
                           只改 folder_id，不动 updated_at（避免大量笔记被冒泡到最近更新）。\
-                          仅 --writable 模式可用。返回受影响行数。")]
+                          仅 --writable 模式可用。返回受影响行数。"
+    )]
     fn move_notes_batch(
         &self,
         Parameters(args): Parameters<MoveNotesBatchArgs>,
     ) -> Result<CallToolResult, McpError> {
         self.ensure_writable()?;
         if args.ids.is_empty() {
-            return Err(McpError::invalid_params(
-                "ids 不能为空".to_string(),
-                None,
-            ));
+            return Err(McpError::invalid_params("ids 不能为空".to_string(), None));
         }
         if args.ids.len() > 500 {
             return Err(McpError::invalid_params(
@@ -835,10 +849,7 @@ impl KbServer {
         self.ensure_writable()?;
         let name = args.name.trim();
         if name.is_empty() {
-            return Err(McpError::invalid_params(
-                "name 不能为空".to_string(),
-                None,
-            ));
+            return Err(McpError::invalid_params("name 不能为空".to_string(), None));
         }
         let conn = self
             .db
@@ -857,8 +868,10 @@ impl KbServer {
     }
 
     // ─── ✏️ 写工具：create_note_from_template ───────────────────
-    #[tool(description = "按模板建笔记。title 不传则自动用「模板名 · YYYY-MM-DD」。\
-                          仅 --writable 模式可用。返回 {id, title}。")]
+    #[tool(
+        description = "按模板建笔记。title 不传则自动用「模板名 · YYYY-MM-DD」。\
+                          仅 --writable 模式可用。返回 {id, title}。"
+    )]
     fn create_note_from_template(
         &self,
         Parameters(args): Parameters<CreateNoteFromTemplateArgs>,
@@ -905,15 +918,18 @@ impl KbServer {
                 None,
             ));
         }
-        Ok(CallToolResult::success(vec![Content::text(
-            format!("{{\"id\":{},\"restored\":true}}", args.id),
-        )]))
+        Ok(CallToolResult::success(vec![Content::text(format!(
+            "{{\"id\":{},\"restored\":true}}",
+            args.id
+        ))]))
     }
 
     // ─── ✏️ 写工具：delete_note（软删到回收站） ─────────────────
-    #[tool(description = "把笔记软删到回收站（is_deleted=1）。原数据仍在，可在主应用 UI 回收站恢复。\
+    #[tool(
+        description = "把笔记软删到回收站（is_deleted=1）。原数据仍在，可在主应用 UI 回收站恢复。\
                           拒绝删除加密笔记。仅 --writable 模式可用。\
-                          这是 LLM 处理「创建错了」/「不要这条了」的标准撤销方式。")]
+                          这是 LLM 处理「创建错了」/「不要这条了」的标准撤销方式。"
+    )]
     fn delete_note(
         &self,
         Parameters(args): Parameters<DeleteNoteArgs>,
@@ -932,14 +948,17 @@ impl KbServer {
                 None,
             ));
         }
-        Ok(CallToolResult::success(vec![Content::text(
-            format!("{{\"id\":{},\"deleted\":true}}", args.id),
-        )]))
+        Ok(CallToolResult::success(vec![Content::text(format!(
+            "{{\"id\":{},\"deleted\":true}}",
+            args.id
+        ))]))
     }
 
     // ─── ✏️ 写工具：remove_tag_from_note ─────────────────────────
-    #[tool(description = "撤回笔记的某个标签（仅删 note_tags 关联，不删 tags 表里的标签本身）。\
-                          仅 --writable 模式可用。LLM 处理「加错标签」时用。")]
+    #[tool(
+        description = "撤回笔记的某个标签（仅删 note_tags 关联，不删 tags 表里的标签本身）。\
+                          仅 --writable 模式可用。LLM 处理「加错标签」时用。"
+    )]
     fn remove_tag_from_note(
         &self,
         Parameters(args): Parameters<RemoveTagArgs>,
@@ -947,10 +966,7 @@ impl KbServer {
         self.ensure_writable()?;
         let tag = args.tag.trim();
         if tag.is_empty() {
-            return Err(McpError::invalid_params(
-                "tag 不能为空".to_string(),
-                None,
-            ));
+            return Err(McpError::invalid_params("tag 不能为空".to_string(), None));
         }
         let conn = self
             .db
@@ -959,14 +975,12 @@ impl KbServer {
             .map_err(|e| McpError::internal_error(format!("db lock: {e}"), None))?;
         let removed = remove_tag_from_note(&conn, args.note_id, tag)
             .map_err(|e| McpError::internal_error(format!("remove_tag: {e}"), None))?;
-        Ok(CallToolResult::success(vec![Content::text(
-            format!(
-                "{{\"note_id\":{},\"tag\":\"{}\",\"removed\":{}}}",
-                args.note_id,
-                tag.replace('"', "\\\""),
-                removed
-            ),
-        )]))
+        Ok(CallToolResult::success(vec![Content::text(format!(
+            "{{\"note_id\":{},\"tag\":\"{}\",\"removed\":{}}}",
+            args.note_id,
+            tag.replace('"', "\\\""),
+            removed
+        ))]))
     }
 
     // ─── ✏️ 写工具：create_task ──────────────────────────────────
@@ -980,10 +994,7 @@ impl KbServer {
         self.ensure_writable()?;
         let title = args.title.trim();
         if title.is_empty() {
-            return Err(McpError::invalid_params(
-                "title 不能为空".to_string(),
-                None,
-            ));
+            return Err(McpError::invalid_params("title 不能为空".to_string(), None));
         }
         let conn = self
             .db
@@ -1051,9 +1062,10 @@ impl KbServer {
                 None,
             ));
         }
-        Ok(CallToolResult::success(vec![Content::text(
-            format!("{{\"id\":{},\"updated\":true}}", args.id),
-        )]))
+        Ok(CallToolResult::success(vec![Content::text(format!(
+            "{{\"id\":{},\"updated\":true}}",
+            args.id
+        ))]))
     }
 
     // ─── ✏️ 写工具：create_note ─────────────────────────────────
@@ -1067,10 +1079,7 @@ impl KbServer {
         self.ensure_writable()?;
         let title = args.title.trim();
         if title.is_empty() {
-            return Err(McpError::invalid_params(
-                "title 不能为空".to_string(),
-                None,
-            ));
+            return Err(McpError::invalid_params("title 不能为空".to_string(), None));
         }
         let conn = self
             .db
@@ -1120,14 +1129,17 @@ impl KbServer {
                 None,
             ));
         }
-        Ok(CallToolResult::success(vec![Content::text(
-            format!("{{\"id\":{},\"updated\":true}}", args.id),
-        )]))
+        Ok(CallToolResult::success(vec![Content::text(format!(
+            "{{\"id\":{},\"updated\":true}}",
+            args.id
+        ))]))
     }
 
     // ─── ✏️ 写工具：add_tag_to_note ─────────────────────────────
-    #[tool(description = "给笔记加标签（标签不存在自动创建）。仅 --writable 模式可用。\
-                          返回 {tag_id, note_id, created_tag} JSON。")]
+    #[tool(
+        description = "给笔记加标签（标签不存在自动创建）。仅 --writable 模式可用。\
+                          返回 {tag_id, note_id, created_tag} JSON。"
+    )]
     fn add_tag_to_note(
         &self,
         Parameters(args): Parameters<AddTagArgs>,
@@ -1135,10 +1147,7 @@ impl KbServer {
         self.ensure_writable()?;
         let tag = args.tag.trim();
         if tag.is_empty() {
-            return Err(McpError::invalid_params(
-                "tag 不能为空".to_string(),
-                None,
-            ));
+            return Err(McpError::invalid_params("tag 不能为空".to_string(), None));
         }
         let conn = self
             .db
@@ -1377,10 +1386,7 @@ fn search_by_tag(
 
 /// 反向链接：哪些笔记 [[链接]] 到了 target_id
 /// 与主应用 database/links.rs::get_backlinks 保持一致逻辑（过滤 is_hidden / is_deleted）
-fn get_backlinks(
-    conn: &Connection,
-    target_id: i64,
-) -> Result<Vec<BacklinkRef>, rusqlite::Error> {
+fn get_backlinks(conn: &Connection, target_id: i64) -> Result<Vec<BacklinkRef>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         "SELECT nl.source_id, n.title, nl.context, n.updated_at
          FROM note_links nl
@@ -1619,10 +1625,7 @@ fn list_templates(conn: &Connection) -> Result<Vec<TemplateInfo>, rusqlite::Erro
 }
 
 /// 列出回收站笔记（is_deleted=1，过滤加密/隐藏）
-fn list_trash(
-    conn: &Connection,
-    limit: usize,
-) -> Result<Vec<TrashItem>, rusqlite::Error> {
+fn list_trash(conn: &Connection, limit: usize) -> Result<Vec<TrashItem>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         "SELECT id, title, substr(content, 1, 140), updated_at
          FROM notes
@@ -1647,10 +1650,7 @@ fn list_trash(
 }
 
 /// 按 updated_at 降序列最近笔记（不限文件夹/标签）
-fn list_recent_notes(
-    conn: &Connection,
-    limit: usize,
-) -> Result<Vec<SearchHit>, rusqlite::Error> {
+fn list_recent_notes(conn: &Connection, limit: usize) -> Result<Vec<SearchHit>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         "SELECT n.id, n.title, substr(n.content, 1, 140), n.updated_at, n.folder_id
          FROM notes n
@@ -1721,11 +1721,7 @@ fn list_notes_by_folder(
         (sql, rows)
     } else {
         // 指定 folder_id 集合
-        let placeholders = folder_ids
-            .iter()
-            .map(|_| "?")
-            .collect::<Vec<_>>()
-            .join(",");
+        let placeholders = folder_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let sql = format!(
             "SELECT n.id, n.title, substr(n.content, 1, 140), n.updated_at, n.folder_id
              FROM notes n
@@ -1904,13 +1900,9 @@ fn create_note_from_template(
     title: Option<&str>,
     folder_id: Option<i64>,
 ) -> Result<(i64, String), rusqlite::Error> {
-    let mut stmt = conn.prepare(
-        "SELECT name, content FROM note_templates WHERE id = ?1",
-    )?;
+    let mut stmt = conn.prepare("SELECT name, content FROM note_templates WHERE id = ?1")?;
     let (template_name, template_content): (String, String) =
-        stmt.query_row(params![template_id], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?;
+        stmt.query_row(params![template_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
 
     let final_title = match title {
         Some(t) if !t.trim().is_empty() => t.trim().to_string(),
@@ -2028,10 +2020,7 @@ fn update_task(
     }
     set_parts.push("updated_at = datetime('now', 'localtime')".into());
 
-    let sql = format!(
-        "UPDATE tasks SET {} WHERE id = ?",
-        set_parts.join(", ")
-    );
+    let sql = format!("UPDATE tasks SET {} WHERE id = ?", set_parts.join(", "));
     binds.push(Box::new(id));
 
     let bind_refs: Vec<&dyn rusqlite::ToSql> = binds.iter().map(|b| b.as_ref()).collect();

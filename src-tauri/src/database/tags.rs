@@ -10,7 +10,10 @@ impl Database {
 
     /// 创建标签
     pub fn create_tag(&self, name: &str, color: Option<&str>) -> Result<Tag, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         conn.execute(
             "INSERT INTO tags (name, color) VALUES (?1, ?2)",
@@ -29,7 +32,10 @@ impl Database {
 
     /// 获取所有标签（带笔记计数，按笔记数降序）
     pub fn list_tags(&self) -> Result<Vec<Tag>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         let mut stmt = conn.prepare(
             "SELECT t.id, t.name, t.color, COUNT(nt.note_id) as note_count
@@ -56,7 +62,10 @@ impl Database {
 
     /// 修改标签颜色（传 None 清空颜色走默认样式）
     pub fn set_tag_color(&self, id: i64, color: Option<&str>) -> Result<(), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         let affected = conn.execute(
             "UPDATE tags SET color = ?1 WHERE id = ?2",
@@ -72,12 +81,13 @@ impl Database {
 
     /// 重命名标签
     pub fn rename_tag(&self, id: i64, name: &str) -> Result<(), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
-        let affected = conn.execute(
-            "UPDATE tags SET name = ?1 WHERE id = ?2",
-            params![name, id],
-        )?;
+        let affected =
+            conn.execute("UPDATE tags SET name = ?1 WHERE id = ?2", params![name, id])?;
 
         if affected == 0 {
             return Err(AppError::NotFound(format!("标签 {} 不存在", id)));
@@ -88,7 +98,10 @@ impl Database {
 
     /// 删除标签（同时删除关联）
     pub fn delete_tag(&self, id: i64) -> Result<bool, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         // 先删除关联关系
         conn.execute("DELETE FROM note_tags WHERE tag_id = ?1", params![id])?;
@@ -107,7 +120,10 @@ impl Database {
         if trimmed.is_empty() {
             return Err(AppError::InvalidInput("标签名不能为空".into()));
         }
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         // 先查
         if let Ok(id) = conn.query_row(
             "SELECT id FROM tags WHERE name = ?1",
@@ -126,7 +142,10 @@ impl Database {
 
     /// 给笔记添加标签
     pub fn add_tag_to_note(&self, note_id: i64, tag_id: i64) -> Result<(), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         conn.execute(
             "INSERT OR IGNORE INTO note_tags (note_id, tag_id) VALUES (?1, ?2)",
@@ -148,12 +167,15 @@ impl Database {
         if note_ids.is_empty() || tag_ids.is_empty() {
             return Ok(0);
         }
-        let mut conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let tx = conn.transaction()?;
         let mut inserted = 0usize;
         {
-            let mut stmt = tx
-                .prepare("INSERT OR IGNORE INTO note_tags (note_id, tag_id) VALUES (?1, ?2)")?;
+            let mut stmt =
+                tx.prepare("INSERT OR IGNORE INTO note_tags (note_id, tag_id) VALUES (?1, ?2)")?;
             for nid in note_ids {
                 for tid in tag_ids {
                     inserted += stmt.execute(params![nid, tid])?;
@@ -166,7 +188,10 @@ impl Database {
 
     /// 移除笔记的标签
     pub fn remove_tag_from_note(&self, note_id: i64, tag_id: i64) -> Result<bool, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         let affected = conn.execute(
             "DELETE FROM note_tags WHERE note_id = ?1 AND tag_id = ?2",
@@ -178,7 +203,10 @@ impl Database {
 
     /// 获取笔记的所有标签
     pub fn get_note_tags(&self, note_id: i64) -> Result<Vec<Tag>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         let mut stmt = conn.prepare(
             "SELECT t.id, t.name, t.color, COUNT(nt2.note_id) as note_count
@@ -211,7 +239,10 @@ impl Database {
         page: usize,
         page_size: usize,
     ) -> Result<(Vec<Note>, usize), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         // 查询总数（T-003: 排除隐藏笔记）
         let total: usize = conn.query_row(

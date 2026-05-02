@@ -37,8 +37,7 @@ pub fn read_file_as_base64(path: String) -> Result<String, String> {
 pub fn convert_doc_to_docx_base64(path: String) -> Result<String, String> {
     let src = PathBuf::from(&path);
     let temp_dir = std::env::temp_dir().join("kb_doc_convert");
-    let docx_path = converter::convert_doc_to_docx(&src, &temp_dir)
-        .map_err(|e| e.to_string())?;
+    let docx_path = converter::convert_doc_to_docx(&src, &temp_dir).map_err(|e| e.to_string())?;
     let bytes = std::fs::read(&docx_path).map_err(|e| e.to_string())?;
     let _ = std::fs::remove_file(&docx_path);
     Ok(STANDARD.encode(bytes))

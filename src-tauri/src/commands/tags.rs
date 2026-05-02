@@ -20,11 +20,7 @@ pub fn list_tags(state: tauri::State<'_, AppState>) -> Result<Vec<Tag>, String> 
 
 /// 重命名标签
 #[tauri::command]
-pub fn rename_tag(
-    state: tauri::State<'_, AppState>,
-    id: i64,
-    name: String,
-) -> Result<(), String> {
+pub fn rename_tag(state: tauri::State<'_, AppState>, id: i64, name: String) -> Result<(), String> {
     TagService::rename(&state.db, id, &name).map_err(|e| e.to_string())
 }
 
@@ -66,10 +62,7 @@ pub fn remove_tag_from_note(
 
 /// 获取笔记的所有标签
 #[tauri::command]
-pub fn get_note_tags(
-    state: tauri::State<'_, AppState>,
-    note_id: i64,
-) -> Result<Vec<Tag>, String> {
+pub fn get_note_tags(state: tauri::State<'_, AppState>, note_id: i64) -> Result<Vec<Tag>, String> {
     TagService::get_note_tags(&state.db, note_id).map_err(|e| e.to_string())
 }
 

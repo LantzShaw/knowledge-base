@@ -22,11 +22,18 @@ use crate::error::AppError;
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WriteBackResult {
     /// 写回成功；含拷到原文件旁的资产数
-    Ok { assets_copied: usize, file_path: String },
+    Ok {
+        assets_copied: usize,
+        file_path: String,
+    },
     /// 笔记不是从外部 .md 打开来的，没什么可写回的
     Skipped { reason: String },
     /// 原文件 mtime 与上次写回时不一致 = 外部改过，让用户选策略
-    Conflict { external_mtime: i64, last_known_mtime: Option<i64>, file_path: String },
+    Conflict {
+        external_mtime: i64,
+        last_known_mtime: Option<i64>,
+        file_path: String,
+    },
     /// 原文件已被删/移走/挂网盘失败等
     Missing { file_path: String },
 }
@@ -269,8 +276,7 @@ fn scan_attr_urls(content: &str, attr_name: &[u8]) -> Vec<(usize, usize, String)
     let mut i = 0;
     while i + attr_name.len() + 3 < bytes.len() {
         if &bytes[i..i + attr_name.len()] == attr_name {
-            let prev_ok =
-                i == 0 || matches!(bytes[i - 1], b' ' | b'\t' | b'\n' | b'\r' | b'<');
+            let prev_ok = i == 0 || matches!(bytes[i - 1], b' ' | b'\t' | b'\n' | b'\r' | b'<');
             let mut k = i + attr_name.len();
             while k < bytes.len() && matches!(bytes[k], b' ' | b'\t') {
                 k += 1;

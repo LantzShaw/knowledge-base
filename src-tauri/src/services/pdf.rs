@@ -35,7 +35,11 @@ const PDFS_DIR_DEV: &str = "dev-pdfs";
 
 #[inline]
 fn pdfs_dir_name() -> &'static str {
-    if cfg!(debug_assertions) { PDFS_DIR_DEV } else { PDFS_DIR_PROD }
+    if cfg!(debug_assertions) {
+        PDFS_DIR_DEV
+    } else {
+        PDFS_DIR_PROD
+    }
 }
 
 /// 单个 PDF 导入结果，供前端展示进度/错误清单
@@ -88,7 +92,10 @@ impl PdfService {
     ) -> Result<Note, AppError> {
         let source = Path::new(source_path);
         if !source.exists() {
-            return Err(AppError::NotFound(format!("PDF 文件不存在: {}", source_path)));
+            return Err(AppError::NotFound(format!(
+                "PDF 文件不存在: {}",
+                source_path
+            )));
         }
 
         // 1. 抽取文本（扫描件 / 加密 PDF / xref 损坏会失败）
@@ -174,12 +181,13 @@ impl PdfService {
     }
 
     /// 根据 note_id 解析出 PDF 绝对路径（不存在则返回 None）
-    pub fn resolve_pdf_absolute_path(
-        app_data_dir: &Path,
-        pdf_path: &str,
-    ) -> Option<PathBuf> {
+    pub fn resolve_pdf_absolute_path(app_data_dir: &Path, pdf_path: &str) -> Option<PathBuf> {
         let abs = app_data_dir.join(pdf_path);
-        if abs.exists() { Some(abs) } else { None }
+        if abs.exists() {
+            Some(abs)
+        } else {
+            None
+        }
     }
 
     /// 删除笔记关联的所有 PDF 文件（永久删除笔记时调用）。
@@ -206,10 +214,7 @@ impl PdfService {
 ///  - 去后缀后限长 200 字符（仍预留给重名后缀），保留 `.pdf` 扩展
 ///  - 兜底：清洗后为空时返回 `untitled.pdf`
 fn sanitize_pdf_filename(source: &Path) -> String {
-    let raw_stem = source
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
+    let raw_stem = source.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let cleaned: String = raw_stem
         .chars()
         .map(|c| match c {
@@ -295,7 +300,9 @@ fn extract_with_pdfium(source: &Path) -> Result<String, String> {
     let mutex = PDFIUM
         .get()
         .ok_or_else(|| "PDFium 未初始化（dll 加载失败）".to_string())?;
-    let guard = mutex.lock().map_err(|e| format!("PDFium 锁被毒化: {}", e))?;
+    let guard = mutex
+        .lock()
+        .map_err(|e| format!("PDFium 锁被毒化: {}", e))?;
     let pdfium = &guard.0;
 
     let doc = pdfium
@@ -340,10 +347,7 @@ fn try_extract_after_repair(source: &Path) -> Result<String, String> {
     let repaired = repair_pdf_bytes(&raw);
 
     // 临时文件放在系统临时目录，名字加 PID + 源文件 stem 防冲突
-    let stem = source
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("src");
+    let stem = source.file_stem().and_then(|s| s.to_str()).unwrap_or("src");
     // 只保留 ASCII 字母数字，避免临时目录路径里混中文被某些环境拒绝
     let safe_stem: String = stem
         .chars()
@@ -389,8 +393,7 @@ fn fix_xref_header_inline(data: &mut [u8]) {
     while i + pat.len() < data.len() {
         if &data[i..i + pat.len()] == pat {
             // 前一个字节必须是换行/回车/空白，才是真正的 xref 关键字
-            let prev_ok = i == 0
-                || matches!(data[i - 1], b'\n' | b'\r' | b' ' | b'\t');
+            let prev_ok = i == 0 || matches!(data[i - 1], b'\n' | b'\r' | b' ' | b'\t');
             let next_byte = data[i + pat.len()];
             if prev_ok && next_byte.is_ascii_digit() {
                 // i+4 是 "xref " 里的空格，替换为 \n
@@ -406,10 +409,7 @@ fn fix_xref_header_inline(data: &mut [u8]) {
 /// 保留最后一个 `%%EOF` 及其后的一个换行符，截掉后续所有字节
 fn truncate_after_last_eof(data: &mut Vec<u8>) {
     let eof = b"%%EOF";
-    let pos = match data
-        .windows(eof.len())
-        .rposition(|w| w == eof)
-    {
+    let pos = match data.windows(eof.len()).rposition(|w| w == eof) {
         Some(p) => p,
         None => return,
     };
@@ -458,7 +458,10 @@ fn friendly_extract_error(raw: &str) -> String {
             raw
         )
     } else if lower.contains("encrypt") {
-        format!("PDF 已加密或有权限限制，暂不支持导入。请先解除加密后再试。原始错误: {}", raw)
+        format!(
+            "PDF 已加密或有权限限制，暂不支持导入。请先解除加密后再试。原始错误: {}",
+            raw
+        )
     } else {
         format!("PDF 文本抽取失败: {}", raw)
     }
@@ -528,11 +531,7 @@ fn clean_line(line: &str) -> String {
                 .map(|(i, _)| i)
                 .unwrap_or(body.len());
             let rest = &body[bullet_end..];
-            return format!(
-                "{}• {}",
-                leading_ws,
-                strip_unprintable(rest).trim_start()
-            );
+            return format!("{}• {}", leading_ws, strip_unprintable(rest).trim_start());
         }
     }
 

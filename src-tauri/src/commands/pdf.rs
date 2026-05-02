@@ -14,7 +14,12 @@ pub fn import_pdfs(
     paths: Vec<String>,
     folder_id: Option<i64>,
 ) -> Result<Vec<PdfImportResult>, String> {
-    Ok(PdfService::import_many(&state.data_dir, &state.db, &paths, folder_id))
+    Ok(PdfService::import_many(
+        &state.data_dir,
+        &state.db,
+        &paths,
+        folder_id,
+    ))
 }
 
 /// 获取笔记对应 PDF 的**相对 data_dir 的 POSIX 路径**（迁移前叫 get_pdf_absolute_path）。

@@ -189,12 +189,7 @@ pub async fn tool_schemas_with_mcp(app: &AppHandle) -> Vec<Value> {
         };
 
         for t in tools {
-            let prefixed_name = format!(
-                "{}{}__{}",
-                MCP_TOOL_PREFIX,
-                server.id,
-                t.name.as_ref()
-            );
+            let prefixed_name = format!("{}{}__{}", MCP_TOOL_PREFIX, server.id, t.name.as_ref());
             // OpenAI tool name 规范：64 字符 + 限定字符。截断保险一下
             let safe_name = if prefixed_name.len() > 64 {
                 prefixed_name.chars().take(64).collect::<String>()
@@ -232,7 +227,10 @@ pub async fn dispatch_with_mcp(
     if let Some(suffix) = name.strip_prefix(MCP_TOOL_PREFIX) {
         // 拆 <id>__<tool>
         let (id_str, tool_name) = suffix.split_once("__").ok_or_else(|| {
-            AppError::Custom(format!("MCP 工具名格式错误: {}（应为 mcp__<id>__<name>）", name))
+            AppError::Custom(format!(
+                "MCP 工具名格式错误: {}（应为 mcp__<id>__<name>）",
+                name
+            ))
         })?;
         let server_id: i64 = id_str
             .parse()
@@ -324,8 +322,7 @@ fn run_search_notes(db: &Database, args: &str) -> Result<String, AppError> {
             json!({ "id": id, "title": title, "snippet": snippet })
         })
         .collect();
-    Ok(serde_json::to_string(&json!({ "hits": hits }))
-        .unwrap_or_else(|_| "[]".to_string()))
+    Ok(serde_json::to_string(&json!({ "hits": hits })).unwrap_or_else(|_| "[]".to_string()))
 }
 
 #[derive(Debug, Deserialize)]
@@ -381,8 +378,7 @@ fn run_find_related(db: &Database, args: &str) -> Result<String, AppError> {
             })
         })
         .collect();
-    Ok(serde_json::to_string(&json!({ "backlinks": arr }))
-        .unwrap_or_else(|_| "{}".to_string()))
+    Ok(serde_json::to_string(&json!({ "backlinks": arr })).unwrap_or_else(|_| "{}".to_string()))
 }
 
 fn run_get_today_tasks(db: &Database) -> Result<String, AppError> {

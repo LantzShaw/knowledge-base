@@ -14,7 +14,10 @@ impl Database {
     /// - `title_normalized`（v17）：wiki 链接查找走索引
     /// - `content_hash`（v22）：导入去重用的 SHA-256 指纹
     pub fn create_note(&self, input: &NoteInput) -> Result<Note, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         let normalized = crate::database::links::normalize_title(&input.title);
         let content_hash = crate::services::hash::sha256_hex(&input.content);
@@ -38,7 +41,10 @@ impl Database {
     ///
     /// 同步维护 `title_normalized`（v17）与 `content_hash`（v22）。
     pub fn update_note(&self, id: i64, input: &NoteInput) -> Result<Note, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         let normalized = crate::database::links::normalize_title(&input.title);
         let content_hash = crate::services::hash::sha256_hex(&input.content);
@@ -70,15 +76,14 @@ impl Database {
     /// 只改 `folder_id`，**不碰 `updated_at`**：批量整理属于"归档动作"，
     /// 不应把大量笔记的"最近更新"时间一起冒泡到最前。
     /// 一条 `WHERE id IN (...)` SQL 完成，保证原子性。
-    pub fn move_notes_batch(
-        &self,
-        ids: &[i64],
-        folder_id: Option<i64>,
-    ) -> Result<usize, AppError> {
+    pub fn move_notes_batch(&self, ids: &[i64], folder_id: Option<i64>) -> Result<usize, AppError> {
         if ids.is_empty() {
             return Ok(0);
         }
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let sql = format!(
             "UPDATE notes SET folder_id = ? WHERE id IN ({})",
@@ -100,7 +105,10 @@ impl Database {
     /// 删除笔记（永久删除，预留给未来使用）
     #[allow(dead_code)]
     pub fn delete_note(&self, id: i64) -> Result<bool, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let affected = conn.execute("DELETE FROM notes WHERE id = ?1", params![id])?;
         Ok(affected > 0)
     }
@@ -110,7 +118,10 @@ impl Database {
     /// 不过滤 `is_hidden`：wiki link [[...]] 点击跳转需要能打开隐藏笔记；
     /// 主列表/搜索等入口由各自的 DAO 方法负责过滤。
     pub fn get_note(&self, id: i64) -> Result<Option<Note>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         let mut stmt = conn.prepare(
             "SELECT id, title, content, folder_id, is_daily, daily_date, is_pinned, is_hidden, is_encrypted, word_count, created_at, updated_at, source_file_path, source_file_type, sort_order
@@ -171,7 +182,10 @@ impl Database {
             None
         };
 
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         // 构建 WHERE 条件（始终过滤已删除 + 隐藏笔记）
         // T-003: is_hidden=0 在所有主列表入口强制过滤；隐藏笔记只能从 /hidden 专用页访问
@@ -213,8 +227,7 @@ impl Database {
         let params_ref: Vec<&dyn rusqlite::types::ToSql> =
             param_values.iter().map(|p| p.as_ref()).collect();
 
-        let total: usize =
-            conn.query_row(&count_sql, params_ref.as_slice(), |row| row.get(0))?;
+        let total: usize = conn.query_row(&count_sql, params_ref.as_slice(), |row| row.get(0))?;
 
         // 查询分页数据
         let offset = (page.saturating_sub(1)) * page_size;
@@ -281,7 +294,10 @@ impl Database {
         placeholder: &str,
         blob: &[u8],
     ) -> Result<(), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let affected = conn.execute(
             "UPDATE notes
              SET is_encrypted = 1, encrypted_blob = ?1, content = ?2,
@@ -296,12 +312,11 @@ impl Database {
     }
 
     /// 取消加密：还原明文到 content + 清空 encrypted_blob + is_encrypted=0
-    pub fn disable_note_encryption(
-        &self,
-        id: i64,
-        plaintext: &str,
-    ) -> Result<(), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+    pub fn disable_note_encryption(&self, id: i64, plaintext: &str) -> Result<(), AppError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let affected = conn.execute(
             "UPDATE notes
              SET is_encrypted = 0, encrypted_blob = NULL, content = ?1,
@@ -318,7 +333,10 @@ impl Database {
     /// 查询笔记是否处于加密态。笔记不存在或已软删返回 NotFound。
     /// ImageService 落盘 / 渲染前需要先反查这个，决定走加密分支还是明文分支。
     pub fn get_note_is_encrypted(&self, id: i64) -> Result<bool, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let flag: Option<i32> = conn
             .query_row(
                 "SELECT is_encrypted FROM notes WHERE id = ?1 AND is_deleted = 0",
@@ -332,7 +350,10 @@ impl Database {
 
     /// 读取加密笔记的 blob（未解密）。调用方拿到后用 vault 解密
     pub fn get_encrypted_blob(&self, id: i64) -> Result<Option<Vec<u8>>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let result = conn
             .query_row(
                 "SELECT encrypted_blob FROM notes WHERE id = ?1 AND is_deleted = 0 AND is_encrypted = 1",
@@ -349,12 +370,11 @@ impl Database {
     /// 预留给 T-007b：解锁态下直接在编辑器里编辑加密笔记，保存时重加密写回。
     /// v1 的流程是"取消加密 → 编辑 → 重新加密"，暂未调用。
     #[allow(dead_code)]
-    pub fn update_encrypted_blob(
-        &self,
-        id: i64,
-        blob: &[u8],
-    ) -> Result<(), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+    pub fn update_encrypted_blob(&self, id: i64, blob: &[u8]) -> Result<(), AppError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let affected = conn.execute(
             "UPDATE notes SET encrypted_blob = ?1, updated_at = datetime('now', 'localtime')
              WHERE id = ?2 AND is_deleted = 0 AND is_encrypted = 1",
@@ -376,7 +396,10 @@ impl Database {
     /// 隐藏后主列表 / 搜索 / 反链 / 图谱 / RAG 全部不显示；取消隐藏立刻恢复可见。
     /// 返回切换后的新状态（true=已隐藏）。
     pub fn set_note_hidden(&self, id: i64, hidden: bool) -> Result<bool, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let affected = conn.execute(
             "UPDATE notes SET is_hidden = ?1, updated_at = datetime('now', 'localtime')
              WHERE id = ?2 AND is_deleted = 0",
@@ -402,7 +425,10 @@ impl Database {
         folder_id: Option<i64>,
         uncategorized: bool,
     ) -> Result<(Vec<Note>, usize), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         // 拼 WHERE 子句：uncategorized 优先级高于 folder_id
         let (extra_where, has_folder_param) = if uncategorized {
@@ -470,7 +496,10 @@ impl Database {
     ///
     /// 顺序：NULL 在前（"未分类"语义上排首位），其余按 folder_id ASC。
     pub fn list_hidden_folder_ids(&self) -> Result<Vec<Option<i64>>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let mut stmt = conn.prepare(
             "SELECT DISTINCT folder_id FROM notes
              WHERE is_deleted = 0 AND is_hidden = 1
@@ -486,7 +515,10 @@ impl Database {
 
     /// 切换笔记置顶状态
     pub fn toggle_pin(&self, id: i64) -> Result<bool, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         let affected = conn.execute(
             "UPDATE notes SET is_pinned = CASE WHEN is_pinned = 0 THEN 1 ELSE 0 END,
@@ -519,12 +551,14 @@ impl Database {
         if ordered_ids.is_empty() {
             return Ok(());
         }
-        let mut conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let tx = conn.transaction()?;
         {
-            let mut stmt = tx.prepare(
-                "UPDATE notes SET sort_order = ?1 WHERE id = ?2 AND is_deleted = 0",
-            )?;
+            let mut stmt =
+                tx.prepare("UPDATE notes SET sort_order = ?1 WHERE id = ?2 AND is_deleted = 0")?;
             for (i, id) in ordered_ids.iter().enumerate() {
                 stmt.execute(params![(i as i64) * 1000, id])?;
             }
@@ -534,8 +568,15 @@ impl Database {
     }
 
     /// 移动笔记到文件夹
-    pub fn move_note_to_folder(&self, note_id: i64, folder_id: Option<i64>) -> Result<(), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+    pub fn move_note_to_folder(
+        &self,
+        note_id: i64,
+        folder_id: Option<i64>,
+    ) -> Result<(), AppError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         let affected = conn.execute(
             "UPDATE notes SET folder_id = ?1, updated_at = datetime('now', 'localtime')
@@ -554,7 +595,10 @@ impl Database {
 
     /// 软删除笔记（移入回收站）
     pub fn soft_delete_note(&self, id: i64) -> Result<bool, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let affected = conn.execute(
             "UPDATE notes SET is_deleted = 1, deleted_at = datetime('now', 'localtime')
              WHERE id = ?1 AND is_deleted = 0",
@@ -569,7 +613,10 @@ impl Database {
         if ids.is_empty() {
             return Ok(0);
         }
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let sql = format!(
             "UPDATE notes SET is_deleted = 1, deleted_at = datetime('now', 'localtime')
@@ -586,7 +633,10 @@ impl Database {
 
     /// 恢复笔记（从回收站恢复）
     pub fn restore_note(&self, id: i64) -> Result<bool, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let affected = conn.execute(
             "UPDATE notes SET is_deleted = 0, deleted_at = NULL
              WHERE id = ?1 AND is_deleted = 1",
@@ -597,7 +647,10 @@ impl Database {
 
     /// 永久删除笔记
     pub fn permanent_delete_note(&self, id: i64) -> Result<bool, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let affected = conn.execute(
             "DELETE FROM notes WHERE id = ?1 AND is_deleted = 1",
             params![id],
@@ -611,7 +664,10 @@ impl Database {
         page: usize,
         page_size: usize,
     ) -> Result<(Vec<Note>, usize), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         // 查询总数
         let total: usize = conn.query_row(
@@ -656,14 +712,20 @@ impl Database {
 
     /// 清空回收站
     pub fn empty_trash(&self) -> Result<usize, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let affected = conn.execute("DELETE FROM notes WHERE is_deleted = 1", [])?;
         Ok(affected)
     }
 
     /// 查询指定笔记的 source_file_path（无论是否在回收站）
     pub fn get_note_source_path(&self, id: i64) -> Result<Option<String>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let mut stmt = conn.prepare("SELECT source_file_path FROM notes WHERE id = ?1")?;
         let path: Option<Option<String>> = stmt
             .query_row(params![id], |row| row.get::<_, Option<String>>(0))
@@ -674,7 +736,10 @@ impl Database {
     /// 轻量查询单条笔记的 folder_id（不存在或 folder_id 为 NULL 都返回 None）
     /// 用于"恢复笔记前判断是否落根目录"等场景，避免读整条 Note
     pub fn get_note_folder_id(&self, id: i64) -> Result<Option<i64>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let mut stmt = conn.prepare("SELECT folder_id FROM notes WHERE id = ?1")?;
         let fid: Option<Option<i64>> = stmt
             .query_row(params![id], |row| row.get::<_, Option<i64>>(0))
@@ -688,10 +753,11 @@ impl Database {
     pub fn list_all_contents_for_orphan_scan(
         &self,
     ) -> Result<Vec<(i64, bool, Option<String>)>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
-        let mut stmt = conn.prepare(
-            "SELECT id, is_encrypted, content FROM notes",
-        )?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
+        let mut stmt = conn.prepare("SELECT id, is_encrypted, content FROM notes")?;
         let rows = stmt
             .query_map([], |row| {
                 Ok((
@@ -707,7 +773,10 @@ impl Database {
     /// 列出所有笔记的 source_file_path（非空），用于孤儿 PDF/源文件扫描。
     /// 含回收站笔记 —— 回收站撤回时还要用。
     pub fn list_all_source_file_paths(&self) -> Result<Vec<String>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let mut stmt = conn.prepare(
             "SELECT source_file_path FROM notes
              WHERE source_file_path IS NOT NULL AND source_file_path <> ''",
@@ -720,9 +789,12 @@ impl Database {
 
     /// 列出回收站内所有笔记的 (id, source_file_path) —— 用于清理时遍历
     pub fn list_trash_ids_with_sources(&self) -> Result<Vec<(i64, Option<String>)>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
-        let mut stmt = conn
-            .prepare("SELECT id, source_file_path FROM notes WHERE is_deleted = 1")?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
+        let mut stmt =
+            conn.prepare("SELECT id, source_file_path FROM notes WHERE is_deleted = 1")?;
         let rows = stmt
             .query_map([], |row| {
                 Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
@@ -734,7 +806,10 @@ impl Database {
     /// 将所有笔记批量移到回收站（软删）
     /// 只影响 is_deleted = 0 的笔记；已在回收站的保持不变。
     pub fn trash_all_notes(&self) -> Result<usize, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let affected = conn.execute(
             "UPDATE notes
              SET is_deleted = 1,
@@ -749,7 +824,10 @@ impl Database {
 
     /// 查询每日笔记（不创建）
     pub fn get_daily(&self, date: &str) -> Result<Option<Note>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         let mut stmt = conn.prepare(
             "SELECT id, title, content, folder_id, is_daily, daily_date, is_pinned, is_hidden, is_encrypted, word_count, created_at, updated_at, source_file_path, source_file_type, sort_order
@@ -783,7 +861,10 @@ impl Database {
 
     /// 获取或创建每日笔记
     pub fn get_or_create_daily(&self, date: &str) -> Result<Note, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         // 先查询是否已存在
         let mut stmt = conn.prepare(
@@ -839,7 +920,10 @@ impl Database {
         &self,
         date: &str,
     ) -> Result<(Option<String>, Option<String>), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let prev: Option<String> = conn
             .query_row(
                 "SELECT daily_date FROM notes
@@ -862,7 +946,10 @@ impl Database {
     }
 
     pub fn list_daily_dates(&self, year: i32, month: i32) -> Result<Vec<String>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         let pattern = format!("{}-{:02}-%", year, month);
         let mut stmt = conn.prepare(
@@ -879,11 +966,7 @@ impl Database {
     }
 
     /// 内部方法：通过已有连接获取单个笔记（避免重复锁）
-    fn get_note_inner(
-        &self,
-        conn: &rusqlite::Connection,
-        id: i64,
-    ) -> Result<Note, AppError> {
+    fn get_note_inner(&self, conn: &rusqlite::Connection, id: i64) -> Result<Note, AppError> {
         let mut stmt = conn.prepare(
             "SELECT id, title, content, folder_id, is_daily, daily_date, is_pinned, is_hidden, is_encrypted, word_count, created_at, updated_at, source_file_path, source_file_type, sort_order
              FROM notes WHERE id = ?1",
@@ -919,7 +1002,10 @@ impl Database {
         path: Option<&str>,
         file_type: Option<&str>,
     ) -> Result<(), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let affected = conn.execute(
             "UPDATE notes SET source_file_path = ?1, source_file_type = ?2 WHERE id = ?3",
             params![path, file_type, id],
@@ -938,7 +1024,10 @@ impl Database {
         note_id: i64,
         conversation_id: Option<i64>,
     ) -> Result<(), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let affected = conn.execute(
             "UPDATE notes SET from_ai_conversation_id = ?1 WHERE id = ?2",
             params![conversation_id, note_id],
@@ -952,11 +1041,11 @@ impl Database {
     /// 读笔记的伴生 AI 对话 ID（编辑器右侧抽屉用）
     ///
     /// 返回 None 时调用方应负责创建一条新对话，再 set_note_companion_conversation 写回。
-    pub fn get_note_companion_conversation(
-        &self,
-        note_id: i64,
-    ) -> Result<Option<i64>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+    pub fn get_note_companion_conversation(&self, note_id: i64) -> Result<Option<i64>, AppError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let result: Option<i64> = conn
             .query_row(
                 "SELECT companion_conversation_id FROM notes WHERE id = ?1",
@@ -974,7 +1063,10 @@ impl Database {
         note_id: i64,
         conversation_id: Option<i64>,
     ) -> Result<(), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let affected = conn.execute(
             "UPDATE notes SET companion_conversation_id = ?1 WHERE id = ?2",
             params![conversation_id, note_id],
@@ -992,7 +1084,10 @@ impl Database {
         &self,
         path: &str,
     ) -> Result<Option<(i64, String)>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let mut stmt = conn.prepare(
             "SELECT id, content FROM notes
              WHERE source_file_path = ?1 AND is_deleted = 0
@@ -1011,7 +1106,10 @@ impl Database {
     /// 用于"外部编辑过 md 源文件 → 重新打开时同步回笔记"的场景。
     /// 同步更新 content_hash（v22）。
     pub fn update_note_content(&self, id: i64, content: &str) -> Result<(), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let content_hash = crate::services::hash::sha256_hex(content);
         let affected = conn.execute(
             "UPDATE notes SET content = ?1, content_hash = ?2,
@@ -1036,7 +1134,10 @@ impl Database {
         title: &str,
         content_hash: &str,
     ) -> Result<Option<i64>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let mut stmt = conn.prepare(
             "SELECT id FROM notes
              WHERE title = ?1 AND content_hash = ?2 AND is_deleted = 0

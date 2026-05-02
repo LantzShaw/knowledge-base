@@ -38,10 +38,7 @@ impl Database {
     }
 
     /// 列出某笔记的所有映射，返回 `internal_url → original_url` 的 HashMap，便于反查替换
-    pub fn list_url_mappings(
-        &self,
-        note_id: i64,
-    ) -> Result<HashMap<String, String>, AppError> {
+    pub fn list_url_mappings(&self, note_id: i64) -> Result<HashMap<String, String>, AppError> {
         let conn = self
             .conn
             .lock()

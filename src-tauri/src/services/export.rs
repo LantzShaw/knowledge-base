@@ -198,9 +198,8 @@ impl ExportService {
         // 单独 block 让 stmt/conn 在拷贝资产前及时释放 DB 锁
         let (title, content): (String, String) = {
             let conn = db.conn_lock()?;
-            let mut stmt = conn.prepare(
-                "SELECT title, content FROM notes WHERE id = ?1 AND is_deleted = 0",
-            )?;
+            let mut stmt =
+                conn.prepare("SELECT title, content FROM notes WHERE id = ?1 AND is_deleted = 0")?;
             stmt.query_row([note_id], |row| Ok((row.get(0)?, row.get(1)?)))
                 .map_err(|_| AppError::NotFound(format!("笔记 {} 不存在", note_id)))?
         };
@@ -394,11 +393,7 @@ fn scan_paren_urls(content: &str) -> Vec<(usize, usize, String)> {
         if bytes[i] == b']' && bytes[i + 1] == b'(' {
             let url_start = i + 2;
             let mut j = url_start;
-            while j < bytes.len()
-                && bytes[j] != b')'
-                && bytes[j] != b'\n'
-                && bytes[j] != b'\r'
-            {
+            while j < bytes.len() && bytes[j] != b')' && bytes[j] != b'\n' && bytes[j] != b'\r' {
                 j += 1;
             }
             if j < bytes.len() && bytes[j] == b')' {
@@ -424,8 +419,7 @@ fn scan_attr_urls(content: &str, attr_name: &[u8]) -> Vec<(usize, usize, String)
         // 位置 i 起必须是属性名
         if &bytes[i..i + attr_name.len()] == attr_name {
             // 属性名前必须是空白或 '<'（确保是标签属性，不是普通文本一部分）
-            let prev_ok = i == 0
-                || matches!(bytes[i - 1], b' ' | b'\t' | b'\n' | b'\r' | b'<');
+            let prev_ok = i == 0 || matches!(bytes[i - 1], b' ' | b'\t' | b'\n' | b'\r' | b'<');
             let mut k = i + attr_name.len();
             // 允许等号前后的空白
             while k < bytes.len() && matches!(bytes[k], b' ' | b'\t') {

@@ -271,7 +271,11 @@ fn locate_sidecar_binary() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
 
-    let exe_suffix = if cfg!(target_os = "windows") { ".exe" } else { "" };
+    let exe_suffix = if cfg!(target_os = "windows") {
+        ".exe"
+    } else {
+        ""
+    };
     // 候选 1：dev 期 cargo build -p kb-mcp 出来的产物（无 triple 后缀）
     let dev_path = dir.join(format!("kb-mcp{}", exe_suffix));
     if dev_path.exists() {
@@ -415,10 +419,7 @@ pub async fn mcp_update_server(
 
 /// 删除 server，同时清掉 client 缓存（子进程会被回收）
 #[tauri::command]
-pub async fn mcp_delete_server(
-    state: tauri::State<'_, AppState>,
-    id: i64,
-) -> Result<bool, String> {
+pub async fn mcp_delete_server(state: tauri::State<'_, AppState>, id: i64) -> Result<bool, String> {
     state.mcp_external.disconnect(id).await;
     state.db.delete_mcp_server(id).map_err(|e| e.to_string())
 }
@@ -574,8 +575,9 @@ pub fn mcp_install_to_client(
     let config_path = match target {
         InstallTarget::ClaudeDesktop => locate_claude_desktop_config()
             .ok_or_else(|| "无法定位 Claude Desktop 配置目录".to_string())?,
-        InstallTarget::Cursor => locate_cursor_config()
-            .ok_or_else(|| "无法定位 Cursor 配置目录".to_string())?,
+        InstallTarget::Cursor => {
+            locate_cursor_config().ok_or_else(|| "无法定位 Cursor 配置目录".to_string())?
+        }
         InstallTarget::ClaudeCode => locate_claude_code_config()
             .ok_or_else(|| "无法定位 Claude Code (CLI) 配置文件 ~/.claude.json".to_string())?,
     };
@@ -648,8 +650,8 @@ pub fn mcp_install_to_client(
     servers_obj.insert("knowledge-base".to_string(), kb_entry);
 
     // 写回，pretty print 2 空格
-    let pretty = serde_json::to_string_pretty(&root)
-        .map_err(|e| format!("序列化 JSON 失败: {e}"))?;
+    let pretty =
+        serde_json::to_string_pretty(&root).map_err(|e| format!("序列化 JSON 失败: {e}"))?;
     std::fs::write(&config_path, pretty)
         .map_err(|e| format!("写入 {} 失败: {}", config_path.display(), e))?;
 
@@ -666,7 +668,11 @@ fn locate_claude_desktop_config() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     {
         let appdata = std::env::var("APPDATA").ok()?;
-        Some(PathBuf::from(appdata).join("Claude").join("claude_desktop_config.json"))
+        Some(
+            PathBuf::from(appdata)
+                .join("Claude")
+                .join("claude_desktop_config.json"),
+        )
     }
     #[cfg(target_os = "macos")]
     {
@@ -725,8 +731,9 @@ pub fn mcp_uninstall_from_client(target: InstallTarget) -> Result<UninstallResul
     let config_path = match target {
         InstallTarget::ClaudeDesktop => locate_claude_desktop_config()
             .ok_or_else(|| "无法定位 Claude Desktop 配置目录".to_string())?,
-        InstallTarget::Cursor => locate_cursor_config()
-            .ok_or_else(|| "无法定位 Cursor 配置目录".to_string())?,
+        InstallTarget::Cursor => {
+            locate_cursor_config().ok_or_else(|| "无法定位 Cursor 配置目录".to_string())?
+        }
         InstallTarget::ClaudeCode => locate_claude_code_config()
             .ok_or_else(|| "无法定位 Claude Code (CLI) 配置文件 ~/.claude.json".to_string())?,
     };
@@ -740,8 +747,8 @@ pub fn mcp_uninstall_from_client(target: InstallTarget) -> Result<UninstallResul
 
     let raw = std::fs::read_to_string(&config_path)
         .map_err(|e| format!("读取 {} 失败: {}", config_path.display(), e))?;
-    let mut root: serde_json::Value = serde_json::from_str(&raw)
-        .map_err(|e| format!("解析 JSON 失败: {}", e))?;
+    let mut root: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("解析 JSON 失败: {}", e))?;
 
     let removed = root
         .get_mut("mcpServers")
@@ -750,8 +757,8 @@ pub fn mcp_uninstall_from_client(target: InstallTarget) -> Result<UninstallResul
         .is_some();
 
     if removed {
-        let pretty = serde_json::to_string_pretty(&root)
-            .map_err(|e| format!("序列化 JSON 失败: {e}"))?;
+        let pretty =
+            serde_json::to_string_pretty(&root).map_err(|e| format!("序列化 JSON 失败: {e}"))?;
         std::fs::write(&config_path, pretty)
             .map_err(|e| format!("写入 {} 失败: {}", config_path.display(), e))?;
     }
@@ -778,8 +785,9 @@ pub fn mcp_check_install_status(target: InstallTarget) -> Result<ClientInstallSt
     let config_path = match target {
         InstallTarget::ClaudeDesktop => locate_claude_desktop_config()
             .ok_or_else(|| "无法定位 Claude Desktop 配置目录".to_string())?,
-        InstallTarget::Cursor => locate_cursor_config()
-            .ok_or_else(|| "无法定位 Cursor 配置目录".to_string())?,
+        InstallTarget::Cursor => {
+            locate_cursor_config().ok_or_else(|| "无法定位 Cursor 配置目录".to_string())?
+        }
         InstallTarget::ClaudeCode => locate_claude_code_config()
             .ok_or_else(|| "无法定位 Claude Code (CLI) 配置文件 ~/.claude.json".to_string())?,
     };
@@ -797,9 +805,7 @@ pub fn mcp_check_install_status(target: InstallTarget) -> Result<ClientInstallSt
     let raw = std::fs::read_to_string(&config_path).unwrap_or_default();
     let root: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::json!({}));
 
-    let kb_entry = root
-        .get("mcpServers")
-        .and_then(|s| s.get("knowledge-base"));
+    let kb_entry = root.get("mcpServers").and_then(|s| s.get("knowledge-base"));
 
     let (installed, writable) = match kb_entry {
         Some(entry) => {

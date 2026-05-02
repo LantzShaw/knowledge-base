@@ -89,9 +89,8 @@ impl super::Database {
             .lock()
             .map_err(|e| AppError::Custom(e.to_string()))?;
         conn.execute("DELETE FROM note_links WHERE source_id = ?1", [source_id])?;
-        let mut stmt = conn.prepare(
-            "INSERT OR IGNORE INTO note_links (source_id, target_id) VALUES (?1, ?2)",
-        )?;
+        let mut stmt = conn
+            .prepare("INSERT OR IGNORE INTO note_links (source_id, target_id) VALUES (?1, ?2)")?;
         for target_id in target_ids {
             if target_id != source_id {
                 // 防止自引用
@@ -230,9 +229,7 @@ impl super::Database {
         // 建索引：normalized_title → id（同名取第一个，与 find_note_id_by_title_loose 行为一致）
         let mut title_to_id: HashMap<String, i64> = HashMap::with_capacity(rows.len());
         for r in &rows {
-            title_to_id
-                .entry(normalize_title(&r.title))
-                .or_insert(r.id);
+            title_to_id.entry(normalize_title(&r.title)).or_insert(r.id);
         }
 
         // 扫 content 提取 wiki，匹配建边

@@ -34,9 +34,7 @@ const REMOTE_TIMEOUT_SECS: u64 = 120;
 /// 因为我们要以"扩展名是不是视频"为筛选条件
 fn md_image_like_regex() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| {
-        Regex::new(r#"!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)"#).unwrap()
-    })
+    R.get_or_init(|| Regex::new(r#"!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)"#).unwrap())
 }
 
 /// OB 嵌入：`![[name]]` / `![[name|alt]]` / `![[name|alt|600]]`
@@ -51,10 +49,8 @@ fn ob_wiki_embed_regex() -> &'static Regex {
 fn html_video_src_regex() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| {
-        Regex::new(
-            r#"(?is)<video\b([^>]*?)\bsrc\s*=\s*["']([^"']+)["']([^>]*)>(.*?)</video>"#,
-        )
-        .unwrap()
+        Regex::new(r#"(?is)<video\b([^>]*?)\bsrc\s*=\s*["']([^"']+)["']([^>]*)>(.*?)</video>"#)
+            .unwrap()
     })
 }
 
@@ -94,11 +90,7 @@ fn is_asset_or_file_url(url: &str) -> bool {
 }
 
 /// 根据 `note_dir` / `vault_root` 解析本地视频路径
-fn resolve_local_video(
-    raw_url: &str,
-    note_dir: &Path,
-    vault_root: &Path,
-) -> Option<PathBuf> {
+fn resolve_local_video(raw_url: &str, note_dir: &Path, vault_root: &Path) -> Option<PathBuf> {
     // 跳过 URL 编码：视频文件名空格 / 中文常见
     let decoded = urlencoding::decode(raw_url)
         .map(|s| s.into_owned())
@@ -186,7 +178,9 @@ pub fn rewrite_video_paths(
                     Err(e) => {
                         log::warn!(
                             "[import-video] 笔记 {} 视频复制失败 ({}): {}",
-                            note_id, src.display(), e
+                            note_id,
+                            src.display(),
+                            e
                         );
                         missing.push(raw_url.to_string());
                         full
@@ -221,7 +215,9 @@ pub fn rewrite_video_paths(
                     Err(e) => {
                         log::warn!(
                             "[import-video] 笔记 {} OB-wiki 视频复制失败 ({}): {}",
-                            note_id, src.display(), e
+                            note_id,
+                            src.display(),
+                            e
                         );
                         missing.push(raw_name.to_string());
                         full
@@ -257,7 +253,9 @@ pub fn rewrite_video_paths(
                     Err(e) => {
                         log::warn!(
                             "[import-video] 笔记 {} HTML 视频复制失败 ({}): {}",
-                            note_id, src.display(), e
+                            note_id,
+                            src.display(),
+                            e
                         );
                         missing.push(raw_url.to_string());
                         full
@@ -293,7 +291,9 @@ pub fn rewrite_video_paths(
                     Err(e) => {
                         log::warn!(
                             "[import-video] 笔记 {} HTML <source> 视频复制失败 ({}): {}",
-                            note_id, src.display(), e
+                            note_id,
+                            src.display(),
+                            e
                         );
                         missing.push(raw_url.to_string());
                         full
@@ -358,7 +358,12 @@ pub async fn rewrite_external_videos(
     // markdown ![]()
     for caps in md_image_like_regex().captures_iter(body) {
         let m = caps.get(0).unwrap();
-        let raw = caps.get(2).map(|x| x.as_str()).unwrap_or("").trim().to_string();
+        let raw = caps
+            .get(2)
+            .map(|x| x.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
         if !is_external_url(&raw) || !is_video_filename(&raw) {
             continue;
         }
@@ -368,7 +373,12 @@ pub async fn rewrite_external_videos(
     // <video src="">
     for caps in html_video_src_regex().captures_iter(body) {
         let m = caps.get(0).unwrap();
-        let raw = caps.get(2).map(|x| x.as_str()).unwrap_or("").trim().to_string();
+        let raw = caps
+            .get(2)
+            .map(|x| x.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
         if !is_external_url(&raw) {
             continue;
         }
@@ -378,7 +388,12 @@ pub async fn rewrite_external_videos(
     // <video><source src="">
     for caps in html_video_source_regex().captures_iter(body) {
         let m = caps.get(0).unwrap();
-        let raw = caps.get(3).map(|x| x.as_str()).unwrap_or("").trim().to_string();
+        let raw = caps
+            .get(3)
+            .map(|x| x.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
         if !is_external_url(&raw) {
             continue;
         }
@@ -421,7 +436,9 @@ pub async fn rewrite_external_videos(
             Err(e) => {
                 log::warn!(
                     "[import-video-ext] 笔记 {} 外链下载失败 ({}): {}",
-                    note_id, url, e
+                    note_id,
+                    url,
+                    e
                 );
                 missing.push(url.clone());
                 url_cache.insert(url.clone(), None);
@@ -432,7 +449,9 @@ pub async fn rewrite_external_videos(
     // 倒序应用替换
     let mut new_body = body.to_string();
     for (start, end, url, kind) in matches.iter().rev() {
-        let Some(Some(new_url)) = url_cache.get(url) else { continue };
+        let Some(Some(new_url)) = url_cache.get(url) else {
+            continue;
+        };
         // 三种来源统一转 HTML <video> —— 编辑器才能识别为 Video 节点
         // （markdown ![]() 会被 tiptap 当成 image，无法播放）
         let _ = kind;
@@ -521,12 +540,19 @@ async fn download_external_video(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_ascii_lowercase())
         .and_then(|ct| {
-            if ct.contains("mp4") { Some("mp4") }
-            else if ct.contains("webm") { Some("webm") }
-            else if ct.contains("matroska") { Some("mkv") }
-            else if ct.contains("quicktime") { Some("mov") }
-            else if ct.contains("ogg") { Some("ogv") }
-            else { None }
+            if ct.contains("mp4") {
+                Some("mp4")
+            } else if ct.contains("webm") {
+                Some("webm")
+            } else if ct.contains("matroska") {
+                Some("mkv")
+            } else if ct.contains("quicktime") {
+                Some("mov")
+            } else if ct.contains("ogg") {
+                Some("ogv")
+            } else {
+                None
+            }
         })
         .or_else(|| {
             url.split('?')
@@ -559,11 +585,7 @@ async fn download_external_video(
         )));
     }
 
-    let abs = VideoService::save_bytes(
-        app_data_dir,
-        note_id,
-        &format!("external.{}", ext),
-        &bytes,
-    )?;
+    let abs =
+        VideoService::save_bytes(app_data_dir, note_id, &format!("external.{}", ext), &bytes)?;
     Ok(path_to_asset_url(Path::new(&abs)))
 }

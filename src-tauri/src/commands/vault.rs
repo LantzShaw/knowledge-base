@@ -23,10 +23,7 @@ pub fn vault_status(state: State<'_, AppState>) -> Result<VaultStatus, String> {
 
 /// 首次设置主密码；成功后自动解锁。若已 setup 过会返回错误。
 #[tauri::command]
-pub async fn vault_setup(
-    state: State<'_, AppState>,
-    password: String,
-) -> Result<(), String> {
+pub async fn vault_setup(state: State<'_, AppState>, password: String) -> Result<(), String> {
     // 同步调 Argon2id 会阻塞主线程；这里 async fn 里直接调，tokio 会自己把 Command
     // 任务调度到 worker 线程，不会阻塞 webview。相对于手工 spawn_blocking，
     // 简单且够用（派生 < 300ms）。
@@ -35,10 +32,7 @@ pub async fn vault_setup(
 
 /// 用主密码解锁 vault
 #[tauri::command]
-pub async fn vault_unlock(
-    state: State<'_, AppState>,
-    password: String,
-) -> Result<(), String> {
+pub async fn vault_unlock(state: State<'_, AppState>, password: String) -> Result<(), String> {
     VaultService::unlock(&state.db, &state.vault, &password).map_err(|e| e.to_string())
 }
 
@@ -65,10 +59,7 @@ pub fn decrypt_note(state: State<'_, AppState>, id: i64) -> Result<String, Strin
 
 /// 取消加密：解密后把明文写回 content，清空 blob
 #[tauri::command]
-pub fn disable_note_encrypt(
-    state: State<'_, AppState>,
-    id: i64,
-) -> Result<(), String> {
+pub fn disable_note_encrypt(state: State<'_, AppState>, id: i64) -> Result<(), String> {
     NoteService::disable_encrypt(&state.db, &state.vault, &state.data_dir, id)
         .map_err(|e| e.to_string())
 }

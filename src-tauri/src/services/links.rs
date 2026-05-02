@@ -5,11 +5,7 @@ use crate::models::{GraphData, NoteLink};
 pub struct LinkService;
 
 impl LinkService {
-    pub fn sync_links(
-        db: &Database,
-        source_id: i64,
-        target_ids: Vec<i64>,
-    ) -> Result<(), AppError> {
+    pub fn sync_links(db: &Database, source_id: i64, target_ids: Vec<i64>) -> Result<(), AppError> {
         db.sync_note_links(source_id, target_ids)
     }
 

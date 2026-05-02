@@ -42,21 +42,14 @@ impl DailyService {
 
 /// 验证日期格式 YYYY-MM-DD
 fn validate_date(date: &str) -> Result<(), AppError> {
-    if date.len() != 10
-        || date.chars().nth(4) != Some('-')
-        || date.chars().nth(7) != Some('-')
-    {
-        return Err(AppError::InvalidInput(
-            "日期格式必须为 YYYY-MM-DD".into(),
-        ));
+    if date.len() != 10 || date.chars().nth(4) != Some('-') || date.chars().nth(7) != Some('-') {
+        return Err(AppError::InvalidInput("日期格式必须为 YYYY-MM-DD".into()));
     }
 
     // 验证年月日是否为有效数字
     let parts: Vec<&str> = date.split('-').collect();
     if parts.len() != 3 {
-        return Err(AppError::InvalidInput(
-            "日期格式必须为 YYYY-MM-DD".into(),
-        ));
+        return Err(AppError::InvalidInput("日期格式必须为 YYYY-MM-DD".into()));
     }
 
     let _year: i32 = parts[0]

@@ -61,9 +61,9 @@ pub fn read_workbook(path: &str) -> Result<ExcelSummary, AppError> {
     let mut sheets = Vec::with_capacity(names.len());
     let mut total_rows = 0usize;
     for name in names {
-        let range = workbook.worksheet_range(&name).map_err(|e| {
-            AppError::Custom(format!("读取 Sheet 「{}」失败：{}", name, e))
-        })?;
+        let range = workbook
+            .worksheet_range(&name)
+            .map_err(|e| AppError::Custom(format!("读取 Sheet 「{}」失败：{}", name, e)))?;
         let mut iter = range.rows();
         let headers: Vec<String> = iter
             .next()
@@ -151,10 +151,7 @@ fn cell_to_string(c: &Data) -> String {
 }
 
 /// 单 Sheet 字符级硬截断：超过 PER_SHEET_HARD_LIMIT 时取头 [TRUNCATE_HEAD_ROWS] + 尾 [TRUNCATE_TAIL_ROWS]
-fn trim_sheet_rows(
-    all_rows: &[Vec<String>],
-    headers: &[String],
-) -> (Vec<Vec<String>>, usize) {
+fn trim_sheet_rows(all_rows: &[Vec<String>], headers: &[String]) -> (Vec<Vec<String>>, usize) {
     if all_rows.is_empty() {
         return (Vec::new(), 0);
     }
@@ -210,8 +207,7 @@ fn render_markdown(sheets: &[SheetSnapshot]) -> String {
                 // 占位行直接横向合并
                 out.push_str(&row[0]);
             } else {
-                let mut cells: Vec<String> =
-                    row.iter().take(s.headers.len()).cloned().collect();
+                let mut cells: Vec<String> = row.iter().take(s.headers.len()).cloned().collect();
                 while cells.len() < s.headers.len() {
                     cells.push(String::new());
                 }
@@ -236,10 +232,7 @@ mod tests {
         // 整数小数自动转 int
         assert_eq!(cell_to_string(&Data::Float(7.0)), "7");
         // 含 | 时转义，避免破坏 markdown 表
-        assert_eq!(
-            cell_to_string(&Data::String("a|b".to_string())),
-            "a\\|b"
-        );
+        assert_eq!(cell_to_string(&Data::String("a|b".to_string())), "a\\|b");
     }
 
     #[test]
@@ -247,10 +240,7 @@ mod tests {
         let s = SheetSnapshot {
             name: "测试".into(),
             headers: vec!["列A".into(), "列B".into()],
-            rows: vec![
-                vec!["1".into(), "x".into()],
-                vec!["2".into(), "y".into()],
-            ],
+            rows: vec![vec!["1".into(), "x".into()], vec!["2".into(), "y".into()]],
             total_rows: 2,
             truncated_rows: 0,
         };

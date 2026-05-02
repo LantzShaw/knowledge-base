@@ -32,7 +32,11 @@ pub enum ImageMigration {
 
 #[inline]
 fn assets_dir_name() -> &'static str {
-    if cfg!(debug_assertions) { ASSETS_DIR_DEV } else { ASSETS_DIR_PROD }
+    if cfg!(debug_assertions) {
+        ASSETS_DIR_DEV
+    } else {
+        ASSETS_DIR_PROD
+    }
 }
 
 pub struct ImageService;
@@ -145,14 +149,8 @@ impl ImageService {
 
         // 拆分原文件名为 stem + ext
         let path = Path::new(file_name);
-        let stem = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("image");
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("png");
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("image");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("png");
 
         // 加密时把 .enc 拼到 ext 上，让 save_unique 一次定位到最终落盘名
         let final_ext = if encrypted {
@@ -179,10 +177,7 @@ impl ImageService {
     ///
     /// 安全：路径校验留给 Command 层。这里只关心读 + 解密。
     /// vault 锁定时调用加密路径会返回 `vault 未解锁` 错误。
-    pub fn read_for_render(
-        vault: &RwLock<VaultState>,
-        path: &str,
-    ) -> Result<Vec<u8>, AppError> {
+    pub fn read_for_render(vault: &RwLock<VaultState>, path: &str) -> Result<Vec<u8>, AppError> {
         let bytes = std::fs::read(path)?;
         if path.ends_with(ENC_SUFFIX) {
             VaultService::decrypt_blob(vault, &bytes)
@@ -240,8 +235,7 @@ impl ImageService {
                     }
                     let blob = std::fs::read(&path)?;
                     let data = VaultService::decrypt_blob(vault, &blob)?;
-                    let original_name =
-                        name.strip_suffix(ENC_SUFFIX).unwrap_or(name.as_str());
+                    let original_name = name.strip_suffix(ENC_SUFFIX).unwrap_or(name.as_str());
                     let new_path = note_dir.join(original_name);
                     std::fs::write(&new_path, &data)?;
                     std::fs::remove_file(&path)?;

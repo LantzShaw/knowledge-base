@@ -83,7 +83,10 @@ fn compute_sleep_duration(app: &AppHandle) -> Duration {
     };
 
     let Ok(next_dt) = NaiveDateTime::parse_from_str(&next_str, "%Y-%m-%d %H:%M:%S") else {
-        log::warn!("[reminder] 无法解析下次提醒时刻: {}, 退化为 5min 轮询", next_str);
+        log::warn!(
+            "[reminder] 无法解析下次提醒时刻: {}, 退化为 5min 轮询",
+            next_str
+        );
         return IDLE_SAFETY_INTERVAL;
     };
 
@@ -96,11 +99,7 @@ fn compute_sleep_duration(app: &AppHandle) -> Duration {
         .to_std()
         .unwrap_or(IDLE_SAFETY_INTERVAL)
         .min(MAX_SLEEP);
-    log::debug!(
-        "[reminder] 下次提醒 {} (in {:?})",
-        next_str,
-        std_dur
-    );
+    log::debug!("[reminder] 下次提醒 {} (in {:?})", next_str, std_dur);
     std_dur
 }
 
@@ -131,8 +130,7 @@ fn tick_once(app: &AppHandle) -> Result<(), AppError> {
         } else {
             // 循环任务：合并漏掉的多次，一次性跳到下一个 > now 的触发点
             let now = chrono::Local::now().naive_local();
-            let result =
-                crate::services::tasks::advance_recurrence(&task, &base_time, now);
+            let result = crate::services::tasks::advance_recurrence(&task, &base_time, now);
             state
                 .db
                 .advance_task_recurrence(task.id, result.next_due, result.new_done_count)
@@ -171,10 +169,7 @@ fn tick_once(app: &AppHandle) -> Result<(), AppError> {
                     log::info!("[reminder] 紧急任务 {} 已打开全屏窗口", task.id);
                 }
                 Err(e) => {
-                    log::warn!(
-                        "[reminder] 紧急窗口创建失败，回退主窗 Modal: {}",
-                        e
-                    );
+                    log::warn!("[reminder] 紧急窗口创建失败，回退主窗 Modal: {}", e);
                     surface_main_window(app);
                     if let Err(e) = app.emit("task:reminder", &task) {
                         log::warn!("[reminder] emit 事件失败: {}", e);

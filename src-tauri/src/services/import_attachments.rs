@@ -22,7 +22,9 @@ use crate::error::AppError;
 use crate::services::image::ImageService;
 
 /// 受支持的图片扩展名（小写比对）
-const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif", "ico"];
+const IMAGE_EXTS: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif", "ico",
+];
 
 /// OB 约定的附件目录名（vault 根下的同层目录，不递归）
 const ATTACHMENT_DIR_NAMES: &[&str] = &["attachments", "assets", "images", "_resources"];
@@ -466,7 +468,9 @@ pub async fn rewrite_external_images(
                     Err(e) => {
                         log::warn!(
                             "[import-external] 笔记 {} 图片落盘失败 ({}): {}",
-                            note_id, url, e
+                            note_id,
+                            url,
+                            e
                         );
                         replacements.push(None);
                     }
@@ -475,7 +479,9 @@ pub async fn rewrite_external_images(
             Err(e) => {
                 log::warn!(
                     "[import-external] 笔记 {} 外链下载失败 ({}): {}",
-                    note_id, url, e
+                    note_id,
+                    url,
+                    e
                 );
                 replacements.push(None);
             }
@@ -525,17 +531,18 @@ async fn download_external_image(
 ) -> Result<(Vec<u8>, String), AppError> {
     // 按 host 选 Referer：微信公众号用官方域名，知乎/简书等其他平台用站点首页
     let lower = url.to_ascii_lowercase();
-    let referer: Option<&str> = if lower.contains("mmbiz.qpic.cn") || lower.contains("weixin.qq.com") {
-        Some("https://mp.weixin.qq.com/")
-    } else if lower.contains("zhimg.com") || lower.contains("zhihu.com") {
-        Some("https://www.zhihu.com/")
-    } else if lower.contains("upload-images.jianshu.io") || lower.contains("jianshu.com") {
-        Some("https://www.jianshu.com/")
-    } else if lower.contains("csdnimg.cn") || lower.contains("csdn.net") {
-        Some("https://blog.csdn.net/")
-    } else {
-        None
-    };
+    let referer: Option<&str> =
+        if lower.contains("mmbiz.qpic.cn") || lower.contains("weixin.qq.com") {
+            Some("https://mp.weixin.qq.com/")
+        } else if lower.contains("zhimg.com") || lower.contains("zhihu.com") {
+            Some("https://www.zhihu.com/")
+        } else if lower.contains("upload-images.jianshu.io") || lower.contains("jianshu.com") {
+            Some("https://www.jianshu.com/")
+        } else if lower.contains("csdnimg.cn") || lower.contains("csdn.net") {
+            Some("https://blog.csdn.net/")
+        } else {
+            None
+        };
 
     let mut req = client.get(url).header(
         "User-Agent",

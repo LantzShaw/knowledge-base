@@ -57,7 +57,10 @@ pub fn get_writing_trend(
     state: State<'_, AppState>,
     days: Option<i32>,
 ) -> Result<Vec<DailyWritingStat>, String> {
-    state.db.get_writing_trend(days.unwrap_or(30)).map_err(|e| e.to_string())
+    state
+        .db
+        .get_writing_trend(days.unwrap_or(30))
+        .map_err(|e| e.to_string())
 }
 
 /// 简单的 greet 命令（保留为示例）
@@ -81,10 +84,7 @@ pub fn get_multi_instance_enabled(app: tauri::AppHandle) -> Result<bool, String>
 
 /// 切换"允许多开实例"开关。下次启动生效（当前进程的实例锁不会变）。
 #[tauri::command]
-pub fn set_multi_instance_enabled(
-    app: tauri::AppHandle,
-    enabled: bool,
-) -> Result<(), String> {
+pub fn set_multi_instance_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let dir = crate::framework_app_data_dir(&app).map_err(|e| e.to_string())?;
     crate::set_multi_instance_enabled(&dir, enabled).map_err(|e| e.to_string())
 }

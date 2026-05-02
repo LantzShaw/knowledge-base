@@ -44,14 +44,12 @@ use crate::services::video::VideoService;
 const DISPLAY_LIMIT: usize = 500;
 
 /// 视频常见扩展名（与 video.rs save 时支持的扩展名对齐）
-const VIDEO_EXTS: &[&str] = &[
-    "mp4", "mov", "webm", "m4v", "ogv", "mkv", "avi", "m4a",
-];
+const VIDEO_EXTS: &[&str] = &["mp4", "mov", "webm", "m4v", "ogv", "mkv", "avi", "m4a"];
 
 /// 附件常见扩展名（与 attachment.rs mime_for_ext 列表对齐，去掉视频）
 const ATTACHMENT_EXTS: &[&str] = &[
-    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "rar", "7z",
-    "tar", "gz", "mp3", "wav", "ogg", "flac", "csv", "json", "xml", "yaml", "yml",
+    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "rar", "7z", "tar", "gz", "mp3",
+    "wav", "ogg", "flac", "csv", "json", "xml", "yaml", "yml",
 ];
 
 /// PDF / Source 扩展名（用于 sources 平铺扫描）
@@ -94,8 +92,7 @@ impl OrphanScanService {
         }
 
         // source_file_path 引用集（小写绝对路径，给 pdfs / sources 用）
-        let mut referenced_source_abs: HashSet<String> =
-            HashSet::with_capacity(source_paths.len());
+        let mut referenced_source_abs: HashSet<String> = HashSet::with_capacity(source_paths.len());
         for rel in &source_paths {
             let abs = app_data_dir.join(rel);
             referenced_source_abs.insert(normalize_path_for_compare(&abs));
@@ -138,10 +135,7 @@ impl OrphanScanService {
     /// 批量删除孤儿素材
     ///
     /// 安全策略：每条 path 必须落在对应 kind 的 assets 子目录下，否则计入 failed 不删。
-    pub fn clean(
-        app_data_dir: &Path,
-        items: &[OrphanItem],
-    ) -> Result<OrphanAssetClean, AppError> {
+    pub fn clean(app_data_dir: &Path, items: &[OrphanItem]) -> Result<OrphanAssetClean, AppError> {
         // 预先按 kind 算各自的合法根目录（小写规范化）
         let mut roots: HashMap<&'static str, String> = HashMap::new();
         roots.insert(
@@ -613,14 +607,10 @@ fn parent_note_id_from(root: &Path, file_path: &Path) -> Option<i64> {
 
 const ALL_EXTS: &[&str] = &[
     // images
-    "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp",
-    // videos
-    "mp4", "mov", "webm", "m4v", "ogv", "mkv", "avi",
-    // attachments
-    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
-    "zip", "rar", "7z", "tar", "gz",
-    "mp3", "wav", "ogg", "flac", "m4a",
-    "csv", "json", "xml", "yaml", "yml",
+    "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", // videos
+    "mp4", "mov", "webm", "m4v", "ogv", "mkv", "avi", // attachments
+    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "rar", "7z", "tar", "gz", "mp3",
+    "wav", "ogg", "flac", "m4a", "csv", "json", "xml", "yaml", "yml",
 ];
 
 /// 从一段 content 中提取所有"疑似素材文件名"。
@@ -710,4 +700,3 @@ pub fn collect_filename_tokens(text: &str, out: &mut HashSet<String>) {
         i = end;
     }
 }
-

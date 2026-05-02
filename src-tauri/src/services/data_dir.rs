@@ -131,10 +131,7 @@ impl DataDirResolver {
     /// - 仅写指针文件 + 创建目标目录
     /// - 不动当前进程的 db / 资产，避免运行时切换的连接竞态
     /// - 下次启动才生效（前端 UI 提示用户重启）
-    pub fn set_pending(
-        default_app_data_dir: &Path,
-        new_path: &str,
-    ) -> Result<(), AppError> {
+    pub fn set_pending(default_app_data_dir: &Path, new_path: &str) -> Result<(), AppError> {
         let trimmed = new_path.trim();
         if trimmed.is_empty() {
             return Err(AppError::InvalidInput("路径不能为空".into()));
@@ -258,10 +255,7 @@ impl DataDirResolver {
             completed_items: Vec::new(),
         };
         write_marker(framework_app_data_dir, &marker)?;
-        log::info!(
-            "[migration] 已写入 marker: {} → {}",
-            marker.from, marker.to
-        );
+        log::info!("[migration] 已写入 marker: {} → {}", marker.from, marker.to);
         Ok(())
     }
 
@@ -274,9 +268,8 @@ impl DataDirResolver {
             return Ok(None);
         }
         let bytes = std::fs::read(&path)?;
-        let m: MigrationMarker = serde_json::from_slice(&bytes).map_err(|e| {
-            AppError::Custom(format!("迁移 marker 解析失败: {}", e))
-        })?;
+        let m: MigrationMarker = serde_json::from_slice(&bytes)
+            .map_err(|e| AppError::Custom(format!("迁移 marker 解析失败: {}", e)))?;
         Ok(Some(m))
     }
 
@@ -370,7 +363,14 @@ impl DataDirResolver {
                 if item.is_dir {
                     copy_dir_recursive(&src, &dst, &mut bytes_done, bytes_total, emit, &item.rel)?;
                 } else {
-                    copy_file_with_progress(&src, &dst, &mut bytes_done, bytes_total, emit, &item.rel)?;
+                    copy_file_with_progress(
+                        &src,
+                        &dst,
+                        &mut bytes_done,
+                        bytes_total,
+                        emit,
+                        &item.rel,
+                    )?;
                 }
             } else {
                 bytes_done += item.size;
@@ -429,7 +429,9 @@ fn scan_items(from: &Path) -> Result<Vec<PlanItem>, AppError> {
             continue;
         }
         let is_dir = p.is_dir();
-        let size = if is_dir { dir_size(&p)? } else {
+        let size = if is_dir {
+            dir_size(&p)?
+        } else {
             std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0)
         };
         out.push(PlanItem {
@@ -514,10 +516,24 @@ fn copy_dir_recursive(
         let to_path = dst.join(&file_name);
         if from_path.is_dir() {
             let sub_rel = format!("{}/{}", rel, file_name.to_string_lossy());
-            copy_dir_recursive(&from_path, &to_path, bytes_done, bytes_total, emit, &sub_rel)?;
+            copy_dir_recursive(
+                &from_path,
+                &to_path,
+                bytes_done,
+                bytes_total,
+                emit,
+                &sub_rel,
+            )?;
         } else {
             let sub_rel = format!("{}/{}", rel, file_name.to_string_lossy());
-            copy_file_with_progress(&from_path, &to_path, bytes_done, bytes_total, emit, &sub_rel)?;
+            copy_file_with_progress(
+                &from_path,
+                &to_path,
+                bytes_done,
+                bytes_total,
+                emit,
+                &sub_rel,
+            )?;
         }
     }
     Ok(())
@@ -541,9 +557,7 @@ fn read_pointer(default_app_data_dir: &Path) -> Result<Option<String>, AppError>
     if !pointer.exists() {
         return Ok(None);
     }
-    let s = std::fs::read_to_string(&pointer)?
-        .trim()
-        .to_string();
+    let s = std::fs::read_to_string(&pointer)?.trim().to_string();
     if s.is_empty() {
         return Ok(None);
     }
@@ -558,11 +572,8 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static N: AtomicU64 = AtomicU64::new(0);
         let n = N.fetch_add(1, Ordering::SeqCst);
-        let dir = std::env::temp_dir().join(format!(
-            "kb_data_dir_test_{}_{}",
-            std::process::id(),
-            n
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("kb_data_dir_test_{}_{}", std::process::id(), n));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }

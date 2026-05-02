@@ -102,7 +102,10 @@ fn is_orphan_list_marker(s: &str) -> bool {
         return false;
     }
     // 数字列表：1. / 12. / 1) / 1）
-    let trimmed_end = s.strip_suffix('.').or_else(|| s.strip_suffix(')')).or_else(|| s.strip_suffix('）'));
+    let trimmed_end = s
+        .strip_suffix('.')
+        .or_else(|| s.strip_suffix(')'))
+        .or_else(|| s.strip_suffix('）'));
     if let Some(stripped) = trimmed_end {
         if !stripped.is_empty() && stripped.chars().all(|c| c.is_ascii_digit()) {
             return true;
@@ -181,8 +184,7 @@ pub fn preserve_md_indent_outside_fence(text: &str) -> String {
     for line in text.split('\n') {
         let trimmed_start = line.trim_start();
         // 围栏判定：行首 ``` 或 ~~~（允许后跟语言标识）；与 markdown-it 的 fence 规则一致
-        let is_fence_marker = trimmed_start.starts_with("```")
-            || trimmed_start.starts_with("~~~");
+        let is_fence_marker = trimmed_start.starts_with("```") || trimmed_start.starts_with("~~~");
         if is_fence_marker {
             // 切换 fence 状态；当前行原样保留（不动行首）
             in_fence = !in_fence;
@@ -197,9 +199,7 @@ pub fn preserve_md_indent_outside_fence(text: &str) -> String {
         // fence 外的行：行首 ASCII 空格 / Tab → NBSP，保留视觉缩进
         let chars: Vec<char> = line.chars().collect();
         let mut prefix_len = 0;
-        while prefix_len < chars.len()
-            && (chars[prefix_len] == ' ' || chars[prefix_len] == '\t')
-        {
+        while prefix_len < chars.len() && (chars[prefix_len] == ' ' || chars[prefix_len] == '\t') {
             prefix_len += 1;
         }
         if prefix_len == 0 {
@@ -253,7 +253,12 @@ fn extract_first_sentence(s: &str, max_chars: usize) -> String {
         .unwrap_or(chars.len());
 
     let take = cut_at.min(max_chars);
-    chars.iter().take(take).collect::<String>().trim().to_string()
+    chars
+        .iter()
+        .take(take)
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 #[cfg(test)]
@@ -262,12 +267,18 @@ mod tests {
 
     #[test]
     fn first_sentence_chinese_punct() {
-        assert_eq!(extract_first_sentence("你好世界。这是第二句", 30), "你好世界");
+        assert_eq!(
+            extract_first_sentence("你好世界。这是第二句", 30),
+            "你好世界"
+        );
     }
 
     #[test]
     fn first_sentence_english_punct() {
-        assert_eq!(extract_first_sentence("Hello world. Bye.", 30), "Hello world");
+        assert_eq!(
+            extract_first_sentence("Hello world. Bye.", 30),
+            "Hello world"
+        );
     }
 
     #[test]
@@ -279,7 +290,10 @@ mod tests {
 
     #[test]
     fn first_sentence_skips_blank_lines() {
-        assert_eq!(extract_first_sentence("\n\n   \nReal line", 30), "Real line");
+        assert_eq!(
+            extract_first_sentence("\n\n   \nReal line", 30),
+            "Real line"
+        );
     }
 
     #[test]

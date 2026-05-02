@@ -29,10 +29,7 @@ pub fn get_task(state: State<'_, AppState>, id: i64) -> Result<Task, String> {
 
 /// 列出某主任务的子任务
 #[tauri::command]
-pub fn list_subtasks(
-    state: State<'_, AppState>,
-    parent_id: i64,
-) -> Result<Vec<Task>, String> {
+pub fn list_subtasks(state: State<'_, AppState>, parent_id: i64) -> Result<Vec<Task>, String> {
     TaskService::list_subtasks(&state.db, parent_id).map_err(|e| e.to_string())
 }
 
@@ -70,10 +67,7 @@ pub fn delete_task(state: State<'_, AppState>, id: i64) -> Result<bool, String> 
 
 /// 批量删除任务（任务页多选模式用）。返回实际删除的条数。
 #[tauri::command]
-pub fn delete_tasks_batch(
-    state: State<'_, AppState>,
-    ids: Vec<i64>,
-) -> Result<usize, String> {
+pub fn delete_tasks_batch(state: State<'_, AppState>, ids: Vec<i64>) -> Result<usize, String> {
     let n = state
         .db
         .delete_tasks_by_ids(&ids)
@@ -84,10 +78,7 @@ pub fn delete_tasks_batch(
 
 /// 批量标记任务为已完成（任务页多选模式用）。返回实际更新条数。
 #[tauri::command]
-pub fn complete_tasks_batch(
-    state: State<'_, AppState>,
-    ids: Vec<i64>,
-) -> Result<usize, String> {
+pub fn complete_tasks_batch(state: State<'_, AppState>, ids: Vec<i64>) -> Result<usize, String> {
     let n = state
         .db
         .complete_tasks_by_ids(&ids)
@@ -140,9 +131,7 @@ pub fn search_tasks(
 // ─── 分类 CRUD ────────────────────────────────
 
 #[tauri::command]
-pub fn list_task_categories(
-    state: State<'_, AppState>,
-) -> Result<Vec<TaskCategory>, String> {
+pub fn list_task_categories(state: State<'_, AppState>) -> Result<Vec<TaskCategory>, String> {
     TaskService::list_categories(&state.db).map_err(|e| e.to_string())
 }
 
@@ -164,10 +153,7 @@ pub fn update_task_category(
 }
 
 #[tauri::command]
-pub fn delete_task_category(
-    state: State<'_, AppState>,
-    id: i64,
-) -> Result<bool, String> {
+pub fn delete_task_category(state: State<'_, AppState>, id: i64) -> Result<bool, String> {
     TaskService::delete_category(&state.db, id).map_err(|e| e.to_string())
 }
 

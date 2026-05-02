@@ -184,9 +184,14 @@ pub async fn sync_webdav_preview(
     filename: Option<String>,
 ) -> Result<SyncManifest, String> {
     let password = resolve_password(&state.db, &config)?;
-    SyncService::webdav_preview(&config.url, &config.username, &password, filename.as_deref())
-        .await
-        .map_err(|e| e.to_string())
+    SyncService::webdav_preview(
+        &config.url,
+        &config.username,
+        &password,
+        filename.as_deref(),
+    )
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// 列出云端所有 `kb-sync-*.zip` 快照（多设备场景）
@@ -221,8 +226,7 @@ pub fn sync_save_webdav_password(
     username: String,
     password: String,
 ) -> Result<(), String> {
-    SyncService::save_webdav_password(&state.db, &username, &password)
-        .map_err(|e| e.to_string())
+    SyncService::save_webdav_password(&state.db, &username, &password).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -277,7 +281,10 @@ pub fn sync_scheduler_reload(state: State<'_, AppState>) -> Result<(), String> {
 // ─── 辅助 ────────────────────────────────────
 
 /// 从 WebDavConfig 读 password：优先用前端传入的，否则读 SQLite 里的加密密文
-fn resolve_password(db: &crate::database::Database, config: &WebDavConfig) -> Result<String, String> {
+fn resolve_password(
+    db: &crate::database::Database,
+    config: &WebDavConfig,
+) -> Result<String, String> {
     if let Some(p) = &config.password {
         if !p.is_empty() {
             return Ok(p.clone());
@@ -295,11 +302,17 @@ fn resolve_db_path(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join(format!("{}app.db", prefix))
 }
 
-fn record_history(state: &AppState, history_id: i64, result: &Result<SyncResult, crate::error::AppError>) {
+fn record_history(
+    state: &AppState,
+    history_id: i64,
+    result: &Result<SyncResult, crate::error::AppError>,
+) {
     match result {
         Ok(r) => {
             let stats_json = serde_json::to_string(&r.stats).unwrap_or_else(|_| "{}".into());
-            let _ = state.db.sync_history_finish(history_id, true, None, &stats_json);
+            let _ = state
+                .db
+                .sync_history_finish(history_id, true, None, &stats_json);
         }
         Err(e) => {
             let _ = state
@@ -317,7 +330,9 @@ fn record_manifest_history(
     match result {
         Ok(m) => {
             let stats_json = serde_json::to_string(&m.stats).unwrap_or_else(|_| "{}".into());
-            let _ = state.db.sync_history_finish(history_id, true, None, &stats_json);
+            let _ = state
+                .db
+                .sync_history_finish(history_id, true, None, &stats_json);
         }
         Err(e) => {
             let _ = state

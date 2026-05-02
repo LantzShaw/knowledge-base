@@ -47,14 +47,8 @@ impl S3Backend {
             endpoint: endpoint.trim_end_matches('/').to_string(),
         };
 
-        let creds = Credentials::new(
-            Some(access_key),
-            Some(secret_key),
-            None,
-            None,
-            None,
-        )
-        .map_err(|e| AppError::Custom(format!("S3 凭据格式错误: {}", e)))?;
+        let creds = Credentials::new(Some(access_key), Some(secret_key), None, None, None)
+            .map_err(|e| AppError::Custom(format!("S3 凭据格式错误: {}", e)))?;
 
         // path-style 而非 virtual-hosted-style：兼容 MinIO / R2 / 阿里云走自定义 endpoint 时的常见限制
         let bucket = Bucket::new(bucket_name, region, creds)

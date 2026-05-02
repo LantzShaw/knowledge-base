@@ -27,9 +27,8 @@ const DEDUP_MAX_BYTES: u64 = 64 * 1024 * 1024; // 64 MB
 
 /// Windows 保留名（不区分大小写匹配）。在这些名字下任何扩展名都不能用。
 const WINDOWS_RESERVED: &[&str] = &[
-    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6",
-    "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6",
-    "LPT7", "LPT8", "LPT9",
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
 
 /// 清洗文件名（不含扩展名）为可在 Windows / macOS / Linux 落盘的形式。

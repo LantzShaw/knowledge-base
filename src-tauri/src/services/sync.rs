@@ -86,12 +86,8 @@ impl SyncService {
         // 3. pdfs/
         if scope.pdfs {
             let pdfs_dir = data_dir.join(pdfs_dir_name());
-            let (count, size) = add_dir_to_zip(
-                &mut zip,
-                &pdfs_dir,
-                &format!("{}/", pdfs_dir_name()),
-                opt,
-            )?;
+            let (count, size) =
+                add_dir_to_zip(&mut zip, &pdfs_dir, &format!("{}/", pdfs_dir_name()), opt)?;
             stats.pdfs_count = count;
             stats.assets_size += size;
         }
@@ -296,10 +292,8 @@ impl SyncService {
         let entries: Vec<(String, String)> = match conn
             .prepare("SELECT key, value FROM app_config WHERE key LIKE 'sync.webdav_pw_enc.%'")
             .and_then(|mut stmt| {
-                stmt.query_map([], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-                })?
-                .collect::<Result<Vec<_>, _>>()
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+                    .collect::<Result<Vec<_>, _>>()
             }) {
             Ok(v) => v,
             Err(e) => {
@@ -319,7 +313,10 @@ impl SyncService {
             }
         }
         if removed > 0 {
-            log::info!("同步后已清理 {} 个失效的 WebDAV 密码条目（换设备导致）", removed);
+            log::info!(
+                "同步后已清理 {} 个失效的 WebDAV 密码条目（换设备导致）",
+                removed
+            );
         }
     }
 
@@ -440,7 +437,9 @@ impl SyncService {
         filename: Option<&str>,
     ) -> Result<SyncManifest, AppError> {
         let client = WebDavClient::new(url, username, password);
-        let fname = filename.map(|s| s.to_string()).unwrap_or_else(device_zip_name);
+        let fname = filename
+            .map(|s| s.to_string())
+            .unwrap_or_else(device_zip_name);
         let bytes = client.download_bytes(&fname).await?;
         let reader = Cursor::new(bytes);
         let mut archive = ZipArchive::new(reader)
@@ -474,10 +473,7 @@ impl SyncService {
     }
 
     /// 从 SQLite 读 WebDAV 密文并解密
-    pub fn get_webdav_password(
-        db: &Database,
-        username: &str,
-    ) -> Result<Option<String>, AppError> {
+    pub fn get_webdav_password(db: &Database, username: &str) -> Result<Option<String>, AppError> {
         match db.get_config(&Self::pw_config_key(username))? {
             Some(enc) if !enc.is_empty() => crypto::decrypt(&enc).map(Some),
             _ => Ok(None),
@@ -529,16 +525,32 @@ fn add_dir_to_zip<W: Write + Seek>(
 }
 
 fn assets_dir_name() -> &'static str {
-    if cfg!(debug_assertions) { "dev-kb_assets" } else { "kb_assets" }
+    if cfg!(debug_assertions) {
+        "dev-kb_assets"
+    } else {
+        "kb_assets"
+    }
 }
 fn pdfs_dir_name() -> &'static str {
-    if cfg!(debug_assertions) { "dev-pdfs" } else { "pdfs" }
+    if cfg!(debug_assertions) {
+        "dev-pdfs"
+    } else {
+        "pdfs"
+    }
 }
 fn sources_dir_name() -> &'static str {
-    if cfg!(debug_assertions) { "dev-sources" } else { "sources" }
+    if cfg!(debug_assertions) {
+        "dev-sources"
+    } else {
+        "sources"
+    }
 }
 fn settings_file_name() -> &'static str {
-    if cfg!(debug_assertions) { "dev-settings.json" } else { "settings.json" }
+    if cfg!(debug_assertions) {
+        "dev-settings.json"
+    } else {
+        "settings.json"
+    }
 }
 
 /// 本机设备名作为云端 ZIP 文件名（同一 WebDAV 下多设备互不覆盖）
@@ -549,7 +561,13 @@ fn device_zip_name() -> String {
     // 清洗：只留字母/数字/-/_
     let safe: String = device
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     format!("kb-sync-{}.zip", safe.to_lowercase())
 }

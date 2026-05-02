@@ -26,12 +26,12 @@ pub enum DocConverter {
 ///
 /// 注意：ProgId 是大小写不敏感的，但 PowerShell `New-Object -ComObject` 仍按字面值匹配。
 const WORD_PROGIDS: &[&str] = &[
-    "Word.Application",       // Microsoft Office Word
-    "KWps.Application",       // WPS Office 文字（旧版常见）
-    "Wps.Application",        // WPS Office 通用
-    "Kwps.Application",       // 大小写变体
-    "KingsoftOffice.Wps",     // 金山办公早期
-    "WPS.Application",        // 又一个变体
+    "Word.Application",   // Microsoft Office Word
+    "KWps.Application",   // WPS Office 文字（旧版常见）
+    "Wps.Application",    // WPS Office 通用
+    "Kwps.Application",   // 大小写变体
+    "KingsoftOffice.Wps", // 金山办公早期
+    "WPS.Application",    // 又一个变体
 ];
 
 static CONVERTER: OnceLock<DocConverter> = OnceLock::new();
@@ -77,7 +77,8 @@ pub fn convert_doc_to_docx(src: &Path, dst_dir: &Path) -> Result<PathBuf, AppErr
             }
         }
         DocConverter::None => Err(AppError::Custom(
-            "未检测到 .doc 转换器，请安装 Microsoft Office 或 WPS Office（含 OLE 自动化组件）".into(),
+            "未检测到 .doc 转换器，请安装 Microsoft Office 或 WPS Office（含 OLE 自动化组件）"
+                .into(),
         )),
     }
 }

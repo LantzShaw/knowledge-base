@@ -16,10 +16,7 @@ pub fn sync_note_links(
 
 /// 获取反向链接
 #[tauri::command]
-pub fn get_backlinks(
-    state: State<'_, AppState>,
-    note_id: i64,
-) -> Result<Vec<NoteLink>, String> {
+pub fn get_backlinks(state: State<'_, AppState>, note_id: i64) -> Result<Vec<NoteLink>, String> {
     LinkService::get_backlinks(&state.db, note_id).map_err(|e| e.to_string())
 }
 

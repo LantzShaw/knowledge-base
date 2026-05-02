@@ -59,19 +59,16 @@ impl PromptService {
     /// 查不到时返回 `Err`，调用方可据此决定是回退到默认 system prompt 还是直接报错。
     pub fn resolve(db: &Database, action: &str) -> Result<PromptTemplate, AppError> {
         if let Some(id_str) = action.strip_prefix("prompt:") {
-            let id: i64 = id_str.parse().map_err(|_| {
-                AppError::Custom(format!("非法的 prompt action: {}", action))
-            })?;
+            let id: i64 = id_str
+                .parse()
+                .map_err(|_| AppError::Custom(format!("非法的 prompt action: {}", action)))?;
             return db.get_prompt(id);
         }
 
         // 兜底按 builtin_code 查（兼容老前端 / 外部脚本直接传 action）
         match db.get_prompt_by_builtin_code(action)? {
             Some(p) => Ok(p),
-            None => Err(AppError::Custom(format!(
-                "未找到对应的提示词：{}",
-                action
-            ))),
+            None => Err(AppError::Custom(format!("未找到对应的提示词：{}", action))),
         }
     }
 }

@@ -87,6 +87,5 @@ pub fn get_image_blob(state: State<'_, AppState>, path: String) -> Result<Vec<u8
     if !abs_str.starts_with(&images_root_str) {
         return Err(format!("非法路径（不在 images 目录下）: {}", path));
     }
-    ImageService::read_for_render(&state.vault, &abs.to_string_lossy())
-        .map_err(|e| e.to_string())
+    ImageService::read_for_render(&state.vault, &abs.to_string_lossy()).map_err(|e| e.to_string())
 }

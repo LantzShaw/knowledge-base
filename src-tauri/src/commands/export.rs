@@ -42,13 +42,8 @@ pub fn export_single_note(
     id: i64,
     parent_dir: String,
 ) -> Result<SingleExportResult, String> {
-    services::export::ExportService::export_single_note(
-        &state.db,
-        &state.data_dir,
-        id,
-        &parent_dir,
-    )
-    .map_err(|e| e.to_string())
+    services::export::ExportService::export_single_note(&state.db, &state.data_dir, id, &parent_dir)
+        .map_err(|e| e.to_string())
 }
 
 /// T-020 导出单条笔记为 Word（.docx）

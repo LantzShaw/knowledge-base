@@ -4,10 +4,7 @@ use crate::state::AppState;
 
 /// 查询每日笔记（不创建）
 #[tauri::command]
-pub fn get_daily(
-    state: tauri::State<'_, AppState>,
-    date: String,
-) -> Result<Option<Note>, String> {
+pub fn get_daily(state: tauri::State<'_, AppState>, date: String) -> Result<Option<Note>, String> {
     DailyService::get(&state.db, &date).map_err(|e| e.to_string())
 }
 

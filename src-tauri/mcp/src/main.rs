@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::Parser;
 use kb_core::{KbDb, KbServer};
-use rmcp::{ServiceExt, transport::stdio};
+use rmcp::{transport::stdio, ServiceExt};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -42,7 +42,11 @@ async fn main() -> Result<()> {
         "[kb-mcp] starting v{}, db = {}, mode = {}",
         env!("CARGO_PKG_VERSION"),
         cli.db_path.display(),
-        if cli.writable { "READ-WRITE" } else { "READ-ONLY" }
+        if cli.writable {
+            "READ-WRITE"
+        } else {
+            "READ-ONLY"
+        }
     );
 
     if !cli.db_path.exists() {

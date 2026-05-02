@@ -41,10 +41,7 @@ impl super::Database {
     }
 
     /// 创建分类（name 唯一约束由 DB 保证；冲突时返回错误）
-    pub fn create_task_category(
-        &self,
-        input: CreateTaskCategoryInput,
-    ) -> Result<i64, AppError> {
+    pub fn create_task_category(&self, input: CreateTaskCategoryInput) -> Result<i64, AppError> {
         let conn = self
             .conn
             .lock()
@@ -58,12 +55,7 @@ impl super::Database {
         conn.execute(
             "INSERT INTO task_categories (name, color, icon, sort_order)
              VALUES (?1, ?2, ?3, ?4)",
-            params![
-                input.name,
-                color,
-                input.icon,
-                input.sort_order.unwrap_or(0),
-            ],
+            params![input.name, color, input.icon, input.sort_order.unwrap_or(0),],
         )
         .map_err(|e| translate_name_conflict(e, &input.name))?;
         Ok(conn.last_insert_rowid())
@@ -125,10 +117,7 @@ impl super::Database {
             .conn
             .lock()
             .map_err(|e| AppError::Custom(e.to_string()))?;
-        let affected = conn.execute(
-            "DELETE FROM task_categories WHERE id = ?1",
-            params![id],
-        )?;
+        let affected = conn.execute("DELETE FROM task_categories WHERE id = ?1", params![id])?;
         Ok(affected > 0)
     }
 }

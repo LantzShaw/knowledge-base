@@ -34,10 +34,7 @@ fn row_to_server(row: &Row<'_>) -> rusqlite::Result<McpServer> {
 impl Database {
     pub fn list_mcp_servers(&self) -> Result<Vec<McpServer>, AppError> {
         let conn = self.conn_lock()?;
-        let sql = format!(
-            "SELECT {} FROM mcp_servers ORDER BY name",
-            SELECT_COLUMNS
-        );
+        let sql = format!("SELECT {} FROM mcp_servers ORDER BY name", SELECT_COLUMNS);
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt
             .query_map([], row_to_server)?
@@ -47,10 +44,7 @@ impl Database {
 
     pub fn get_mcp_server(&self, id: i64) -> Result<Option<McpServer>, AppError> {
         let conn = self.conn_lock()?;
-        let sql = format!(
-            "SELECT {} FROM mcp_servers WHERE id = ?1",
-            SELECT_COLUMNS
-        );
+        let sql = format!("SELECT {} FROM mcp_servers WHERE id = ?1", SELECT_COLUMNS);
         let mut stmt = conn.prepare(&sql)?;
         let r = stmt.query_row(params![id], row_to_server).ok();
         Ok(r)
@@ -75,10 +69,7 @@ impl Database {
             ],
         )?;
         let id = conn.last_insert_rowid();
-        let sql = format!(
-            "SELECT {} FROM mcp_servers WHERE id = ?1",
-            SELECT_COLUMNS
-        );
+        let sql = format!("SELECT {} FROM mcp_servers WHERE id = ?1", SELECT_COLUMNS);
         let mut stmt = conn.prepare(&sql)?;
         let r = stmt.query_row(params![id], row_to_server)?;
         Ok(r)
@@ -112,10 +103,7 @@ impl Database {
         if affected == 0 {
             return Err(AppError::NotFound(format!("mcp_server {} 不存在", id)));
         }
-        let sql = format!(
-            "SELECT {} FROM mcp_servers WHERE id = ?1",
-            SELECT_COLUMNS
-        );
+        let sql = format!("SELECT {} FROM mcp_servers WHERE id = ?1", SELECT_COLUMNS);
         let mut stmt = conn.prepare(&sql)?;
         let r = stmt.query_row(params![id], row_to_server)?;
         Ok(r)

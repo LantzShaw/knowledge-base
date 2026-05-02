@@ -77,13 +77,17 @@ pub trait SyncBackendImpl {
     /// v1 阶段先不做附件同步；预留接口
     #[allow(dead_code)]
     fn put_attachment(&self, _hash: &str, _bytes: &[u8]) -> Result<(), AppError> {
-        Err(AppError::Custom("attachment 同步暂未实现（v1 留给后续阶段）".into()))
+        Err(AppError::Custom(
+            "attachment 同步暂未实现（v1 留给后续阶段）".into(),
+        ))
     }
 
     /// 下载附件
     #[allow(dead_code)]
     fn get_attachment(&self, _hash: &str) -> Result<Option<Vec<u8>>, AppError> {
-        Err(AppError::Custom("attachment 同步暂未实现（v1 留给后续阶段）".into()))
+        Err(AppError::Custom(
+            "attachment 同步暂未实现（v1 留给后续阶段）".into(),
+        ))
     }
 }
 
@@ -95,8 +99,8 @@ pub fn parse_auth(
     config_json: &str,
 ) -> Result<BackendAuth, AppError> {
     use crate::models::SyncBackendKind as K;
-    let v: serde_json::Value =
-        serde_json::from_str(config_json).map_err(|e| AppError::Custom(format!("config_json 解析失败: {}", e)))?;
+    let v: serde_json::Value = serde_json::from_str(config_json)
+        .map_err(|e| AppError::Custom(format!("config_json 解析失败: {}", e)))?;
     let get_str = |k: &str| -> Result<String, AppError> {
         v.get(k)
             .and_then(|x| x.as_str())
@@ -104,7 +108,10 @@ pub fn parse_auth(
             .ok_or_else(|| AppError::InvalidInput(format!("config_json 缺字段: {}", k)))
     };
     let get_str_or = |k: &str, default: &str| -> String {
-        v.get(k).and_then(|x| x.as_str()).map(|s| s.to_string()).unwrap_or_else(|| default.into())
+        v.get(k)
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| default.into())
     };
 
     match kind {

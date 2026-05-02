@@ -58,7 +58,8 @@ async fn tick_once(app: &AppHandle) -> Result<(), String> {
         }
         log::info!(
             "[sync-v1-scheduler] backend #{} ({}) 到期，开始双向同步",
-            backend.id, backend.name
+            backend.id,
+            backend.name
         );
         run_backend_sync(app, backend.id).await;
     }
@@ -75,8 +76,9 @@ fn is_due(backend: &SyncBackend, now: &NaiveDateTime) -> bool {
     match backend.last_push_ts.as_deref() {
         None | Some("") => true,
         Some(ts) => match NaiveDateTime::parse_from_str(ts, "%Y-%m-%d %H:%M:%S") {
-            Ok(parsed) => (now.and_utc().timestamp() - parsed.and_utc().timestamp())
-                >= interval_secs,
+            Ok(parsed) => {
+                (now.and_utc().timestamp() - parsed.and_utc().timestamp()) >= interval_secs
+            }
             Err(_) => true,
         },
     }
@@ -89,16 +91,16 @@ fn is_due(backend: &SyncBackend, now: &NaiveDateTime) -> bool {
 async fn run_backend_sync(app: &AppHandle, backend_id: i64) {
     // 先 pull
     let pull_app = app.clone();
-    let pull_outcome: Result<String, String> = tauri::async_runtime::spawn_blocking(move || {
-        run_pull_blocking(&pull_app, backend_id)
-    })
-    .await
-    .unwrap_or_else(|e| Err(format!("pull task panic: {}", e)));
+    let pull_outcome: Result<String, String> =
+        tauri::async_runtime::spawn_blocking(move || run_pull_blocking(&pull_app, backend_id))
+            .await
+            .unwrap_or_else(|e| Err(format!("pull task panic: {}", e)));
 
     if let Err(e) = &pull_outcome {
         log::warn!(
             "[sync-v1-scheduler] backend #{} pull 失败: {}（跳过 push，等下个周期）",
-            backend_id, e
+            backend_id,
+            e
         );
         emit_result(app, backend_id, false, Some(format!("pull 失败: {}", e)));
         return;
@@ -106,22 +108,26 @@ async fn run_backend_sync(app: &AppHandle, backend_id: i64) {
 
     // pull 成功才 push（否则可能把过期数据推给远端）
     let push_app = app.clone();
-    let push_outcome: Result<String, String> = tauri::async_runtime::spawn_blocking(move || {
-        run_push_blocking(&push_app, backend_id)
-    })
-    .await
-    .unwrap_or_else(|e| Err(format!("push task panic: {}", e)));
+    let push_outcome: Result<String, String> =
+        tauri::async_runtime::spawn_blocking(move || run_push_blocking(&push_app, backend_id))
+            .await
+            .unwrap_or_else(|e| Err(format!("push task panic: {}", e)));
 
     match push_outcome {
         Ok(summary) => {
             log::info!(
                 "[sync-v1-scheduler] backend #{} 双向同步完成: {}",
-                backend_id, summary
+                backend_id,
+                summary
             );
             emit_result(app, backend_id, true, None);
         }
         Err(e) => {
-            log::warn!("[sync-v1-scheduler] backend #{} push 失败: {}", backend_id, e);
+            log::warn!(
+                "[sync-v1-scheduler] backend #{} push 失败: {}",
+                backend_id,
+                e
+            );
             emit_result(app, backend_id, false, Some(format!("push 失败: {}", e)));
         }
     }

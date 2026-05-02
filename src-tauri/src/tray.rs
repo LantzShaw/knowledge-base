@@ -25,14 +25,8 @@ pub fn setup_tray(
 
     // 偏好 / 更新
     // 窗口置顶：初始默认关闭（Tauri 没有"读取当前 always-on-top"的 API，以托盘状态为准）
-    let always_on_top = CheckMenuItem::with_id(
-        app,
-        "always-on-top",
-        "窗口置顶",
-        true,
-        false,
-        None::<&str>,
-    )?;
+    let always_on_top =
+        CheckMenuItem::with_id(app, "always-on-top", "窗口置顶", true, false, None::<&str>)?;
     // 开机自启：从 autolaunch 插件读真实状态作为初值，保证与系统一致
     let autostart_enabled = app.autolaunch().is_enabled().unwrap_or(false);
     let autostart = CheckMenuItem::with_id(

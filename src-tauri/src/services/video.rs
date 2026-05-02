@@ -21,7 +21,11 @@ static VIDEO_SEQ: AtomicU64 = AtomicU64::new(0);
 
 #[inline]
 fn assets_dir_name() -> &'static str {
-    if cfg!(debug_assertions) { ASSETS_DIR_DEV } else { ASSETS_DIR_PROD }
+    if cfg!(debug_assertions) {
+        ASSETS_DIR_DEV
+    } else {
+        ASSETS_DIR_PROD
+    }
 }
 
 pub struct VideoService;
@@ -54,23 +58,13 @@ impl VideoService {
         let note_dir = Self::videos_dir(data_dir).join(note_id.to_string());
 
         let path = Path::new(file_name);
-        let stem = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("video");
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("mp4");
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("video");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("mp4");
 
         let file_path = safe_filename::save_unique(&note_dir, stem, ext, data)?;
         VIDEO_SEQ.fetch_add(1, Ordering::Relaxed);
 
-        log::info!(
-            "视频已保存: {} ({} bytes)",
-            file_path.display(),
-            data.len()
-        );
+        log::info!("视频已保存: {} ({} bytes)", file_path.display(), data.len());
         Ok(file_path.to_string_lossy().into_owned())
     }
 
@@ -107,11 +101,7 @@ impl VideoService {
         let file_path = safe_filename::save_unique_from_path(&note_dir, stem, ext, source)?;
         VIDEO_SEQ.fetch_add(1, Ordering::Relaxed);
 
-        log::info!(
-            "视频已复制: {} → {}",
-            source.display(),
-            file_path.display()
-        );
+        log::info!("视频已复制: {} → {}", source.display(), file_path.display());
         Ok(file_path.to_string_lossy().into_owned())
     }
 

@@ -30,8 +30,7 @@ fn row_to_prompt(row: &rusqlite::Row<'_>) -> rusqlite::Result<PromptTemplate> {
     })
 }
 
-const SELECT_COLUMNS: &str =
-    "id, title, description, prompt, output_mode, icon, is_builtin, \
+const SELECT_COLUMNS: &str = "id, title, description, prompt, output_mode, icon, is_builtin, \
      builtin_code, sort_order, enabled, created_at, updated_at";
 
 impl Database {
@@ -44,7 +43,11 @@ impl Database {
         let sql = format!(
             "SELECT {} FROM prompt_templates {} ORDER BY sort_order ASC, id ASC",
             SELECT_COLUMNS,
-            if only_enabled { "WHERE enabled = 1" } else { "" }
+            if only_enabled {
+                "WHERE enabled = 1"
+            } else {
+                ""
+            }
         );
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt

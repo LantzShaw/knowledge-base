@@ -113,7 +113,10 @@ where
                 Ok(vec![])
             } else {
                 // OB 也支持 `tags: foo, bar` 这种内联，自然分割逗号
-                Ok(s.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect())
+                Ok(s.split(',')
+                    .map(|t| t.trim().to_string())
+                    .filter(|t| !t.is_empty())
+                    .collect())
             }
         }
         fn visit_string<E: de::Error>(self, s: String) -> Result<Self::Value, E> {
@@ -163,9 +166,8 @@ pub fn html_to_markdown(html: &str) -> String {
 /// "MD 预览"/"分享 HTML 片段" 等场景。
 #[allow(dead_code)]
 pub fn markdown_to_html(md: &str) -> String {
-    let options = Options::ENABLE_TABLES
-        | Options::ENABLE_STRIKETHROUGH
-        | Options::ENABLE_TASKLISTS;
+    let options =
+        Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
     let parser = Parser::new_ext(md, options);
     let mut out = String::new();
     html::push_html(&mut out, parser);

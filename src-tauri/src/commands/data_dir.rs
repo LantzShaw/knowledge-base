@@ -18,10 +18,7 @@ pub fn get_data_dir_info(app: tauri::AppHandle) -> Result<ResolvedDataDir, Strin
 }
 
 #[tauri::command]
-pub fn set_pending_data_dir(
-    app: tauri::AppHandle,
-    new_path: String,
-) -> Result<(), String> {
+pub fn set_pending_data_dir(app: tauri::AppHandle, new_path: String) -> Result<(), String> {
     let app_data_dir = crate::framework_app_data_dir(&app).map_err(|e| e.to_string())?;
     DataDirResolver::set_pending(&app_data_dir, &new_path).map_err(|e| e.to_string())
 }
@@ -60,9 +57,7 @@ pub fn cancel_pending_migration(app: tauri::AppHandle) -> Result<(), String> {
 
 /// 读迁移 marker（splash 窗口启动时查初始状态用）
 #[tauri::command]
-pub fn get_migration_marker(
-    app: tauri::AppHandle,
-) -> Result<Option<MigrationMarker>, String> {
+pub fn get_migration_marker(app: tauri::AppHandle) -> Result<Option<MigrationMarker>, String> {
     let app_data_dir = crate::framework_app_data_dir(&app).map_err(|e| e.to_string())?;
     DataDirResolver::read_migration_marker(&app_data_dir).map_err(|e| e.to_string())
 }

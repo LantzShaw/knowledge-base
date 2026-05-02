@@ -8,7 +8,10 @@ use super::Database;
 impl Database {
     /// 全文搜索：先用 FTS5，无结果则用 LIKE 模糊搜索兜底（支持中文）
     pub fn search_notes(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         // 1. 尝试 FTS5 搜索（需要转换为 FTS5 语法）
         let fts_query = sanitize_fts_query(query);
@@ -165,9 +168,9 @@ fn build_highlight_snippet(content: &str, keywords: &[&str]) -> String {
     // 找第一个关键词出现的 char 位置
     let first_char_pos = keywords.iter().find_map(|kw| {
         let kw_lower = kw.to_lowercase();
-        plain_lower.find(&kw_lower).map(|byte_pos| {
-            plain_lower[..byte_pos].chars().count()
-        })
+        plain_lower
+            .find(&kw_lower)
+            .map(|byte_pos| plain_lower[..byte_pos].chars().count())
     });
 
     // 截取片段：关键词前置只留 10 字符，避免在搜索面板单行/双行截断里
@@ -200,10 +203,7 @@ fn build_highlight_snippet(content: &str, keywords: &[&str]) -> String {
 
         while i < snippet_chars.len() {
             if i + kw_char_len <= snippet_chars.len()
-                && snippet_lower[i..i + kw_char_len]
-                    .iter()
-                    .collect::<String>()
-                    == kw_lower
+                && snippet_lower[i..i + kw_char_len].iter().collect::<String>() == kw_lower
             {
                 result.push_str("<mark>");
                 for j in i..i + kw_char_len {

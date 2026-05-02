@@ -7,11 +7,7 @@ pub struct FolderService;
 
 impl FolderService {
     /// 创建文件夹
-    pub fn create(
-        db: &Database,
-        name: &str,
-        parent_id: Option<i64>,
-    ) -> Result<Folder, AppError> {
+    pub fn create(db: &Database, name: &str, parent_id: Option<i64>) -> Result<Folder, AppError> {
         let name = name.trim();
         if name.is_empty() {
             return Err(AppError::InvalidInput("文件夹名称不能为空".into()));
@@ -44,11 +40,7 @@ impl FolderService {
     }
 
     /// 移动文件夹（改父节点，不处理同级排序）
-    pub fn move_to(
-        db: &Database,
-        id: i64,
-        new_parent_id: Option<i64>,
-    ) -> Result<(), AppError> {
+    pub fn move_to(db: &Database, id: i64, new_parent_id: Option<i64>) -> Result<(), AppError> {
         db.move_folder(id, new_parent_id)
     }
 
