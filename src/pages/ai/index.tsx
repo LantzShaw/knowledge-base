@@ -217,10 +217,10 @@ export default function AiChatPage() {
   }, [msgCtx.state.payload]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const unlistenRefs = useRef<UnlistenFn[]>([]);
-  // 跟踪组件挂载状态：handleSend 内每个 await listen 之后检查，
-  // 若 unmounted 则立即 unlisten 避免泄漏 + 后续 setState 报警告
+  // 跟踪组件挂载状态（防 setState on unmounted）
   const mountedRef = useRef(true);
+  // activeConvId 的 ref 镜像 —— 给 ai:done handler 用，避免 mount-once useEffect 闭包陷阱
+  const activeConvIdRef = useRef<number | null>(null);
 
   // 初始化
   useEffect(() => {
@@ -228,10 +228,84 @@ export default function AiChatPage() {
     loadModels();
     return () => {
       mountedRef.current = false;
-      unlistenRefs.current.forEach((fn) => fn());
-      unlistenRefs.current = [];
     };
   }, []);
+
+  // ─── 全局 ai:* 事件监听（mount once） ─────────────────────────
+  //
+  // 历史 bug：之前在 handleSend 里 await listen() 4 次再 await sendMessage。
+  // - 切走时 useEffect cleanup → unlisten → 流式 token 丢失 → 切回只能 loadMessages
+  //   看到完整答案，streaming 期间 UI 一直空白
+  // - 4 次串行 await listen() 的 100~200ms 注册延迟期间如果上游就开始流，可能丢前几个 token
+  //
+  // 修复：listen 提到顶层，整个组件生命周期内只注册一次。
+  // 切走 → 组件 unmount → cleanup unlisten；切回 mount → 重新 listen，无需依赖 send。
+  // 各 setter 是 stable 引用，闭包陷阱不存在；activeConvId 通过 ref 镜像拿最新。
+  useEffect(() => {
+    let unlistens: UnlistenFn[] = [];
+    let cancelled = false;
+
+    (async () => {
+      const tokenUnlisten = await listen<string>("ai:token", (event) => {
+        setStreamingText((prev) => prev + event.payload);
+      });
+      const doneUnlisten = await listen("ai:done", async () => {
+        setStreaming(false);
+        const conv = activeConvIdRef.current;
+        if (conv) {
+          await loadMessages(conv);
+          await loadConversations();
+        }
+        setStreamingText("");
+        setStreamingSkillCalls([]);
+      });
+      const errorUnlisten = await listen<string>("ai:error", (event) => {
+        setStreaming(false);
+        setStreamingText("");
+        setStreamingSkillCalls([]);
+        message.error(`AI 错误: ${event.payload}`);
+      });
+      // tool_call 事件可能多次触发（running → ok/error），按 id upsert
+      const toolCallUnlisten = await listen<SkillCall>(
+        "ai:tool_call",
+        (event) => {
+          const incoming = event.payload;
+          setStreamingSkillCalls((prev) => {
+            const idx = prev.findIndex((c) => c.id === incoming.id);
+            if (idx >= 0) {
+              const next = prev.slice();
+              next[idx] = incoming;
+              return next;
+            }
+            return [...prev, incoming];
+          });
+        },
+      );
+
+      if (cancelled) {
+        // 注册期间已 unmount，立即解绑
+        tokenUnlisten();
+        doneUnlisten();
+        errorUnlisten();
+        toolCallUnlisten();
+      } else {
+        unlistens = [tokenUnlisten, doneUnlisten, errorUnlisten, toolCallUnlisten];
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      unlistens.forEach((fn) => fn());
+    };
+    // 故意空依赖：mount once。state setters 都是 stable，
+    // activeConvId 通过 activeConvIdRef.current 拿最新值
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 同步 activeConvId 到 ref，给 ai:done handler 用
+  useEffect(() => {
+    activeConvIdRef.current = activeConvId;
+  }, [activeConvId]);
 
   // 待发送的自动 prompt（首页"问 AI"入口跳过来时携带）
   // 等 activeConvId 切到目标对话后再触发 handleSend(prompt)
@@ -464,64 +538,9 @@ export default function AiChatPage() {
     };
     setMessages((prev) => [...prev, userMsg]);
 
-    // 监听流式事件
-    const cleanup = async () => {
-      for (const fn of unlistenRefs.current) {
-        fn();
-      }
-      unlistenRefs.current = [];
-    };
-    await cleanup();
-
-    // 每个 listen 注册后立即 push 到 unlistenRefs，避免一次性赋值时
-    // 中间 await 期间 unmount 导致前面 listener 泄漏。
-    // 同时检查 mountedRef，unmounted 后立即 unlisten 不再 push。
-    const safeRegister = async <T,>(
-      event: string,
-      handler: (e: { payload: T }) => void,
-    ) => {
-      const fn = await listen<T>(event, handler);
-      if (mountedRef.current) {
-        unlistenRefs.current.push(fn);
-      } else {
-        fn(); // 已 unmount → 立即解绑
-      }
-    };
-
-    await safeRegister<string>("ai:token", (event) => {
-      setStreamingText((prev) => prev + event.payload);
-    });
-    await safeRegister<unknown>("ai:done", async () => {
-      setStreaming(false);
-      await cleanup();
-      // 重新加载消息获取完整数据
-      if (activeConvId) {
-        await loadMessages(activeConvId);
-        await loadConversations();
-      }
-      setStreamingText("");
-      setStreamingSkillCalls([]);
-    });
-    await safeRegister<string>("ai:error", async (event) => {
-      setStreaming(false);
-      await cleanup();
-      setStreamingText("");
-      setStreamingSkillCalls([]);
-      message.error(`AI 错误: ${event.payload}`);
-    });
-    // T-004: tool_call 事件可能多次触发（running → ok/error）
-    await safeRegister<SkillCall>("ai:tool_call", (event) => {
-      const incoming = event.payload;
-      setStreamingSkillCalls((prev) => {
-        const idx = prev.findIndex((c) => c.id === incoming.id);
-        if (idx >= 0) {
-          const next = prev.slice();
-          next[idx] = incoming;
-          return next;
-        }
-        return [...prev, incoming];
-      });
-    });
+    // 注：ai:* 事件 listener 已经在顶层 useEffect 全局注册（mount once），
+    // 这里只管发请求。事件流期间 streamingText / streamingSkillCalls 会被
+    // 全局 listener 持续刷新，无需再 register / cleanup。
 
     // 把 AttachmentPreview 按 kind 转成后端期望的 MessageAttachment
     const attachmentsPayload: MessageAttachment[] = pendingAttachments.map(
@@ -540,7 +559,6 @@ export default function AiChatPage() {
       setPendingAttachments([]);
     } catch (e) {
       setStreaming(false);
-      await cleanup();
       setStreamingText("");
       setStreamingSkillCalls([]);
       showAiError(e);
