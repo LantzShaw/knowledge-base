@@ -1460,7 +1460,7 @@ export function TiptapEditor({
 
   // 编辑器节点右键菜单：图片/视频/附件/wiki 链接的自定义右键操作；
   // 普通文本继续走浏览器原生剪切/复制/粘贴菜单
-  const { ctx: nodeCtxMenu, menuItems: nodeMenuItems } = useEditorContextMenu(editor);
+  const { ctx: nodeCtxMenu, menuItems: nodeMenuItems } = useEditorContextMenu(editor, noteId);
 
   // 编辑器统计信息：打字时不实时算，停顿 300ms 后再遍历整篇。
   // 算法与右上角 EditorStats 共用 src/lib/textStats.ts，确保两处数字永远一致。

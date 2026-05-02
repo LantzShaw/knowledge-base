@@ -81,7 +81,7 @@ export const Annotation = Mark.create({
 
   addKeyboardShortcuts() {
     return {
-      "Mod-Alt-m": () => {
+      "Mod-Shift-m": () => {
         // 广播给 React 侧，让 EditorToolbar 弹 Modal 输入批注内容。
         // mark 本身不能弹 antd Modal（不在 React 树里），用 CustomEvent 解耦。
         document.dispatchEvent(new CustomEvent("kb-annotation-shortcut"));

@@ -45,6 +45,7 @@ import {
 import { open } from "@tauri-apps/plugin-dialog";
 import { toKbAsset } from "@/lib/assetUrl";
 import { attachmentApi, imageApi, videoApi } from "@/lib/api";
+import { MicButton } from "@/components/MicButton";
 import { insertVideoTimestamp } from "./VideoTimestamp";
 import { EditorStats } from "./EditorStats";
 import { EmojiPicker } from "./EmojiPicker";
@@ -664,6 +665,17 @@ export function EditorToolbar({ editor, noteId, ensureNoteId }: ToolbarProps) {
         icon: null,
         title: "插入 Emoji",
         customRender: () => <EmojiPicker editor={editor} />,
+      },
+      {
+        icon: null,
+        title: "语音输入",
+        customRender: () => (
+          <MicButton
+            onTranscribed={(text) =>
+              editor.chain().focus().insertContent(text).run()
+            }
+          />
+        ),
       },
       {
         icon: (

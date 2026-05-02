@@ -67,7 +67,7 @@ export function AnnotationButton({ editor }: Props) {
 
   return (
     <>
-      <Tooltip title="批注 (Ctrl+Alt+M)" mouseEnterDelay={0.5}>
+      <Tooltip title="批注 (Ctrl+Shift+M)" mouseEnterDelay={0.5}>
         <Button
           type="text"
           size="small"
@@ -86,7 +86,7 @@ export function AnnotationButton({ editor }: Props) {
         title={hasMark ? "编辑批注" : "添加批注"}
         open={open}
         onCancel={() => setOpen(false)}
-        destroyOnClose
+        destroyOnHidden
         width={420}
         footer={[
           hasMark ? (

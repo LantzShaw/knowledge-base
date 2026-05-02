@@ -9,10 +9,14 @@ import {
   FolderOpen,
   Hash,
   MessageSquare,
+  Image as ImageIcon,
+  Layers,
 } from "lucide-react";
 import { revealItemInDir, openPath } from "@tauri-apps/plugin-opener";
 import { useContextMenu } from "@/hooks/useContextMenu";
-import { systemApi, linkApi } from "@/lib/api";
+import { useFeatureEnabled } from "@/hooks/useFeatureEnabled";
+import { systemApi, linkApi, imageApi, cardApi } from "@/lib/api";
+import { parseKbAsset } from "@/lib/assetUrl";
 import {
   type ContextMenuEntry,
 } from "@/components/ui/ContextMenuOverlay";
@@ -41,9 +45,36 @@ type EditorMenuPayload =
   | { kind: "file"; href: string; el: HTMLElement }
   | { kind: "annotation"; comment: string; el: HTMLElement };
 
-/** 把 kb-asset:// / file:// / 相对路径解析成系统绝对路径 */
+/**
+ * Tiptap MutationObserver 渲染期会把 `kb-asset://` 替换成 Tauri 的 asset 协议 URL，
+ * 形如 `http://asset.localhost/<encoded-abs>` (Windows) 或 `asset://localhost/<encoded-abs>` (macOS/Linux)。
+ * 路径部分是 `convertFileSrc(abs)` 编码出来的，decodeURIComponent 即得绝对路径。
+ */
+const ASSET_HOST_PREFIXES = [
+  "http://asset.localhost/",
+  "https://asset.localhost/",
+  "asset://localhost/",
+];
+
+function decodeAssetLocalhost(url: string): string | null {
+  for (const prefix of ASSET_HOST_PREFIXES) {
+    if (url.startsWith(prefix)) {
+      try {
+        return decodeURIComponent(url.slice(prefix.length));
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+/** 把 kb-asset:// / file:// / asset.localhost / 相对路径解析成系统绝对路径 */
 async function resolveAbsolute(urlOrSrc: string): Promise<string | null> {
   if (!urlOrSrc) return null;
+  // Tauri asset 协议（Tiptap 渲染期注入到 DOM 的 src）→ 反解出原绝对路径
+  const fromAssetHost = decodeAssetLocalhost(urlOrSrc);
+  if (fromAssetHost) return fromAssetHost;
   // file:// → 转文件系统路径
   if (urlOrSrc.startsWith("file://")) {
     try {
@@ -55,14 +86,20 @@ async function resolveAbsolute(urlOrSrc: string): Promise<string | null> {
     }
   }
   // kb-asset://<rel> → 后端 resolveAssetAbsolute
-  if (urlOrSrc.startsWith("kb-asset://")) {
-    const rel = urlOrSrc.slice("kb-asset://".length);
-    try {
-      return await systemApi.resolveAssetAbsolute(rel);
-    } catch {
-      return null;
+  // 用 parseKbAsset 而不是手动 slice：前者会 decodeURIComponent，
+  // 处理 markdown 序列化往返后 attrs.src 变成 `kb-asset://%E4%B8%AD%E6%96%87.png` 的情况。
+  {
+    const rel = parseKbAsset(urlOrSrc);
+    if (rel !== null) {
+      try {
+        return await systemApi.resolveAssetAbsolute(rel);
+      } catch {
+        return null;
+      }
     }
   }
+  // blob: → 加密素材运行期生成的 Blob URL，无从反解到磁盘路径
+  if (urlOrSrc.startsWith("blob:")) return null;
   // 相对路径 → 也走 resolveAssetAbsolute 兜底
   if (!urlOrSrc.startsWith("http") && !urlOrSrc.startsWith("/")) {
     try {
@@ -75,9 +112,14 @@ async function resolveAbsolute(urlOrSrc: string): Promise<string | null> {
   return urlOrSrc;
 }
 
-export function useEditorContextMenu(editor: Editor | null) {
+export function useEditorContextMenu(
+  editor: Editor | null,
+  noteId?: number | null,
+) {
   const ctx = useContextMenu<EditorMenuPayload>();
   const navigate = useNavigate();
+  // 设置里关闭"卡片复习"模块时，annotation 右键的"转为闪卡"项整条隐藏
+  const cardsEnabled = useFeatureEnabled("cards");
 
   /** 删除指定 DOM 对应的节点（用于图片 / 视频右键的"删除"项） */
   const deleteNodeAtElement = useCallback(
@@ -93,6 +135,29 @@ export function useEditorContextMenu(editor: Editor | null) {
       } catch (e) {
         message.error(`删除失败：${e}`);
       }
+    },
+    [editor],
+  );
+
+  /**
+   * 取节点的原始 src：MutationObserver 会把 `<img src="kb-asset://...">` 重写成
+   * `http://asset.localhost/<encoded>` 用于渲染，但 ProseMirror state 里的 attrs.src
+   * 始终是原始的 `kb-asset://...`。"在文件管理器中显示" / "用默认应用打开" 必须拿原始值
+   * 走后端解析，否则会把 asset 协议 URL 当成路径喂给系统 API → OS error 123。
+   */
+  const getOriginalSrc = useCallback(
+    (el: HTMLElement, fallback: string): string => {
+      if (!editor) return fallback;
+      try {
+        const pos = editor.view.posAtDOM(el, 0);
+        if (pos < 0) return fallback;
+        const node = editor.state.doc.nodeAt(pos);
+        const src = node?.attrs?.src;
+        if (typeof src === "string" && src.length > 0) return src;
+      } catch {
+        // posAtDOM 偶尔会抛（比如节点已被卸载）—— 退回 DOM src
+      }
+      return fallback;
     },
     [editor],
   );
@@ -135,7 +200,8 @@ export function useEditorContextMenu(editor: Editor | null) {
       const videoEl = target.closest<HTMLElement>(".tiptap-video-block");
       if (videoEl) {
         const inner = videoEl.querySelector("video");
-        const src = inner?.getAttribute("src") ?? "";
+        const domSrc = inner?.getAttribute("src") ?? "";
+        const src = getOriginalSrc(videoEl, domSrc);
         e.preventDefault();
         ctx.open(
           { clientX: e.clientX, clientY: e.clientY },
@@ -147,7 +213,8 @@ export function useEditorContextMenu(editor: Editor | null) {
       // 3. 图片（含 figure 内的 img）
       const imgEl = target.closest<HTMLElement>("img");
       if (imgEl) {
-        const src = imgEl.getAttribute("src") ?? "";
+        const domSrc = imgEl.getAttribute("src") ?? "";
+        const src = getOriginalSrc(imgEl, domSrc);
         e.preventDefault();
         ctx.open(
           { clientX: e.clientX, clientY: e.clientY },
@@ -172,7 +239,7 @@ export function useEditorContextMenu(editor: Editor | null) {
 
       // 其他位置（普通文本 / 列表 / 表格等）→ 不拦，走浏览器原生菜单
     },
-    [editor, ctx],
+    [editor, ctx, getOriginalSrc],
   );
 
   // 用 capture-phase 原生 listener，比 React 合成事件先触发
@@ -207,6 +274,98 @@ export function useEditorContextMenu(editor: Editor | null) {
         await revealItemInDir(abs);
       } catch (err) {
         message.error(`打开文件管理器失败：${err}`);
+      }
+    };
+    /**
+     * 复制可在系统资源管理器 / 终端使用的绝对路径。
+     * 笔记 content 里 src 是 `kb-asset://...` 内部 URL，对用户没意义；
+     * 这里走 resolveAbsolute 转成 OS 原生绝对路径再写剪贴板。
+     * 远程 http(s) URL 原样复制（resolveAbsolute 对其透传）。
+     */
+    const copyAbsolutePath = async (urlOrSrc: string) => {
+      const abs = await resolveAbsolute(urlOrSrc);
+      if (!abs) {
+        message.warning("无法解析路径");
+        return;
+      }
+      copyText(abs, "已复制路径");
+    };
+    /**
+     * 取图片原始字节。
+     * - `kb-asset://<rel>` → 走后端 IPC（加密图也能拿到明文 bytes）
+     * - 其它（http 外链 / blob: / data:）→ fetch DOM 上的渲染 URL 兜底
+     *
+     * 不能直接 `canvas.drawImage(imgEl)` 再 toBlob：`<img>` 加载自 `http://asset.localhost`，
+     * 与主窗 origin 不同源，canvas 会被污染（tainted）→ toBlob 抛 SecurityError。
+     */
+    const fetchImageBytes = async (
+      src: string,
+      el: HTMLElement,
+    ): Promise<Uint8Array | null> => {
+      const kbRel = parseKbAsset(src);
+      if (kbRel !== null) {
+        try {
+          return await imageApi.getBlob(kbRel);
+        } catch {
+          // IPC 失败（vault 锁定 / 文件丢失等）→ fall through 到 fetch
+        }
+      }
+      const imgEl = (
+        el.tagName === "IMG" ? el : el.querySelector("img")
+      ) as HTMLImageElement | null;
+      const url = imgEl?.currentSrc || imgEl?.src || src;
+      if (!url) return null;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return new Uint8Array(await res.arrayBuffer());
+      } catch {
+        return null;
+      }
+    };
+
+    /**
+     * 把图片复制成 PNG 写到系统剪贴板。
+     *
+     * 流程：拿到原始字节 → `createImageBitmap(blob)` 解码 → canvas → toBlob('image/png')。
+     * 关键点：`createImageBitmap` 的 source 是 Blob（同源数据），canvas 不会被污染，
+     * 所以 toBlob 不会抛 SecurityError。
+     *
+     * ClipboardItem 在 Chromium 上稳定支持 image/png，统一转 PNG 最稳。
+     */
+    const copyImageBlob = async (rawSrc: string, el: HTMLElement) => {
+      try {
+        const bytes = await fetchImageBytes(rawSrc, el);
+        if (!bytes || bytes.length === 0) {
+          message.error("无法获取图片数据");
+          return;
+        }
+        const sourceBlob = new Blob([bytes as BlobPart]);
+        const bitmap = await createImageBitmap(sourceBlob);
+        let pngBlob: Blob;
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) throw new Error("Canvas 2D 上下文不可用");
+          ctx.drawImage(bitmap, 0, 0);
+          pngBlob = await new Promise<Blob>((resolve, reject) => {
+            canvas.toBlob(
+              (b) =>
+                b ? resolve(b) : reject(new Error("canvas.toBlob 返回 null")),
+              "image/png",
+            );
+          });
+        } finally {
+          bitmap.close();
+        }
+        await navigator.clipboard.write([
+          new ClipboardItem({ "image/png": pngBlob }),
+        ]);
+        message.success("已复制图片");
+      } catch (err) {
+        message.error(`复制图片失败：${err}`);
       }
     };
     const openByDefaultApp = async (urlOrSrc: string) => {
@@ -263,12 +422,21 @@ export function useEditorContextMenu(editor: Editor | null) {
     if (p.kind === "image") {
       return [
         {
+          key: "copy-image",
+          label: "复制图片",
+          icon: <ImageIcon size={13} />,
+          onClick: () => {
+            ctx.close();
+            void copyImageBlob(p.src, p.el);
+          },
+        },
+        {
           key: "copy-path",
           label: "复制路径",
           icon: <Copy size={13} />,
           onClick: () => {
             ctx.close();
-            copyText(p.src);
+            void copyAbsolutePath(p.src);
           },
         },
         {
@@ -302,7 +470,7 @@ export function useEditorContextMenu(editor: Editor | null) {
           icon: <Copy size={13} />,
           onClick: () => {
             ctx.close();
-            copyText(p.src);
+            void copyAbsolutePath(p.src);
           },
         },
         {
@@ -357,6 +525,36 @@ export function useEditorContextMenu(editor: Editor | null) {
             copyText(p.comment, "已复制批注内容");
           },
         },
+        // 仅在"卡片复习"模块启用时展示"转为闪卡"
+        ...(cardsEnabled
+          ? [
+              {
+                key: "to-card",
+                label: "转为闪卡",
+                icon: <Layers size={13} />,
+                onClick: async () => {
+                  ctx.close();
+                  // 正面 = 原文（被批注的文字），反面 = 批注内容
+                  const front = (p.el.textContent ?? "").trim();
+                  const back = p.comment.trim();
+                  if (!front || !back) {
+                    message.warning("原文或批注为空，无法生成闪卡");
+                    return;
+                  }
+                  try {
+                    await cardApi.create({
+                      front,
+                      back,
+                      noteId: noteId ?? null,
+                    });
+                    message.success("已生成闪卡，前往「卡片复习」查看");
+                  } catch (err) {
+                    message.error(`生成失败：${err}`);
+                  }
+                },
+              } as ContextMenuEntry,
+            ]
+          : []),
         { type: "divider" },
         {
           key: "delete",
@@ -415,7 +613,7 @@ export function useEditorContextMenu(editor: Editor | null) {
         },
       },
     ];
-  }, [ctx, navigate, deleteNodeAtElement, editor]);
+  }, [ctx, navigate, deleteNodeAtElement, editor, noteId, cardsEnabled]);
 
   return { ctx, menuItems };
 }
