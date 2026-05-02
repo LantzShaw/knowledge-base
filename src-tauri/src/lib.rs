@@ -125,9 +125,7 @@ fn app_data_dir_name() -> String {
 /// Tauri 内置 `app.path().app_data_dir()` 永远返回 prod 名（基于 tauri.conf.json
 /// 的 identifier），所有运行期 Command 拿 framework_app_data_dir 都要经过本函数，
 /// 否则 dev 单实例锁 / multi_instance flag / 指针文件 等会落到 prod 目录里。
-pub(crate) fn framework_app_data_dir(
-    handle: &tauri::AppHandle,
-) -> Result<PathBuf, tauri::Error> {
+pub(crate) fn framework_app_data_dir(handle: &tauri::AppHandle) -> Result<PathBuf, tauri::Error> {
     let from_tauri = handle.path().app_data_dir()?;
     if cfg!(debug_assertions) {
         Ok(from_tauri
@@ -369,7 +367,9 @@ fn run_data_dir_migration_with_splash(
 
     log::info!(
         "[migration] 检测到 marker: {} → {} (status={:?})",
-        marker.from, marker.to, marker.status
+        marker.from,
+        marker.to,
+        marker.status
     );
 
     // 创建 splash 窗口
@@ -386,9 +386,7 @@ fn run_data_dir_migration_with_splash(
     .always_on_top(true)
     .visible(true)
     .build()
-    .map_err(|e| {
-        crate::error::AppError::Custom(format!("splash 窗口创建失败: {}", e))
-    })?;
+    .map_err(|e| crate::error::AppError::Custom(format!("splash 窗口创建失败: {}", e)))?;
 
     // 让 splash 内 JS 有机会订阅事件（首屏 React 渲染 + listen 调用大约 100ms）
     std::thread::sleep(std::time::Duration::from_millis(300));
@@ -494,13 +492,13 @@ pub fn run() {
 
             // T-013: 解析最终数据根目录（env > 指针文件 > 默认）
             // 注意 dev 模式旧数据迁移、单实例锁仍在 framework_app_data_dir 上做
-            let resolved_data_dir = services::data_dir::DataDirResolver::resolve(
-                &framework_app_data_dir,
-            )
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+            let resolved_data_dir =
+                services::data_dir::DataDirResolver::resolve(&framework_app_data_dir)
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
             log::info!(
                 "[data_dir] 当前数据根: {} (source={:?})",
-                resolved_data_dir.current_dir, resolved_data_dir.source
+                resolved_data_dir.current_dir,
+                resolved_data_dir.source
             );
             let data_dir_root = std::path::PathBuf::from(&resolved_data_dir.current_dir);
             std::fs::create_dir_all(&data_dir_root)?;
@@ -541,8 +539,9 @@ pub fn run() {
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
             log::info!("图片存储目录: {}", images_dir.display());
 
-            let attachments_dir = services::attachment::AttachmentService::ensure_dir(&instance_dir)
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+            let attachments_dir =
+                services::attachment::AttachmentService::ensure_dir(&instance_dir)
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
             log::info!("附件存储目录: {}", attachments_dir.display());
 
             let pdfs_dir = services::pdf::PdfService::ensure_dir(&instance_dir)
@@ -560,7 +559,10 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             const PDFIUM_LIB: &str = "resources/pdfium/libpdfium.so";
 
-            match app.path().resolve(PDFIUM_LIB, tauri::path::BaseDirectory::Resource) {
+            match app
+                .path()
+                .resolve(PDFIUM_LIB, tauri::path::BaseDirectory::Resource)
+            {
                 Ok(lib_path) => match services::pdf::init_pdfium(&lib_path) {
                     Ok(()) => log::info!("PDFium 绑定成功: {}", lib_path.display()),
                     Err(e) => log::warn!(
@@ -581,14 +583,20 @@ pub fn run() {
             // 都会落到这条静态 scope 之外，导致 `convertFileSrc()` 出来的 asset URL 被 WebView 拒绝
             // → 图片/视频/PDF/附件全部加载失败。
             // 失败仅 log warn：素材渲染降级，不阻断启动。
-            if let Err(e) = app.asset_protocol_scope().allow_directory(&instance_dir, true) {
+            if let Err(e) = app
+                .asset_protocol_scope()
+                .allow_directory(&instance_dir, true)
+            {
                 log::warn!(
                     "[asset_scope] 注册数据目录到 asset 协议失败（图片/PDF 可能无法显示）: {} ({})",
                     instance_dir.display(),
                     e
                 );
             } else {
-                log::info!("[asset_scope] 已允许 asset 协议读取: {}", instance_dir.display());
+                log::info!(
+                    "[asset_scope] 已允许 asset 协议读取: {}",
+                    instance_dir.display()
+                );
             }
 
             // ─── 启动 in-memory MCP server（kb-core）─────────────
@@ -648,10 +656,7 @@ pub fn run() {
             // ⚠️ 投递文件刻意走 framework_app_data_dir（不是 data_dir_root）：
             //    其他进程不知道当前用户配的自定义路径，必须用 OS 给的固定位置约定
             if instance_id.is_none() {
-                start_md_deliver_watcher(
-                    app.handle().clone(),
-                    framework_app_data_dir.clone(),
-                );
+                start_md_deliver_watcher(app.handle().clone(), framework_app_data_dir.clone());
 
                 // 全局快捷键：仅默认实例注册，避免多开实例互抢系统级热键。
                 // 单条注册失败只 log warn，不阻断启动；用户可在设置页改键/禁用
@@ -953,6 +958,16 @@ pub fn run() {
             commands::sync::sync_delete_webdav_password,
             commands::sync::sync_list_history,
             commands::sync::sync_scheduler_reload,
+            // 闪卡 + FSRS 复习
+            commands::cards::create_card,
+            commands::cards::list_cards,
+            commands::cards::get_card,
+            commands::cards::list_due_cards,
+            commands::cards::update_card_content,
+            commands::cards::delete_card,
+            commands::cards::review_card,
+            commands::cards::get_card_stats,
+            commands::cards::list_card_review_logs,
             // 待办模块
             commands::tasks::list_tasks,
             commands::tasks::get_task,
@@ -979,6 +994,11 @@ pub fn run() {
             commands::tasks::create_task_category,
             commands::tasks::update_task_category,
             commands::tasks::delete_task_category,
+            // 语音识别（ASR）
+            commands::asr::asr_get_config,
+            commands::asr::asr_save_config,
+            commands::asr::asr_test_connection,
+            commands::asr::asr_transcribe_audio,
         ])
         // ─── 窗口事件处理 ─────────────────────────
         .on_window_event(|window, event| {

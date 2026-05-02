@@ -1330,8 +1330,6 @@ pub struct SyncPullResult {
     pub errors: Vec<String>,
 }
 
-
-
 // ─── M5-2: 外部 MCP server 注册表 ─────────────────────────────────
 
 /// 用户在「设置 → MCP 服务器」里添加的一个外部 MCP server。
@@ -1377,4 +1375,188 @@ fn default_transport() -> String {
 }
 fn default_enabled() -> bool {
     true
+}
+
+// ─── 语音识别（ASR）─────────────────────────────
+//
+// 抽象一层 AsrProvider，先实现阿里云 DashScope（qwen3-asr-flash-filetrans / paraformer-v2）。
+// 配置存到 app_config 表（KV 形式），key 前缀 `asr.*`：
+//   asr.provider / asr.api_key / asr.model / asr.region / asr.enabled
+
+/// ASR 服务商类型
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AsrProviderKind {
+    /// 阿里云百炼 DashScope
+    Dashscope,
+}
+
+impl AsrProviderKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Dashscope => "dashscope",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "dashscope" => Some(Self::Dashscope),
+            _ => None,
+        }
+    }
+}
+
+/// ASR 配置（前端展示与保存共用）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AsrConfig {
+    pub provider: AsrProviderKind,
+    /// API Key（明文存 app_config，与现有 ai_models.api_key 风格一致）
+    pub api_key: String,
+    /// 模型 ID，如 `qwen3-asr-flash-filetrans` / `paraformer-v2`
+    pub model: String,
+    /// 区域："beijing"（默认）/ "singapore"
+    pub region: String,
+    pub enabled: bool,
+}
+
+impl Default for AsrConfig {
+    fn default() -> Self {
+        Self {
+            provider: AsrProviderKind::Dashscope,
+            api_key: String::new(),
+            // 同步多模态 API，支持 base64 直传，无需轮询
+            model: "qwen3-asr-flash".into(),
+            region: "beijing".into(),
+            enabled: false,
+        }
+    }
+}
+
+/// 转录请求入参（前端把录音 base64 + mime 传过来）
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscribeRequest {
+    /// 音频 base64（不含 data:xxx;base64, 前缀）
+    pub audio_base64: String,
+    /// 音频 MIME，如 "audio/wav" / "audio/mpeg" / "audio/webm;codecs=opus"
+    pub mime: String,
+    /// 语言提示，可选（zh / en / auto）；缺省 auto
+    pub language: Option<String>,
+}
+
+/// 转录结果
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscribeResult {
+    /// 识别出的完整文本
+    pub text: String,
+    /// 端到端耗时（毫秒，含轮询）
+    pub latency_ms: u64,
+    /// 实际使用的模型
+    pub model: String,
+}
+
+/// 连接测试结果（"测试连接"按钮用）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AsrTestResult {
+    pub ok: bool,
+    pub latency_ms: u64,
+    /// 失败时的简短中文原因；成功时为 None
+    pub message: Option<String>,
+}
+
+// ─── 闪卡 + FSRS 复习 ───────────────────────────────────────────
+
+/// 闪卡：正反两面 + FSRS 调度状态。
+///
+/// FSRS state 取值（与 ts-fsrs State 枚举一致）：
+///   0=New（新卡）, 1=Learning（学习中）, 2=Review（复习中）, 3=Relearning（重学）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Card {
+    pub id: i64,
+    /// 关联的笔记 ID（从笔记中提炼时设置；笔记删除后变 NULL，卡片仍可保留）
+    pub note_id: Option<i64>,
+    pub front: String,
+    pub back: String,
+    /// 套牌名，默认 "default"
+    pub deck: String,
+
+    // FSRS 调度状态
+    pub due: String,
+    pub stability: f64,
+    pub difficulty: f64,
+    pub elapsed_days: i32,
+    pub scheduled_days: i32,
+    pub reps: i32,
+    pub lapses: i32,
+    pub state: i32,
+    pub last_review: Option<String>,
+
+    pub is_deleted: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// 创建卡片入参（前端 → Rust）
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateCardInput {
+    pub front: String,
+    pub back: String,
+    /// 缺省时使用 "default"
+    pub deck: Option<String>,
+    /// 缺省时不关联笔记
+    pub note_id: Option<i64>,
+}
+
+/// 复习一张卡片入参（前端用 ts-fsrs 算好新状态后传回）
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewCardInput {
+    pub card_id: i64,
+    /// 用户评分: 1=Again, 2=Hard, 3=Good, 4=Easy
+    pub rating: i32,
+    /// 前端 ts-fsrs 算出的新调度状态
+    pub state: i32,
+    pub due: String,
+    pub stability: f64,
+    pub difficulty: f64,
+    pub elapsed_days: i32,
+    pub last_elapsed_days: i32,
+    pub scheduled_days: i32,
+}
+
+/// 卡片复习历史（review_log）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardReviewLog {
+    pub id: i64,
+    pub card_id: i64,
+    pub rating: i32,
+    pub state: i32,
+    pub due: String,
+    pub stability: f64,
+    pub difficulty: f64,
+    pub elapsed_days: i32,
+    pub last_elapsed_days: i32,
+    pub scheduled_days: i32,
+    pub review: String,
+}
+
+/// 卡片统计（首页展示"今日待复习/学习中/总数"）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardStats {
+    /// 今天到期（含已过期）的待复习数
+    pub due_today: i64,
+    /// 处于 Learning / Relearning 的卡数
+    pub learning: i64,
+    /// 处于 Review 的卡数
+    pub review: i64,
+    /// 状态 New（从未复习过）的卡数
+    pub new_cards: i64,
+    /// 总卡数（不含已删除）
+    pub total: i64,
 }

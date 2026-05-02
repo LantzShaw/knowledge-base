@@ -1,7 +1,8 @@
 pub mod ai;
-pub mod mcp_servers;
+pub mod cards;
 pub mod folders;
 pub mod links;
+pub mod mcp_servers;
 pub mod notes;
 pub mod prompt;
 pub mod schema;
@@ -57,9 +58,7 @@ impl Database {
     }
 
     /// 获取数据库连接锁（供 Service 层复杂操作使用）
-    pub fn conn_lock(
-        &self,
-    ) -> Result<std::sync::MutexGuard<'_, Connection>, AppError> {
+    pub fn conn_lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, AppError> {
         self.conn
             .lock()
             .map_err(|e| AppError::Custom(e.to_string()))
@@ -122,7 +121,10 @@ impl Database {
 
     /// 获取所有配置
     pub fn get_all_config(&self) -> Result<Vec<AppConfig>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let mut stmt = conn.prepare("SELECT key, value FROM app_config ORDER BY key")?;
         let configs = stmt
             .query_map([], |row| {
@@ -137,17 +139,21 @@ impl Database {
 
     /// 获取单个配置
     pub fn get_config(&self, key: &str) -> Result<Option<String>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let mut stmt = conn.prepare("SELECT value FROM app_config WHERE key = ?1")?;
-        let result = stmt
-            .query_row([key], |row| row.get::<_, String>(0))
-            .ok();
+        let result = stmt.query_row([key], |row| row.get::<_, String>(0)).ok();
         Ok(result)
     }
 
     /// 设置配置（upsert）
     pub fn set_config(&self, key: &str, value: &str) -> Result<(), AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         conn.execute(
             "INSERT INTO app_config (key, value, updated_at)
              VALUES (?1, ?2, datetime('now', 'localtime'))
@@ -167,7 +173,10 @@ impl Database {
     /// 旧实现 6 次 query_row + `updated_at LIKE '2026-04-22%'` 会走全表扫描（字符串前缀匹配
     /// 不能命中 idx_notes_updated 索引），合并后锁持有时间显著降低。
     pub fn get_dashboard_stats(&self) -> Result<crate::models::DashboardStats, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
 
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
@@ -182,21 +191,12 @@ impl Database {
             |row| Ok((row.get(0)?, row.get(1)?, row.get::<_, i64>(2)? as usize)),
         )?;
 
-        let total_folders: usize = conn.query_row(
-            "SELECT COUNT(*) FROM folders",
-            [],
-            |row| row.get(0),
-        )?;
-        let total_tags: usize = conn.query_row(
-            "SELECT COUNT(*) FROM tags",
-            [],
-            |row| row.get(0),
-        )?;
-        let total_links: usize = conn.query_row(
-            "SELECT COUNT(*) FROM note_links",
-            [],
-            |row| row.get(0),
-        )?;
+        let total_folders: usize =
+            conn.query_row("SELECT COUNT(*) FROM folders", [], |row| row.get(0))?;
+        let total_tags: usize =
+            conn.query_row("SELECT COUNT(*) FROM tags", [], |row| row.get(0))?;
+        let total_links: usize =
+            conn.query_row("SELECT COUNT(*) FROM note_links", [], |row| row.get(0))?;
 
         Ok(crate::models::DashboardStats {
             total_notes,
@@ -209,8 +209,14 @@ impl Database {
     }
 
     /// 获取最近 N 天的写作趋势
-    pub fn get_writing_trend(&self, days: i32) -> Result<Vec<crate::models::DailyWritingStat>, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+    pub fn get_writing_trend(
+        &self,
+        days: i32,
+    ) -> Result<Vec<crate::models::DailyWritingStat>, AppError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let mut stmt = conn.prepare(
             "SELECT DATE(updated_at) as d, COUNT(*) as cnt, COALESCE(SUM(word_count), 0) as wc
              FROM notes
@@ -234,9 +240,11 @@ impl Database {
 
     /// 删除配置
     pub fn delete_config(&self, key: &str) -> Result<bool, AppError> {
-        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         let affected = conn.execute("DELETE FROM app_config WHERE key = ?1", [key])?;
         Ok(affected > 0)
     }
-
 }

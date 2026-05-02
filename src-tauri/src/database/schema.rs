@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use crate::error::AppError;
 
 /// 当前 Schema 版本
-pub const SCHEMA_VERSION: i32 = 33;
+pub const SCHEMA_VERSION: i32 = 34;
 
 /// 获取数据库版本
 pub fn get_version(conn: &Connection) -> Result<i32, AppError> {
@@ -63,11 +63,9 @@ pub fn migrate(conn: &Connection) -> Result<(), AppError> {
             30 => migrate_v30_to_v31(conn)?,
             31 => migrate_v31_to_v32(conn)?,
             32 => migrate_v32_to_v33(conn)?,
+            33 => migrate_v33_to_v34(conn)?,
             _ => {
-                return Err(AppError::Custom(format!(
-                    "未知的数据库版本: {}",
-                    version
-                )));
+                return Err(AppError::Custom(format!("未知的数据库版本: {}", version)));
             }
         }
         version = get_version(conn)?;
@@ -553,11 +551,12 @@ fn migrate_v13_to_v14(conn: &Connection) -> Result<(), AppError> {
     log::info!("数据库迁移: v13 -> v14 (notes.content HTML → Markdown)");
 
     // 1) 取出所有待转换的笔记（content 非空且未被清空的）
-    let mut stmt = conn.prepare(
-        "SELECT id, content FROM notes WHERE content IS NOT NULL AND content != ''",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT id, content FROM notes WHERE content IS NOT NULL AND content != ''")?;
     let rows: Vec<(i64, String)> = stmt
-        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?
         .filter_map(|r| r.ok())
         .collect();
     drop(stmt);
@@ -593,9 +592,7 @@ fn migrate_v14_to_v15(conn: &Connection) -> Result<(), AppError> {
 
     let cols = list_columns(conn, "tasks")?;
     if !cols.iter().any(|c| c == "remind_before_minutes") {
-        conn.execute_batch(
-            "ALTER TABLE tasks ADD COLUMN remind_before_minutes INTEGER;",
-        )?;
+        conn.execute_batch("ALTER TABLE tasks ADD COLUMN remind_before_minutes INTEGER;")?;
     }
     if !cols.iter().any(|c| c == "reminded_at") {
         conn.execute_batch("ALTER TABLE tasks ADD COLUMN reminded_at TEXT;")?;
@@ -646,13 +643,9 @@ fn migrate_v16_to_v17(conn: &Connection) -> Result<(), AppError> {
     }
 
     // 回填：仅对 title_normalized IS NULL 的行（幂等可重跑）
-    let mut stmt = conn.prepare(
-        "SELECT id, title FROM notes WHERE title_normalized IS NULL",
-    )?;
+    let mut stmt = conn.prepare("SELECT id, title FROM notes WHERE title_normalized IS NULL")?;
     let rows: Vec<(i64, String)> = stmt
-        .query_map([], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
-        })?
+        .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
         .filter_map(|r| r.ok())
         .collect();
     drop(stmt);
@@ -877,8 +870,7 @@ fn migrate_v21_to_v22(conn: &Connection) -> Result<(), AppError> {
     }
 
     // 回填：仅对 content_hash IS NULL 的行（幂等可重跑）
-    let mut stmt = conn
-        .prepare("SELECT id, content FROM notes WHERE content_hash IS NULL")?;
+    let mut stmt = conn.prepare("SELECT id, content FROM notes WHERE content_hash IS NULL")?;
     let rows: Vec<(i64, String)> = stmt
         .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
         .filter_map(|r| r.ok())
@@ -1097,7 +1089,9 @@ fn migrate_v26_to_v27(conn: &Connection) -> Result<(), AppError> {
 ///    每次写回前比对：若磁盘当前 mtime ≠ 此值，说明外部编辑器（VSCode 等）改过文件，
 ///    弹冲突 Modal 让用户选「覆盖外部 / 保留外部 / 取消」。
 fn migrate_v27_to_v28(conn: &Connection) -> Result<(), AppError> {
-    log::info!("数据库迁移: v27 -> v28 (外部 .md 双向同步: note_url_mapping + last_writeback_mtime)");
+    log::info!(
+        "数据库迁移: v27 -> v28 (外部 .md 双向同步: note_url_mapping + last_writeback_mtime)"
+    );
 
     conn.execute_batch(
         "
@@ -1116,9 +1110,7 @@ fn migrate_v27_to_v28(conn: &Connection) -> Result<(), AppError> {
 
     let cols = list_columns(conn, "notes")?;
     if !cols.iter().any(|c| c == "last_writeback_mtime") {
-        conn.execute_batch(
-            "ALTER TABLE notes ADD COLUMN last_writeback_mtime INTEGER;",
-        )?;
+        conn.execute_batch("ALTER TABLE notes ADD COLUMN last_writeback_mtime INTEGER;")?;
     }
 
     set_version(conn, 28)?;
@@ -1154,9 +1146,8 @@ fn migrate_v28_to_v29(conn: &Connection) -> Result<(), AppError> {
     )
     .expect("正则字面量恒定，编译失败属于代码 BUG");
 
-    let mut stmt = conn.prepare(
-        "SELECT id, content FROM notes WHERE content IS NOT NULL AND content != ''",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT id, content FROM notes WHERE content IS NOT NULL AND content != ''")?;
     let rows: Vec<(i64, String)> = stmt
         .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
         .filter_map(|r| r.ok())
@@ -1193,7 +1184,8 @@ fn migrate_v28_to_v29(conn: &Connection) -> Result<(), AppError> {
                     unresolved += 1;
                     log::warn!(
                         "[v29] 笔记 {} 中 asset 路径无法解析为相对路径，保留原样: {}",
-                        id, decoded
+                        id,
+                        decoded
                     );
                     caps.get(0).map(|m| m.as_str()).unwrap_or("").to_string()
                 }
@@ -1212,7 +1204,9 @@ fn migrate_v28_to_v29(conn: &Connection) -> Result<(), AppError> {
 
     log::info!(
         "[v29] 迁移完成：触达 {} 条笔记，替换 {} 个 asset URL，{} 个无法解析（已保留）",
-        replaced_notes, replaced_urls, unresolved
+        replaced_notes,
+        replaced_urls,
+        unresolved
     );
 
     set_version(conn, 29)?;
@@ -1273,9 +1267,7 @@ fn migrate_v30_to_v31(conn: &Connection) -> Result<(), AppError> {
 
     let cols = list_columns(conn, "notes")?;
     if !cols.iter().any(|c| c == "sort_order") {
-        conn.execute_batch(
-            "ALTER TABLE notes ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;",
-        )?;
+        conn.execute_batch("ALTER TABLE notes ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;")?;
     }
 
     // 初始化已有数据：同一 folder 内按修改时间倒序分配 0/1000/2000...
@@ -1366,5 +1358,71 @@ fn migrate_v32_to_v33(conn: &Connection) -> Result<(), AppError> {
     )?;
 
     set_version(conn, 33)?;
+    Ok(())
+}
+
+/// v33 -> v34: 闪卡 + FSRS 复习
+///
+/// `cards` 存卡片正反面 + FSRS 调度状态（下次到期/稳定度/难度等）。
+/// `card_review_logs` 每次复习写一条历史，可用于参数优化（FSRS optimizer）和统计图表。
+///
+/// SRS 算法（FSRS）跑在前端 ts-fsrs，后端只负责持久化。前端复习时算出
+/// 新的 (due/stability/difficulty/...) 一起传回 review_card 命令更新。
+fn migrate_v33_to_v34(conn: &Connection) -> Result<(), AppError> {
+    log::info!("数据库迁移: v33 -> v34 (闪卡 + FSRS 复习)");
+
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS cards (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            note_id         INTEGER REFERENCES notes(id) ON DELETE SET NULL,
+            front           TEXT NOT NULL,
+            back            TEXT NOT NULL,
+            deck            TEXT NOT NULL DEFAULT 'default',
+
+            -- FSRS 调度状态（默认值对应『新卡』）
+            due             TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            stability       REAL NOT NULL DEFAULT 0,
+            difficulty      REAL NOT NULL DEFAULT 0,
+            elapsed_days    INTEGER NOT NULL DEFAULT 0,
+            scheduled_days  INTEGER NOT NULL DEFAULT 0,
+            reps            INTEGER NOT NULL DEFAULT 0,
+            lapses          INTEGER NOT NULL DEFAULT 0,
+            -- FSRS state: 0=New, 1=Learning, 2=Review, 3=Relearning
+            state           INTEGER NOT NULL DEFAULT 0,
+            last_review     TEXT,
+
+            -- 软删除（与 notes 一致的回收站语义）
+            is_deleted      INTEGER NOT NULL DEFAULT 0,
+
+            created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            updated_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_cards_due ON cards(due) WHERE is_deleted = 0;
+        CREATE INDEX IF NOT EXISTS idx_cards_deck ON cards(deck) WHERE is_deleted = 0;
+        CREATE INDEX IF NOT EXISTS idx_cards_note ON cards(note_id) WHERE is_deleted = 0;
+
+        CREATE TABLE IF NOT EXISTS card_review_logs (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            card_id             INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+            -- 用户评分: 1=Again, 2=Hard, 3=Good, 4=Easy（与 ts-fsrs Rating 枚举一致）
+            rating              INTEGER NOT NULL,
+            state               INTEGER NOT NULL,
+            due                 TEXT NOT NULL,
+            stability           REAL NOT NULL,
+            difficulty          REAL NOT NULL,
+            elapsed_days        INTEGER NOT NULL,
+            last_elapsed_days   INTEGER NOT NULL DEFAULT 0,
+            scheduled_days      INTEGER NOT NULL,
+            review              TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_card_logs_card ON card_review_logs(card_id);
+        CREATE INDEX IF NOT EXISTS idx_card_logs_review ON card_review_logs(review);
+        ",
+    )?;
+
+    set_version(conn, 34)?;
     Ok(())
 }
