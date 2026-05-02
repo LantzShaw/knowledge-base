@@ -115,11 +115,14 @@ export function AppLayout() {
   const activeTheme = themeCategory === "light" ? lightTheme : darkTheme;
   const { token } = antdTheme.useToken();
 
-  // Pop-out 窗口：URL 带 ?popout=1 时复用 focusMode 的隐藏逻辑（无侧边栏 / Header / Tabs，
-  // 仅渲染 Outlet 的笔记编辑器）。OR 进 focusMode 而不新加变量，最小改动。
-  const isPopoutWindow =
-    typeof window !== "undefined" &&
-    new URLSearchParams(window.location.search).get("popout") === "1";
+  // Pop-out 窗口：window label 以 `popout-` 开头则进精简模式（复用 focusMode 的隐藏逻辑：
+  // 无侧边栏 / Header / Tabs，仅渲染 Outlet 的笔记编辑器）。
+  // Why label 而不是 URL query：`?` 在 Windows 路径里非法，会让 WebviewUrl::App 把 URL
+  // 拼坏 → 白屏 + Win32 消息循环卡死（主窗冻结）。
+  const isPopoutWindow = (() => {
+    const w = getAppWindow();
+    return !!w && w.label.startsWith("popout-");
+  })();
   const focusMode = focusModeRaw || isPopoutWindow;
 
   const location = useLocation();
