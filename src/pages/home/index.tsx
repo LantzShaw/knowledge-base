@@ -100,6 +100,8 @@ export default function HomePage() {
   const [trend, setTrend] = useState<DailyWritingStat[]>([]);
   /** 今日待办速览(今天 + 逾期,前端筛 / 切片) */
   const [todayTasks, setTodayTasks] = useState<Task[]>([]);
+  /** 即将到期速览(明天到 7 天内,前端筛 / 切片) */
+  const [upcomingTasks, setUpcomingTasks] = useState<Task[]>([]);
   /** 最近 AI 会话(用于"问 AI"卡 fallback 列表) */
   const [recentChats, setRecentChats] = useState<AiConversation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -134,20 +136,27 @@ export default function HomePage() {
       setPinnedNotes(notesResult.items.filter((n) => n.is_pinned));
       setStats(dashStats);
       setTrend(trendData);
-      // 筛今日 + 逾期(due_date <= 今天结束)未完成,按时间排序
-      const today = new Date();
-      const todayEnd = new Date(today);
+      // 三段筛：逾期+今日 给 todayTasks；明天到 7 天后 给 upcomingTasks
+      const todayEnd = new Date();
       todayEnd.setHours(23, 59, 59, 999);
-      const filtered = allTodos
-        .filter((t) => t.status === 0 && t.due_date)
+      const next7End = new Date(todayEnd);
+      next7End.setDate(next7End.getDate() + 7);
+      const allWithDue = allTodos.filter((t) => t.status === 0 && t.due_date);
+      const sortByDue = (a: Task, b: Task) =>
+        new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime();
+      // 逾期 + 今日（≤ 今天结束）
+      const todayOrOverdue = allWithDue
         .filter((t) => new Date(t.due_date!).getTime() <= todayEnd.getTime())
-        .sort((a, b) => {
-          // 逾期优先
-          const ad = new Date(a.due_date!).getTime();
-          const bd = new Date(b.due_date!).getTime();
-          return ad - bd;
-        });
-      setTodayTasks(filtered);
+        .sort(sortByDue);
+      // 即将到期（今天结束 < due ≤ 7 天后结束）
+      const upcoming = allWithDue
+        .filter((t) => {
+          const d = new Date(t.due_date!).getTime();
+          return d > todayEnd.getTime() && d <= next7End.getTime();
+        })
+        .sort(sortByDue);
+      setTodayTasks(todayOrOverdue);
+      setUpcomingTasks(upcoming);
       setRecentChats(chats.slice(0, 3));
     } catch (e) {
       console.error("加载首页数据失败:", e);
@@ -220,6 +229,16 @@ export default function HomePage() {
     },
     [message, refreshTaskStats, loadDashboard],
   );
+
+  /** 同时 patch todayTasks 和 upcomingTasks（一个任务可能在任一段里） */
+  const patchTask = useCallback((id: number, patch: Partial<Task>) => {
+    setTodayTasks((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, ...patch } : t)),
+    );
+    setUpcomingTasks((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, ...patch } : t)),
+    );
+  }, []);
 
   // ─── 右键菜单（最近笔记 + 今日待办两个 widget） ─────
   const noteCtx = useContextMenu<Note>();
@@ -423,12 +442,28 @@ export default function HomePage() {
     return items.map((it) => ({ ...it, ratio: it.words / maxW }));
   }, [vitalityMetrics]);
 
-  // 待办速览展示前 5 条
-  const displayedTodos = useMemo(() => todayTasks.slice(0, 5), [todayTasks]);
-  const overdueTodayCount = useMemo(() => {
-    const now = Date.now();
-    return todayTasks.filter((t) => new Date(t.due_date!).getTime() < now).length;
-  }, [todayTasks]);
+  // 待办速览三段：逾期（昨天及更早）/ 今日 / 即将到期。每段最多 5 条
+  const todoGroups = useMemo(() => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayStartMs = todayStart.getTime();
+    const overdue: Task[] = [];
+    const today: Task[] = [];
+    for (const t of todayTasks) {
+      // todayTasks 已经是 due ≤ 今天结束 的，按 todayStart 切：早于今天 0:00 = 逾期
+      if (new Date(t.due_date!).getTime() < todayStartMs) overdue.push(t);
+      else today.push(t);
+    }
+    return {
+      overdue: overdue.slice(0, 5),
+      overdueTotal: overdue.length,
+      today: today.slice(0, 5),
+      todayTotal: today.length,
+      upcoming: upcomingTasks.slice(0, 5),
+      upcomingTotal: upcomingTasks.length,
+    };
+  }, [todayTasks, upcomingTasks]);
+  const totalTodoCount = todoGroups.overdueTotal + todoGroups.todayTotal + todoGroups.upcomingTotal;
   const displayedRecent = useMemo(() => recentNotes.slice(0, 5), [recentNotes]);
 
   // ─── 渲染 ─────────────────────────────────────────
@@ -594,7 +629,7 @@ export default function HomePage() {
       {/* ④ 双列:今日待办速览(左) + 最近笔记(右)；待办关闭时只剩最近笔记一列 */}
       <div className="grid grid-cols-12 gap-3">
 
-        {/* 今日待办：tasks 关闭则整张卡片不渲染，最近笔记自动占满 */}
+        {/* 待办速览(三段:逾期/今日/即将到期):tasks 关闭整卡不渲染，最近笔记自动占满 */}
         {tasksEnabled && (
         <Card
           size="small"
@@ -603,17 +638,11 @@ export default function HomePage() {
           title={
             <span className="flex items-center gap-2 text-sm">
               <CheckSquare size={14} style={{ color: token.colorSuccess }} />
-              今日待办
-              <Text type="secondary" style={{ fontSize: 12, fontWeight: "normal" }}>
-                · {todayTasks.length} 条
-              </Text>
-              {overdueTodayCount > 0 && (
-                <span
-                  className="inline-flex items-center gap-0.5 text-[11px] px-1.5 py-0.5 rounded"
-                  style={{ background: `${token.colorError}1a`, color: token.colorError }}
-                >
-                  <AlertTriangle size={10} /> {overdueTodayCount} 逾期
-                </span>
+              待办速览
+              {totalTodoCount > 0 && (
+                <Text type="secondary" style={{ fontSize: 12, fontWeight: "normal" }}>
+                  · 共 {totalTodoCount} 条
+                </Text>
               )}
             </span>
           }
@@ -628,20 +657,21 @@ export default function HomePage() {
             </Button>
           }
         >
-          {displayedTodos.length === 0 ? (
+          {totalTodoCount === 0 ? (
             <div className="text-center py-4">
               <Text type="secondary" style={{ fontSize: 12 }}>
-                {loading ? "加载中…" : "今天没有待办，太棒了 ✨"}
+                {loading ? "加载中…" : "暂无待办，享受当下 ✨"}
               </Text>
             </div>
           ) : (
-            <ul
-              className="flex flex-col gap-2 m-0 p-0 list-none"
-              style={{ maxHeight: 280, overflowY: "auto" }}
-            >
-              {displayedTodos.map((task) => {
-                const dueAt = new Date(task.due_date!).getTime();
-                const isOverdue = dueAt < Date.now();
+            (() => {
+              /** 单条任务渲染（三段共用），按段类型决定日期标签的色/文 */
+              const renderTaskRow = (
+                task: Task,
+                sectionKey: "overdue" | "today" | "upcoming",
+              ) => {
+                const due = new Date(task.due_date!);
+                const dueMs = due.getTime();
                 const dotColor =
                   task.priority === 0
                     ? token.colorError
@@ -652,147 +682,252 @@ export default function HomePage() {
                 const ctxActive = taskCtx.state.payload?.id === task.id;
                 const hasSubtasks = task.subtask_total > 0;
                 const expanded = expandedTodoIds.has(task.id);
+
+                // 日期标签：每段不同
+                let dateLabel: React.ReactNode;
+                if (sectionKey === "overdue") {
+                  const todayStart = new Date();
+                  todayStart.setHours(0, 0, 0, 0);
+                  const days = Math.max(
+                    1,
+                    Math.round((todayStart.getTime() - dueMs) / 86400000),
+                  );
+                  dateLabel = (
+                    <span
+                      className="text-[11px] px-1.5 py-0.5 rounded shrink-0"
+                      style={{
+                        background: `${token.colorError}1a`,
+                        color: token.colorError,
+                      }}
+                    >
+                      {days === 1 ? "昨天" : `${days} 天前`}
+                    </span>
+                  );
+                } else if (sectionKey === "today") {
+                  const hh = String(due.getHours()).padStart(2, "0");
+                  const mm = String(due.getMinutes()).padStart(2, "0");
+                  const noTime = hh === "00" && mm === "00";
+                  const overdueNow = dueMs < Date.now();
+                  dateLabel = (
+                    <Text
+                      type={overdueNow ? "danger" : "secondary"}
+                      style={{ fontSize: 11, flexShrink: 0 }}
+                    >
+                      {noTime ? "今天" : `${hh}:${mm}`}
+                    </Text>
+                  );
+                } else {
+                  const todayStart = new Date();
+                  todayStart.setHours(0, 0, 0, 0);
+                  const days = Math.max(
+                    1,
+                    Math.ceil((dueMs - todayStart.getTime()) / 86400000),
+                  );
+                  dateLabel = (
+                    <Text
+                      type="secondary"
+                      style={{ fontSize: 11, flexShrink: 0 }}
+                    >
+                      +{days} 天
+                    </Text>
+                  );
+                }
+
                 return (
                   <Fragment key={task.id}>
-                  <li
-                    className="flex items-start gap-2.5"
-                    style={{
-                      padding: "4px 6px",
-                      borderRadius: 4,
-                      background: ctxActive ? token.colorPrimaryBg : "transparent",
-                      transition: "background .12s",
-                    }}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      taskCtx.open(e.nativeEvent, task);
-                    }}
-                  >
-                    {/* ▶ 展开按钮（仅含子任务时显示），不冒泡到行级 setTaskDetail */}
-                    {hasSubtasks ? (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setExpandedTodoIds((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(task.id)) next.delete(task.id);
-                            else next.add(task.id);
-                            return next;
-                          });
-                        }}
-                        className="flex items-center justify-center hover:bg-black/5 rounded transition cursor-pointer"
-                        style={{
-                          width: 16,
-                          height: 16,
-                          marginTop: 3,
-                          flexShrink: 0,
-                          color: token.colorTextTertiary,
-                        }}
-                        title={expanded ? "折叠子任务" : "展开子任务"}
-                      >
-                        {expanded ? (
-                          <ChevronDown size={12} />
-                        ) : (
-                          <ChevronRight size={12} />
-                        )}
-                      </button>
-                    ) : (
-                      <span style={{ width: 16, flexShrink: 0 }} />
-                    )}
-                    <input
-                      type="checkbox"
-                      onChange={() => handleToggleTask(task.id)}
-                      onClick={(e) => e.stopPropagation()}
-                      style={{ cursor: "pointer", flexShrink: 0, marginTop: 4 }}
-                    />
-                    <span
-                      style={{
-                        width: 6,
-                        height: 6,
-                        borderRadius: "50%",
-                        background: dotColor,
-                        flexShrink: 0,
-                        marginTop: 7,
-                      }}
-                    />
-                    <div
-                      className="flex-1 min-w-0 cursor-pointer"
-                      onClick={() => setTaskDetail(task)}
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <Text
-                          ellipsis
-                          style={{ fontSize: 13, flex: 1, minWidth: 0 }}
-                        >
-                          {task.title}
-                        </Text>
-                        {task.important && (
-                          <Star
-                            size={11}
-                            style={{ color: token.colorWarning, flexShrink: 0 }}
-                            fill={token.colorWarning}
-                          />
-                        )}
-                        {isOverdue ? (
-                          <span
-                            className="text-[11px] px-1.5 py-0.5 rounded shrink-0"
-                            style={{
-                              background: `${token.colorError}1a`,
-                              color: token.colorError,
-                            }}
-                          >
-                            逾期
-                          </span>
-                        ) : (
-                          <Text
-                            type="secondary"
-                            style={{ fontSize: 11, flexShrink: 0 }}
-                          >
-                            今天
-                          </Text>
-                        )}
-                      </div>
-                      {/* 第二行始终渲染：无 desc 时用不间断空格占位，
-                          保证每条待办高度 = 标题 + 描述行，与右侧笔记节奏一致 */}
-                      <Text
-                        type="secondary"
-                        ellipsis
-                        style={{ fontSize: 11, display: "block", minHeight: 16 }}
-                      >
-                        {desc || "\u00A0"}
-                      </Text>
-                    </div>
-                  </li>
-                  {/* 行内展开子任务（与 /tasks 一致） */}
-                  {expanded && hasSubtasks && (
                     <li
-                      className="list-none"
+                      className="flex items-start gap-2.5"
                       style={{
-                        padding: "6px 10px 8px 38px",
-                        background: token.colorFillQuaternary,
+                        padding: "4px 6px",
                         borderRadius: 4,
+                        background: ctxActive ? token.colorPrimaryBg : "transparent",
+                        transition: "background .12s",
                       }}
-                      onClick={(e) => e.stopPropagation()}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        taskCtx.open(e.nativeEvent, task);
+                      }}
                     >
-                      <SubtaskList
-                        parentTaskId={task.id}
-                        compact
-                        onChanged={(done, total) => {
-                          // 局部 patch 当前 todayTasks 项的 subtask_done/total
-                          setTodayTasks((prev) =>
-                            prev.map((t) =>
-                              t.id === task.id
-                                ? { ...t, subtask_done: done, subtask_total: total }
-                                : t,
-                            ),
-                          );
+                      {hasSubtasks ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedTodoIds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(task.id)) next.delete(task.id);
+                              else next.add(task.id);
+                              return next;
+                            });
+                          }}
+                          className="flex items-center justify-center hover:bg-black/5 rounded transition cursor-pointer"
+                          style={{
+                            width: 16,
+                            height: 16,
+                            marginTop: 3,
+                            flexShrink: 0,
+                            color: token.colorTextTertiary,
+                          }}
+                          title={expanded ? "折叠子任务" : "展开子任务"}
+                        >
+                          {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                        </button>
+                      ) : (
+                        <span style={{ width: 16, flexShrink: 0 }} />
+                      )}
+                      <input
+                        type="checkbox"
+                        onChange={() => handleToggleTask(task.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ cursor: "pointer", flexShrink: 0, marginTop: 4 }}
+                      />
+                      <span
+                        style={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: "50%",
+                          background: dotColor,
+                          flexShrink: 0,
+                          marginTop: 7,
                         }}
                       />
+                      <div
+                        className="flex-1 min-w-0 cursor-pointer"
+                        onClick={() => setTaskDetail(task)}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <Text
+                            ellipsis
+                            style={{ fontSize: 13, flex: 1, minWidth: 0 }}
+                          >
+                            {task.title}
+                          </Text>
+                          {task.important && (
+                            <Star
+                              size={11}
+                              style={{ color: token.colorWarning, flexShrink: 0 }}
+                              fill={token.colorWarning}
+                            />
+                          )}
+                          {dateLabel}
+                        </div>
+                        <Text
+                          type="secondary"
+                          ellipsis
+                          style={{ fontSize: 11, display: "block", minHeight: 16 }}
+                        >
+                          {desc || "\u00A0"}
+                        </Text>
+                      </div>
                     </li>
-                  )}
+                    {expanded && hasSubtasks && (
+                      <li
+                        className="list-none"
+                        style={{
+                          padding: "6px 10px 8px 38px",
+                          background: token.colorFillQuaternary,
+                          borderRadius: 4,
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <SubtaskList
+                          parentTaskId={task.id}
+                          compact
+                          onChanged={(done, total) =>
+                            patchTask(task.id, {
+                              subtask_done: done,
+                              subtask_total: total,
+                            })
+                          }
+                        />
+                      </li>
+                    )}
                   </Fragment>
                 );
-              })}
-            </ul>
+              };
+
+              const sections: Array<{
+                key: "overdue" | "today" | "upcoming";
+                items: Task[];
+                total: number;
+                label: string;
+                icon: React.ReactNode;
+                color: string;
+              }> = [
+                {
+                  key: "overdue",
+                  items: todoGroups.overdue,
+                  total: todoGroups.overdueTotal,
+                  label: "逾期",
+                  icon: <AlertTriangle size={11} />,
+                  color: token.colorError,
+                },
+                {
+                  key: "today",
+                  items: todoGroups.today,
+                  total: todoGroups.todayTotal,
+                  label: "今日",
+                  icon: <CalendarDays size={11} />,
+                  color: token.colorPrimary,
+                },
+                {
+                  key: "upcoming",
+                  items: todoGroups.upcoming,
+                  total: todoGroups.upcomingTotal,
+                  label: "即将到期(7 天内)",
+                  icon: <Clock size={11} />,
+                  color: token.colorTextSecondary,
+                },
+              ];
+
+              return (
+                <div
+                  className="flex flex-col gap-3"
+                  style={{ maxHeight: 420, overflowY: "auto" }}
+                >
+                  {sections
+                    .filter((s) => s.items.length > 0)
+                    .map((s) => (
+                      <div key={s.key} className="flex flex-col gap-1">
+                        <div
+                          className="flex items-center gap-1.5"
+                          style={{
+                            fontSize: 11,
+                            color: s.color,
+                            fontWeight: 600,
+                          }}
+                        >
+                          {s.icon}
+                          <span>{s.label}</span>
+                          <Text
+                            type="secondary"
+                            style={{ fontSize: 11, fontWeight: 400 }}
+                          >
+                            · {s.total}
+                          </Text>
+                        </div>
+                        <ul className="flex flex-col gap-1.5 m-0 p-0 list-none">
+                          {s.items.map((t) => renderTaskRow(t, s.key))}
+                        </ul>
+                        {s.total > s.items.length && (
+                          <Button
+                            type="link"
+                            size="small"
+                            onClick={() => navigate("/tasks")}
+                            style={{
+                              padding: 0,
+                              fontSize: 11,
+                              alignSelf: "flex-start",
+                              marginLeft: 24,
+                            }}
+                          >
+                            + 还有 {s.total - s.items.length} 条…
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                </div>
+              );
+            })()
           )}
         </Card>
         )}
@@ -1085,12 +1220,8 @@ export default function HomePage() {
         onClose={() => setTaskDetail(null)}
         onToggleStatus={(id) => void handleToggleTask(id)}
         onSubtaskChanged={(id, done, total) => {
-          // 局部 patch todayTasks 中对应行的进度，避免重拉造成闪烁
-          setTodayTasks((prev) =>
-            prev.map((t) =>
-              t.id === id ? { ...t, subtask_done: done, subtask_total: total } : t,
-            ),
-          );
+          // 局部 patch（同时覆盖 today / upcoming），避免重拉造成闪烁
+          patchTask(id, { subtask_done: done, subtask_total: total });
         }}
         onEdit={(t) => setEditingTask(t)}
       />
@@ -1105,13 +1236,10 @@ export default function HomePage() {
         }}
         onSubtaskChanged={(done, total) => {
           if (!editingTask) return;
-          setTodayTasks((prev) =>
-            prev.map((t) =>
-              t.id === editingTask.id
-                ? { ...t, subtask_done: done, subtask_total: total }
-                : t,
-            ),
-          );
+          patchTask(editingTask.id, {
+            subtask_done: done,
+            subtask_total: total,
+          });
         }}
       />
 
