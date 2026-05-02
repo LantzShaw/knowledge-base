@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { aiPlanApi, taskApi } from "@/lib/api";
 import type { TaskSuggestion } from "@/types";
+import { MicButton } from "@/components/MicButton";
 
 interface PlanTodayModalProps {
   open: boolean;
@@ -241,8 +242,22 @@ export function PlanTodayModal({ open, onClose, onSaved }: PlanTodayModalProps) 
             <Alert type="error" showIcon message={errorText} closable onClose={() => setErrorText(null)} />
           )}
           <div>
-            <div style={{ fontSize: 13, color: token.colorTextSecondary, marginBottom: 6 }}>
-              今日目标（可选）
+            <div
+              style={{
+                fontSize: 13,
+                color: token.colorTextSecondary,
+                marginBottom: 6,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <span>今日目标（可选）</span>
+              <MicButton
+                onTranscribed={(text) =>
+                  setGoal((prev) => (prev ? `${prev} ${text}` : text))
+                }
+              />
             </div>
             <Input.TextArea
               value={goal}

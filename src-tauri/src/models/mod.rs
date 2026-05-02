@@ -958,7 +958,15 @@ pub struct TaskSuggestion {
     pub due_date: Option<String>,
     /// 提前提醒时间（分钟）。null = 不提醒；0 = 准时提醒；正整数 = 提前 N 分钟。
     /// AI 根据四象限自动判断：Q1 紧急多用 0/15；Q2 重要多用 60/1440；Q4 多用 null。
-    #[serde(default)]
+    ///
+    /// `rename = "remindBefore"`：序列化和反序列化都用 `remindBefore` —— 与现有
+    /// AI prompt（plan_today / draft_note）和前端 TS `TaskSuggestion.remindBefore` 对齐。
+    /// `alias = "remindBeforeMinutes"` 兼容旧版本可能输出的 camelCase 字段名。
+    #[serde(
+        default,
+        rename = "remindBefore",
+        alias = "remindBeforeMinutes"
+    )]
     pub remind_before_minutes: Option<i32>,
     /// AI 给出的推荐理由（可选，用于 UI 折叠展示）
     pub reason: Option<String>,

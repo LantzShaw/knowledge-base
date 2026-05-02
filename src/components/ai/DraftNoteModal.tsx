@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { aiPlanApi, folderApi, noteApi } from "@/lib/api";
 import type { TargetLength } from "@/types";
+import { MicButton } from "@/components/MicButton";
 
 interface DraftNoteModalProps {
   open: boolean;
@@ -167,9 +168,19 @@ export function DraftNoteModal({ open, onClose, onSaved }: DraftNoteModalProps) 
                 fontSize: 13,
                 color: token.colorTextSecondary,
                 marginBottom: 6,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
               }}
             >
-              主题 <span style={{ color: token.colorError }}>*</span>
+              <span>
+                主题 <span style={{ color: token.colorError }}>*</span>
+              </span>
+              <MicButton
+                onTranscribed={(text) =>
+                  setTopic((prev) => (prev ? `${prev} ${text}` : text))
+                }
+              />
             </div>
             <Input
               value={topic}
@@ -186,9 +197,17 @@ export function DraftNoteModal({ open, onClose, onSaved }: DraftNoteModalProps) 
                 fontSize: 13,
                 color: token.colorTextSecondary,
                 marginBottom: 6,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
               }}
             >
-              参考材料（可选）
+              <span>参考材料（可选）</span>
+              <MicButton
+                onTranscribed={(text) =>
+                  setReference((prev) => (prev ? `${prev}\n${text}` : text))
+                }
+              />
             </div>
             <Input.TextArea
               value={reference}

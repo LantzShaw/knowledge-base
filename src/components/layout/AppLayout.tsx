@@ -21,6 +21,7 @@ import { TabBar } from "./TabBar";
 import { WindowControls } from "./WindowControls";
 import { InstanceBadge } from "./InstanceBadge";
 import { CommandPalette } from "@/components/ui/CommandPalette";
+import { QuickCaptureAsrModal } from "@/components/QuickCaptureAsrModal";
 import { ShortcutsPanel } from "@/components/ui/ShortcutsPanel";
 import { StarryBackground } from "@/components/ui/StarryBackground";
 import { createBlankAndOpen } from "@/lib/noteCreator";
@@ -270,6 +271,11 @@ export function AppLayout() {
       setPaletteOpen(true);
     }).then((fn) => unlisteners.push(fn));
 
+    // 全局快捷键 Ctrl+Shift+V → 后端 emit `asr:open_capture` → 弹语音快速捕获 Modal
+    listen("asr:open_capture", () => {
+      setAsrCaptureOpen(true);
+    }).then((fn) => unlisteners.push(fn));
+
     listen<{ success: boolean; error?: string; stats?: { notesCount?: number } }>(
       "sync:manual-push-result",
       (e) => {
@@ -317,6 +323,7 @@ export function AppLayout() {
 
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [asrCaptureOpen, setAsrCaptureOpen] = useState(false);
   const { update, modalOpen, openModal, closeModal, checkManually } = useUpdateChecker();
 
   const themeMenuItems = [
@@ -578,6 +585,10 @@ export function AppLayout() {
         onOpenShortcuts={() => { setPaletteOpen(false); setShortcutsOpen(true); }}
       />
       <ShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <QuickCaptureAsrModal
+        open={asrCaptureOpen}
+        onClose={() => setAsrCaptureOpen(false)}
+      />
       <UpdateModal open={modalOpen} onClose={closeModal} update={update} />
       <ExitConfirmListener />
       <CloseRequestedListener />

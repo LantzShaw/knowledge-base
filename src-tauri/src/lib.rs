@@ -878,6 +878,7 @@ pub fn run() {
             commands::ai::ai_suggest_prompt,
             commands::ai::cancel_ai_write_assist,
             commands::ai::ai_plan_today,
+            commands::ai::ai_extract_task_from_text,
             commands::ai::ai_plan_from_goal,
             commands::ai::ai_plan_from_excel,
             commands::ai::ai_parse_excel,

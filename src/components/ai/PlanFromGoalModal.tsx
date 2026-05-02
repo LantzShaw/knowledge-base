@@ -25,6 +25,7 @@ import {
 import dayjs, { type Dayjs } from "dayjs";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { aiPlanApi, taskApi } from "@/lib/api";
+import { MicButton } from "@/components/MicButton";
 import type {
   MilestoneDraft,
   TaskSuggestion,
@@ -348,9 +349,19 @@ export function PlanFromGoalModal({ open, onClose, onSaved }: Props) {
                           fontSize: 13,
                           color: token.colorTextSecondary,
                           marginBottom: 6,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
                         }}
                       >
-                        你的目标 <span style={{ color: token.colorError }}>*</span>
+                        <span>
+                          你的目标 <span style={{ color: token.colorError }}>*</span>
+                        </span>
+                        <MicButton
+                          onTranscribed={(text) =>
+                            setGoal((prev) => (prev ? `${prev} ${text}` : text))
+                          }
+                        />
                       </div>
                       <Input.TextArea
                         value={goal}

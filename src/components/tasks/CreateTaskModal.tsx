@@ -33,6 +33,7 @@ import type {
   CreateTaskInput,
 } from "@/types";
 import { SubtaskList } from "./SubtaskList";
+import { MicButton } from "@/components/MicButton";
 
 type RepeatMode = "none" | "daily" | "weekdays" | "weekly" | "monthly" | "custom";
 type EndMode = "never" | "until" | "count";
@@ -445,8 +446,18 @@ export function CreateTaskModal({
       <div className="flex flex-col gap-4 pt-1">
         {/* 标题 */}
         <div>
-          <div className="text-[11px] mb-1" style={{ color: token.colorTextSecondary }}>
-            标题 <span style={{ color: token.colorError }}>*</span>
+          <div
+            className="text-[11px] mb-1 flex items-center justify-between"
+            style={{ color: token.colorTextSecondary }}
+          >
+            <span>
+              标题 <span style={{ color: token.colorError }}>*</span>
+            </span>
+            <MicButton
+              onTranscribed={(text) =>
+                setTitle((prev) => (prev ? `${prev} ${text}` : text))
+              }
+            />
           </div>
           <Input
             autoFocus
@@ -769,8 +780,16 @@ export function CreateTaskModal({
 
         {/* 描述 */}
         <div>
-          <div className="text-[11px] mb-1" style={{ color: token.colorTextSecondary }}>
-            描述（可选）
+          <div
+            className="text-[11px] mb-1 flex items-center justify-between"
+            style={{ color: token.colorTextSecondary }}
+          >
+            <span>描述（可选）</span>
+            <MicButton
+              onTranscribed={(text) =>
+                setDescription((prev) => (prev ? `${prev}\n${text}` : text))
+              }
+            />
           </div>
           <Input.TextArea
             rows={2}

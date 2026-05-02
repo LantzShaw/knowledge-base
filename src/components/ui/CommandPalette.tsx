@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Modal, Input, Empty, Spin, theme as antdTheme } from "antd";
 import { useSearchSuggestions } from "@/hooks/useSearchSuggestions";
 import { highlightText, highlightSnippet } from "@/lib/highlight";
+import { MicButton } from "@/components/MicButton";
 import {
   Search,
   NotebookText,
@@ -179,6 +180,14 @@ export function CommandPalette({ open, onClose, onOpenShortcuts }: CommandPalett
       >
         <Input
           prefix={<Search size={16} style={{ color: token.colorTextQuaternary }} />}
+          suffix={
+            <MicButton
+              size="small"
+              onTranscribed={(text) =>
+                setKeyword((prev) => (prev ? `${prev} ${text}` : text))
+              }
+            />
+          }
           placeholder="搜索笔记 / 待办 / 跳转页面…"
           variant="borderless"
           size="large"

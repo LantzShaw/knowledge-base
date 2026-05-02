@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useSearchSuggestions } from "@/hooks/useSearchSuggestions";
 import { highlightText, highlightSnippet } from "@/lib/highlight";
+import { MicButton } from "@/components/MicButton";
 
 interface Props {
   value: string;
@@ -92,6 +93,14 @@ export function HomeSearchInput({
         size="large"
         placeholder={placeholder ?? "搜索笔记 / 待办…   (Ctrl+K 快速跳转)"}
         prefix={<Search size={16} style={{ color: token.colorTextQuaternary }} />}
+        suffix={
+          <MicButton
+            size="small"
+            onTranscribed={(text) =>
+              onChange(value ? `${value} ${text}` : text)
+            }
+          />
+        }
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onPressEnter={() => {
@@ -100,7 +109,6 @@ export function HomeSearchInput({
         }}
         onFocus={() => setFocused(true)}
         onKeyDown={handleKeyDown}
-        allowClear
         style={{ borderRadius: 8 }}
       />
 

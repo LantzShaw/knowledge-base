@@ -5,7 +5,7 @@ use crate::models::{
     AiConversation, AiMessage, AiModel, AiModelInput, AiModelTestResult, AttachmentPreview,
     DraftNoteRequest, DraftNoteResponse, ExcelPreview, MessageAttachment, Note, NoteInput,
     PlanFromExcelRequest, PlanFromGoalRequest, PlanFromGoalResponse, PlanTodayRequest,
-    PlanTodayResponse,
+    PlanTodayResponse, TaskSuggestion,
 };
 use crate::services::ai::AiService;
 use crate::state::AppState;
@@ -20,10 +20,7 @@ pub fn list_ai_models(state: State<'_, AppState>) -> Result<Vec<AiModel>, String
 
 /// 创建 AI 模型
 #[tauri::command]
-pub fn create_ai_model(
-    state: State<'_, AppState>,
-    input: AiModelInput,
-) -> Result<AiModel, String> {
+pub fn create_ai_model(state: State<'_, AppState>, input: AiModelInput) -> Result<AiModel, String> {
     state.db.create_ai_model(&input).map_err(|e| e.to_string())
 }
 
@@ -49,10 +46,7 @@ pub fn delete_ai_model(state: State<'_, AppState>, id: i64) -> Result<(), String
 /// 设置默认 AI 模型
 #[tauri::command]
 pub fn set_default_ai_model(state: State<'_, AppState>, id: i64) -> Result<(), String> {
-    state
-        .db
-        .set_default_ai_model(id)
-        .map_err(|e| e.to_string())
+    state.db.set_default_ai_model(id).map_err(|e| e.to_string())
 }
 
 /// 测试 AI 模型连通性。
@@ -70,13 +64,8 @@ pub async fn test_ai_model(input: AiModelInput) -> Result<AiModelTestResult, Str
 
 /// 获取所有对话
 #[tauri::command]
-pub fn list_ai_conversations(
-    state: State<'_, AppState>,
-) -> Result<Vec<AiConversation>, String> {
-    state
-        .db
-        .list_ai_conversations()
-        .map_err(|e| e.to_string())
+pub fn list_ai_conversations(state: State<'_, AppState>) -> Result<Vec<AiConversation>, String> {
+    state.db.list_ai_conversations().map_err(|e| e.to_string())
 }
 
 /// 创建对话
@@ -89,11 +78,13 @@ pub fn create_ai_conversation(
     let title = title.unwrap_or_else(|| "新对话".to_string());
     let model_id = match model_id {
         Some(id) => id,
-        None => state
-            .db
-            .get_default_ai_model()
-            .map_err(|e| e.to_string())?
-            .id,
+        None => {
+            state
+                .db
+                .get_default_ai_model()
+                .map_err(|e| e.to_string())?
+                .id
+        }
     };
     state
         .db
@@ -103,10 +94,7 @@ pub fn create_ai_conversation(
 
 /// 删除对话
 #[tauri::command]
-pub fn delete_ai_conversation(
-    state: State<'_, AppState>,
-    id: i64,
-) -> Result<(), String> {
+pub fn delete_ai_conversation(state: State<'_, AppState>, id: i64) -> Result<(), String> {
     state
         .db
         .delete_ai_conversation(id)
@@ -211,10 +199,7 @@ pub async fn send_ai_message(
     // 创建取消信号
     let (cancel_tx, cancel_rx) = watch::channel(false);
     {
-        let mut cancel_map = state
-            .ai_cancel
-            .lock()
-            .map_err(|e| e.to_string())?;
+        let mut cancel_map = state.ai_cancel.lock().map_err(|e| e.to_string())?;
         cancel_map.insert(conversation_id, cancel_tx);
     }
 
@@ -228,10 +213,7 @@ pub async fn send_ai_message(
 
     // 清理取消信号
     {
-        let mut cancel_map = state
-            .ai_cancel
-            .lock()
-            .map_err(|e| e.to_string())?;
+        let mut cancel_map = state.ai_cancel.lock().map_err(|e| e.to_string())?;
         cancel_map.remove(&conversation_id);
     }
 
@@ -244,10 +226,7 @@ pub fn cancel_ai_generation(
     state: State<'_, AppState>,
     conversation_id: i64,
 ) -> Result<(), String> {
-    let cancel_map = state
-        .ai_cancel
-        .lock()
-        .map_err(|e| e.to_string())?;
+    let cancel_map = state.ai_cancel.lock().map_err(|e| e.to_string())?;
     if let Some(tx) = cancel_map.get(&conversation_id) {
         let _ = tx.send(true);
     }
@@ -301,20 +280,14 @@ pub async fn ai_suggest_prompt(
     selected_text: String,
     context: Option<String>,
 ) -> Result<String, String> {
-    AiService::suggest_prompt(
-        &state.db,
-        &selected_text,
-        &context.unwrap_or_default(),
-    )
-    .await
-    .map_err(|e| e.to_string())
+    AiService::suggest_prompt(&state.db, &selected_text, &context.unwrap_or_default())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// 取消写作辅助生成
 #[tauri::command]
-pub fn cancel_ai_write_assist(
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub fn cancel_ai_write_assist(state: State<'_, AppState>) -> Result<(), String> {
     let cancel_map = state.ai_cancel.lock().map_err(|e| e.to_string())?;
     if let Some(tx) = cancel_map.get(&-1) {
         let _ = tx.send(true);
@@ -336,7 +309,26 @@ pub async fn ai_plan_today(
     request: PlanTodayRequest,
 ) -> Result<PlanTodayResponse, String> {
     let db = &state.db;
-    AiService::plan_today(db, request).await.map_err(|e| e.to_string())
+    AiService::plan_today(db, request)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 把一段自然语言（通常是语音转写结果）抽取成一条结构化任务建议。
+///
+/// 用于「语音快速捕获」场景：用户说『明天下午三点开会，提前半小时提醒』，
+/// 后端调默认 AI 模型解析成 TaskSuggestion。建议未落库；调用方拿到后通常直接
+/// `taskApi.create()` 入库或弹确认 Modal 让用户编辑。
+///
+/// 非流式；典型耗时 2-6 秒。
+#[tauri::command]
+pub async fn ai_extract_task_from_text(
+    state: State<'_, AppState>,
+    text: String,
+) -> Result<TaskSuggestion, String> {
+    AiService::extract_task_from_text(&state.db, &text)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// 目标驱动 AI 智能规划：把一个长期目标拆成多条可执行待办 + 阶段里程碑
@@ -456,9 +448,7 @@ pub fn get_or_create_companion_conversation(
     } else {
         note.title.chars().take(40).collect::<String>()
     };
-    let default_model = db
-        .get_default_ai_model()
-        .map_err(|e| e.to_string())?;
+    let default_model = db.get_default_ai_model().map_err(|e| e.to_string())?;
     let conv = db
         .create_ai_conversation(&title, default_model.id)
         .map_err(|e| e.to_string())?;

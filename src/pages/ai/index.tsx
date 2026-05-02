@@ -49,6 +49,7 @@ import type {
   SkillCall,
 } from "@/types";
 import { AttachmentChip } from "@/components/ai/AttachmentChip";
+import { MicButton } from "@/components/MicButton";
 
 /** 多附件总字符上限：超过则阻止再加，避免炸 context window */
 const TOTAL_ATTACHMENT_CHAR_LIMIT = 80_000;
@@ -1135,6 +1136,13 @@ export default function AiChatPage() {
                     disabled={streaming}
                   />
                 </Tooltip>
+                <MicButton
+                  size="middle"
+                  disabled={streaming}
+                  onTranscribed={(text) =>
+                    setInputText((prev) => (prev ? `${prev} ${text}` : text))
+                  }
+                />
                 <TextArea
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}

@@ -35,6 +35,7 @@ const DEFAULT_BINDINGS: &[(&str, &str)] = &[
     ("global.showWindow", "CommandOrControl+Alt+K"),
     ("global.openDaily", "CommandOrControl+Alt+D"),
     ("global.openSearch", "CommandOrControl+Alt+F"),
+    ("global.asrCapture", "CommandOrControl+Shift+V"),
 ];
 
 /// 进程内缓存：「ID → 当前注册中的 accel」
@@ -209,16 +210,17 @@ fn check_no_conflict(db: &Database, self_id: &str, accel: &str) -> Result<(), Ap
 fn bind(app: &AppHandle, id: &str, accel: &str) -> Result<(), tauri_plugin_global_shortcut::Error> {
     let app_for_handler = app.clone();
     let id_for_handler = id.to_string();
-    app.global_shortcut().on_shortcut(accel, move |_, _, event| {
-        if event.state() != ShortcutState::Pressed {
-            return;
-        }
-        let app_clone = app_for_handler.clone();
-        let id_clone = id_for_handler.clone();
-        tauri::async_runtime::spawn(async move {
-            dispatch_action(app_clone, &id_clone);
-        });
-    })?;
+    app.global_shortcut()
+        .on_shortcut(accel, move |_, _, event| {
+            if event.state() != ShortcutState::Pressed {
+                return;
+            }
+            let app_clone = app_for_handler.clone();
+            let id_clone = id_for_handler.clone();
+            tauri::async_runtime::spawn(async move {
+                dispatch_action(app_clone, &id_clone);
+            });
+        })?;
     cache()
         .lock()
         .map(|mut g| g.insert(id.to_string(), accel.to_string()))
@@ -251,6 +253,12 @@ fn dispatch_action(app: AppHandle, id: &str) {
         "global.openSearch" => {
             focus_main(&app);
             let _ = app.emit("tray:open-search", ());
+        }
+        "global.asrCapture" => {
+            // 唤起主窗 + 通知前端打开"语音快速捕获"Modal
+            // 实际录音 / 转写 / 落库都在前端发起（复用 asrApi + MicButton 等已有能力）
+            focus_main(&app);
+            let _ = app.emit("asr:open_capture", ());
         }
         _ => log::warn!("[shortcut] 未知 action id: {}", id),
     }

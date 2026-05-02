@@ -457,6 +457,20 @@ export function EditorToolbar({ editor, noteId, ensureNoteId }: ToolbarProps) {
         isActive: () => editor.isActive("subscript"),
       },
     ],
+    // 输入辅助（单独成组，与文本格式 / 颜色字号区分；后续可在此追加 AI 续写等）
+    [
+      {
+        icon: null,
+        title: "语音输入",
+        customRender: () => (
+          <MicButton
+            onTranscribed={(text) =>
+              editor.chain().focus().insertContent(text).run()
+            }
+          />
+        ),
+      },
+    ],
     // 颜色 / 字号 / 行高
     [
       {
@@ -665,17 +679,6 @@ export function EditorToolbar({ editor, noteId, ensureNoteId }: ToolbarProps) {
         icon: null,
         title: "插入 Emoji",
         customRender: () => <EmojiPicker editor={editor} />,
-      },
-      {
-        icon: null,
-        title: "语音输入",
-        customRender: () => (
-          <MicButton
-            onTranscribed={(text) =>
-              editor.chain().focus().insertContent(text).run()
-            }
-          />
-        ),
       },
       {
         icon: (

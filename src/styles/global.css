@@ -470,17 +470,32 @@ body,
   border-top: none;
 }
 
-/* 工具栏按钮：圆润、无边框、轻量 */
+/* 工具栏按钮：圆润、无边框、轻量
+ * display:inline-flex + align-items:center 强制内容垂直居中 ——
+ * 修复带小三角的 dropdown 按钮（callout / 代码块 / 表格 / 段落 / 字号 / 行高）
+ * 因 lucide SVG 基线对齐造成的偏上/偏下问题。
+ */
 .tiptap-toolbar .ant-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 28px;
   height: 28px;
   padding: 0 6px;
+  line-height: 1;
   border: none !important;
   border-radius: 6px;
   background: transparent !important;
   color: var(--ant-color-text-secondary, #666);
   box-shadow: none !important;
   transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+/* icon prop 模式（callout / 代码块 / 表格）的 wrapper 也对齐 */
+.tiptap-toolbar .ant-btn .ant-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
 }
 
 .tiptap-toolbar .ant-btn:hover:not(:disabled) {

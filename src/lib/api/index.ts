@@ -71,6 +71,7 @@ import type {
   PlanFromGoalResponse,
   PlanFromExcelRequest,
   ExcelPreview,
+  TaskSuggestion,
   AttachmentPreview,
   MessageAttachment,
   DraftNoteRequest,
@@ -659,6 +660,13 @@ export const aiPlanApi = {
   /** 一键撤销某次 AI 智能规划生成的所有任务，返回删除条数 */
   undoBatch: (batchId: string) =>
     invoke<number>("undo_task_batch", { batchId }),
+  /**
+   * 把一段自然语言（通常是语音转写）解析成结构化任务建议。
+   * 用于「语音快速捕获 → 智能解析」场景；典型耗时 2-6s。
+   * 仅返回建议，未落库；调用方拿到后通常直接 taskApi.create()。
+   */
+  extractTaskFromText: (text: string) =>
+    invoke<TaskSuggestion>("ai_extract_task_from_text", { text }),
 };
 
 /**

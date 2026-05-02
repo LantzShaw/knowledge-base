@@ -3,6 +3,7 @@ import { App as AntdApp, Button, Checkbox, Input, Spin, theme as antdTheme } fro
 import { Plus, Trash2 } from "lucide-react";
 import { taskApi } from "@/lib/api";
 import type { Task } from "@/types";
+import { MicButton } from "@/components/MicButton";
 
 /**
  * 子任务列表组件——展示在主任务编辑弹窗的底部。
@@ -180,6 +181,13 @@ export function SubtaskList({ parentTaskId, onChanged, compact = false }: Props)
         onPressEnter={handleAdd}
         placeholder="+ 新增子任务（回车确认）"
         prefix={<Plus size={12} style={{ color: token.colorTextTertiary }} />}
+        suffix={
+          <MicButton
+            onTranscribed={(text) =>
+              setDraft((prev) => (prev ? `${prev} ${text}` : text))
+            }
+          />
+        }
         disabled={adding}
       />
     </div>

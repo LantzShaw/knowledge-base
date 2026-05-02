@@ -57,6 +57,13 @@ export const SHORTCUTS: ShortcutDef[] = [
     group: "全局快捷键（系统级，后台也可用）",
     desc: "打开搜索面板",
   },
+  {
+    id: "global.asrCapture",
+    scope: "global",
+    defaultAccel: "CommandOrControl+Shift+V",
+    group: "全局快捷键（系统级，后台也可用）",
+    desc: "语音快速捕获（录音 → 文字 → 任务/笔记）",
+  },
 
   // ─── 应用内（窗口聚焦时生效） ───
   { id: "app.palette", scope: "app", defaultAccel: "CommandOrControl+K", group: "应用内", desc: "打开命令面板" },

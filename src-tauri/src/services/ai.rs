@@ -240,11 +240,7 @@ pub fn strip_pseudo_tool_calls(s: &str) -> String {
 ///
 /// **失败容忍**：单篇笔记 `get_note` 失败时跳过该篇，不让单条坏数据搞挂整个对话。
 /// 笔记列表为空时返回空串，调用方按需跳过。
-fn build_attached_notes_context(
-    db: &Database,
-    note_ids: &[i64],
-    model: &AiModel,
-) -> String {
+fn build_attached_notes_context(db: &Database, note_ids: &[i64], model: &AiModel) -> String {
     if note_ids.is_empty() {
         return String::new();
     }
@@ -386,8 +382,7 @@ impl AiService {
         // 优先按 DB Prompt 走（prompt:id 或 builtin_code），custom 路径跳过 resolve
         let rendered = if custom_instruction.is_some() {
             None
-        } else if let Ok(tmpl) = crate::services::prompt::PromptService::resolve(db, action)
-        {
+        } else if let Ok(tmpl) = crate::services::prompt::PromptService::resolve(db, action) {
             let vars = crate::services::prompt::PromptVars {
                 selection: &selection_plain,
                 context: &context_snippet,
@@ -403,15 +398,9 @@ impl AiService {
             // 自定义提问：把指令 + 上下文 + 选区组装成一条 user message
             let mut user_content = format!("【指令】\n{}\n", instruction);
             if !context_snippet.is_empty() {
-                user_content.push_str(&format!(
-                    "\n【上下文（参考）】\n{}\n",
-                    context_snippet
-                ));
+                user_content.push_str(&format!("\n【上下文（参考）】\n{}\n", context_snippet));
             }
-            user_content.push_str(&format!(
-                "\n【待处理文本】\n{}",
-                selection_plain
-            ));
+            user_content.push_str(&format!("\n【待处理文本】\n{}", selection_plain));
             vec![
                 json!({
                     "role": "system",
@@ -463,9 +452,7 @@ impl AiService {
                 Self::stream_ollama_generic(&write_app, &model, &messages, cancel_rx).await?
             }
             // T-012: 默认走 OpenAI 兼容（含 LM Studio / 自定义 baseUrl）
-            _ => {
-                Self::stream_openai_generic(&write_app, &model, &messages, cancel_rx).await?
-            }
+            _ => Self::stream_openai_generic(&write_app, &model, &messages, cancel_rx).await?,
         };
 
         let _ = app.emit("ai-write:done", "");
@@ -502,7 +489,11 @@ impl AiService {
             || selection_plain.contains("=> ")
             || selection_plain.contains("const ")
             || selection_plain.contains("import ");
-        let language_hint = if has_cjk { "中文" } else { "外文（英/日/其他）" };
+        let language_hint = if has_cjk {
+            "中文"
+        } else {
+            "外文（英/日/其他）"
+        };
         let length_band = if char_count < 30 {
             "极短（<30 字）"
         } else if char_count < 120 {
@@ -760,7 +751,10 @@ impl AiService {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(AppError::Custom(format!("Ollama 返回错误 {}: {}", status, body)));
+            return Err(AppError::Custom(format!(
+                "Ollama 返回错误 {}: {}",
+                status, body
+            )));
         }
 
         let mut stream = response.bytes_stream();
@@ -823,7 +817,10 @@ impl AiService {
                 request = request.header("Authorization", format!("Bearer {}", key));
             }
         }
-        let response = request.send().await.map_err(|e| AppError::Custom(format!("API 请求失败: {}", e)))?;
+        let response = request
+            .send()
+            .await
+            .map_err(|e| AppError::Custom(format!("API 请求失败: {}", e)))?;
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
@@ -890,11 +887,7 @@ impl AiService {
 
         // 2. 附加笔记上下文（A 方向：用户在 AI 页用 chip 选了 N 篇笔记作为强制上下文）
         //    跟 RAG 独立：附加 = 必含；RAG = 智能补全；可叠加
-        let attached_context = build_attached_notes_context(
-            db,
-            &conv.attached_note_ids,
-            &model,
-        );
+        let attached_context = build_attached_notes_context(db, &conv.attached_note_ids, &model);
 
         // 3. RAG: 检索相关笔记
         //
@@ -917,8 +910,9 @@ impl AiService {
         if use_rag {
             let notes = db.search_notes_for_rag(user_message, RAG_TOP_N)?;
             if !notes.is_empty() {
-                let total_budget = ((model.max_context as f64) * RAG_BUDGET_RATIO * CHARS_PER_TOKEN_CJK)
-                    .max(8000.0) as usize;
+                let total_budget =
+                    ((model.max_context as f64) * RAG_BUDGET_RATIO * CHARS_PER_TOKEN_CJK)
+                        .max(8000.0) as usize;
                 let mut used = 0usize;
                 let mut included = 0usize;
 
@@ -947,10 +941,7 @@ impl AiService {
                     };
 
                     used += snippet.chars().count();
-                    rag_context.push_str(&format!(
-                        "---\n标题: {}\n内容: {}\n\n",
-                        title, snippet,
-                    ));
+                    rag_context.push_str(&format!("---\n标题: {}\n内容: {}\n\n", title, snippet,));
                     ref_ids.push(*id);
                     included += 1;
                 }
@@ -972,12 +963,8 @@ impl AiService {
         } else {
             Some(serde_json::to_string(&ref_ids).unwrap_or_default())
         };
-        let user_msg = db.add_ai_message(
-            conversation_id,
-            "user",
-            user_message,
-            refs_json.as_deref(),
-        )?;
+        let user_msg =
+            db.add_ai_message(conversation_id, "user", user_message, refs_json.as_deref())?;
         db.touch_ai_conversation(conversation_id)?;
 
         // 4. 构建历史消息并发送（支持自动重试递减历史）
@@ -988,26 +975,22 @@ impl AiService {
         let mut last_error = None;
 
         for &max_hist in &max_history_attempts {
-            let messages = Self::build_messages(
-                &model,
-                &history,
-                &rag_context,
-                &attached_context,
-                max_hist,
+            let messages =
+                Self::build_messages(&model, &history, &rag_context, &attached_context, max_hist);
+
+            log::info!(
+                "AI Request: model={}, messages={}, max_history={}",
+                model.model_id,
+                messages.len(),
+                max_hist
             );
 
-            log::info!("AI Request: model={}, messages={}, max_history={}",
-                model.model_id, messages.len(), max_hist);
-
             let result = match model.provider.as_str() {
-                "ollama" => {
-                    Self::stream_ollama(&app, &model, &messages, cancel_rx.clone()).await
-                }
+                "ollama" => Self::stream_ollama(&app, &model, &messages, cancel_rx.clone()).await,
                 // T-012: 默认走 OpenAI 兼容协议（OpenAI / Claude 代理 / DeepSeek / 智谱 /
                 // Minimax / SiliconFlow / LM Studio / 用户自定义 baseUrl）
                 _ => {
-                    Self::stream_openai_compatible(&app, &model, &messages, cancel_rx.clone())
-                        .await
+                    Self::stream_openai_compatible(&app, &model, &messages, cancel_rx.clone()).await
                 }
             };
 
@@ -1020,8 +1003,7 @@ impl AiService {
                     // 若会话仍是"新对话"默认名，用用户首问的前 24 个字符作为标题
                     let auto_title = derive_conversation_title(user_message);
                     if !auto_title.is_empty() {
-                        let _ = db
-                            .rename_ai_conversation_if_default(conversation_id, &auto_title);
+                        let _ = db.rename_ai_conversation_if_default(conversation_id, &auto_title);
                     }
 
                     let _ = app.emit("ai:done", conversation_id);
@@ -1035,7 +1017,8 @@ impl AiService {
                     {
                         log::warn!(
                             "API 请求失败(max_history={}), 尝试减少历史: {}",
-                            max_hist, err_str
+                            max_hist,
+                            err_str
                         );
                         last_error = Some(e.to_string());
                         continue;
@@ -1551,10 +1534,7 @@ impl AiService {
         let response = match request.send().await {
             Ok(r) => r,
             Err(e) => {
-                return (
-                    Err(AppError::Custom(format!("API 请求失败: {}", e))),
-                    None,
-                );
+                return (Err(AppError::Custom(format!("API 请求失败: {}", e))), None);
             }
         };
         if !response.status().is_success() {
@@ -1711,7 +1691,12 @@ impl AiService {
 
         // ─── 构造 prompt ────────────────────────
         let mut user_sections = Vec::<String>::new();
-        if let Some(goal) = req.goal.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        if let Some(goal) = req
+            .goal
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
             user_sections.push(format!("## 今日目标\n{}", goal));
         }
         if let Some(n) = &daily_yesterday {
@@ -1761,7 +1746,11 @@ impl AiService {
             );
         }
 
-        let user_content = format!("请为我规划今天（{}）的待办。\n\n{}", today, user_sections.join("\n\n"));
+        let user_content = format!(
+            "请为我规划今天（{}）的待办。\n\n{}",
+            today,
+            user_sections.join("\n\n")
+        );
 
         let system_prompt = format!(
             "你是一个日程规划助手，使用艾森豪威尔四象限法则做决策。\
@@ -1815,7 +1804,9 @@ impl AiService {
         });
         // Claude 兼容代理有些不支持 response_format，去掉该字段以防报错
         if model.provider == "claude" {
-            req_body.as_object_mut().and_then(|m| m.remove("response_format"));
+            req_body
+                .as_object_mut()
+                .and_then(|m| m.remove("response_format"));
         }
 
         let mut builder = client
@@ -1843,9 +1834,126 @@ impl AiService {
             .map_err(|e| AppError::Custom(format!("解析响应失败: {}", e)))?;
         let content = resp_json["choices"][0]["message"]["content"]
             .as_str()
-            .ok_or_else(|| AppError::Custom("AI 返回格式异常：缺少 choices[0].message.content".to_string()))?;
+            .ok_or_else(|| {
+                AppError::Custom("AI 返回格式异常：缺少 choices[0].message.content".to_string())
+            })?;
 
         parse_plan_today_response(content).ok_or_else(|| {
+            AppError::Custom(format!(
+                "AI 返回的 JSON 无法解析。原始响应：\n{}",
+                content.chars().take(400).collect::<String>()
+            ))
+        })
+    }
+
+    /// 把一句自然语言描述抽取成结构化任务建议（语音快速捕获用）。
+    ///
+    /// 输入是一段口语化的话，例如「明天下午三点开会，提前半小时提醒」；
+    /// 输出 `TaskSuggestion`，包含解析后的 dueDate / remindBefore / priority / important。
+    /// 仅作为建议返回，不落库——调用方拿到后可走标准 `taskApi.create`。
+    ///
+    /// 复用默认 AI 模型；非流式，典型耗时 2-6 秒。
+    pub async fn extract_task_from_text(
+        db: &Database,
+        text: &str,
+    ) -> Result<TaskSuggestion, AppError> {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return Err(AppError::InvalidInput("文本为空".into()));
+        }
+
+        let model = db.get_default_ai_model()?;
+        if model.provider == "ollama" {
+            return Err(AppError::Custom(
+                "智能解析暂不支持 Ollama 协议，请切换到 OpenAI 兼容模型。".into(),
+            ));
+        }
+
+        let now = chrono::Local::now();
+        let today = now.format("%Y-%m-%d").to_string();
+        let now_full = now.format("%Y-%m-%d %H:%M:%S").to_string();
+
+        let system_prompt = format!(
+            "你是任务解析助手。把用户口语化的一句话转换成结构化的任务 JSON。\n\
+             当前时间: {now_full}\n\
+             今天日期: {today}\n\n\
+             严格返回 JSON 对象（不要 markdown 代码块、不要任何额外文字），格式：\n\
+             {{\n  \
+             \"title\": \"任务标题（去掉时间/提醒等元信息，只留核心动作）\",\n  \
+             \"dueDate\": \"YYYY-MM-DD HH:MM:SS\" 或 null,\n  \
+             \"remindBefore\": null|0|15|30|60|180|1440|10080,\n  \
+             \"priority\": 0|1|2,\n  \
+             \"important\": true|false,\n  \
+             \"reason\": \"简短说明你怎么解析的\"\n\
+             }}\n\n\
+             解析规则：\n\
+             - title：必须可执行（『写周报』而非『关于周报』）；去掉口语连接词。\n\
+             - dueDate：能解析就给完整 'YYYY-MM-DD HH:MM:SS'。\n\
+                  · 「明天下午三点」 = today+1 15:00:00\n\
+                  · 「30 分钟后」 = now + 30min\n\
+                  · 「周五」 = 本周或下周最近的周五\n\
+                  · 没明确时间 → null\n\
+                  · 只有日期没有时间 → 当天 23:59:59\n\
+             - remindBefore（提前几分钟提醒）：用户明说『提前 X 分钟/小时/天』就照填；否则按规则：\n\
+                  · 紧急任务（priority=0） → 0 或 15\n\
+                  · 重要任务（important=true） → 60 或 1440\n\
+                  · 不重要不紧急 → null\n\
+                  · 必须是固定值之一：null / 0 / 15 / 30 / 60 / 180 / 1440 / 10080\n\
+             - priority：0=紧急（今/明天必做） / 1=一般（本周内） / 2=不急（无截止）\n\
+             - important：true=对长期目标/健康/关键产出有显著贡献\n\
+             - reason：一句中文，简短解释你怎么从原文推断时间和优先级\n\n\
+             🔴 JSON 字符串字段（title / reason）严禁使用英文双引号 \"，需要引用时用中文「」或『』。"
+        );
+
+        let messages = vec![
+            json!({ "role": "system", "content": system_prompt }),
+            json!({ "role": "user", "content": trimmed }),
+        ];
+
+        let client = crate::services::http_client::shared();
+        let url = build_openai_chat_url(&model.api_url);
+        let mut req_body = json!({
+            "model": model.model_id,
+            "messages": messages,
+            "stream": false,
+            "response_format": { "type": "json_object" },
+            "max_tokens": 600,
+        });
+        if model.provider == "claude" {
+            req_body
+                .as_object_mut()
+                .and_then(|m| m.remove("response_format"));
+        }
+
+        let mut builder = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(&req_body);
+        if let Some(key) = &model.api_key {
+            if !key.is_empty() {
+                builder = builder.header("Authorization", format!("Bearer {}", key));
+            }
+        }
+
+        let response = builder
+            .send()
+            .await
+            .map_err(|e| AppError::Custom(format!("API 请求失败: {}", e)))?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(AppError::Custom(format_openai_api_error(status, &body)));
+        }
+
+        let resp_json: Value = response
+            .json()
+            .await
+            .map_err(|e| AppError::Custom(format!("解析响应失败: {}", e)))?;
+        let content = resp_json["choices"][0]["message"]["content"]
+            .as_str()
+            .ok_or_else(|| AppError::Custom("AI 返回格式异常：缺少 content".into()))?;
+
+        parse_task_suggestion_response(content).ok_or_else(|| {
             AppError::Custom(format!(
                 "AI 返回的 JSON 无法解析。原始响应：\n{}",
                 content.chars().take(400).collect::<String>()
@@ -1979,9 +2087,7 @@ impl AiService {
         let content = resp_json["choices"][0]["message"]["content"]
             .as_str()
             .ok_or_else(|| {
-                AppError::Custom(
-                    "AI 返回格式异常：缺少 choices[0].message.content".to_string(),
-                )
+                AppError::Custom("AI 返回格式异常：缺少 choices[0].message.content".to_string())
             })?;
 
         parse_draft_note_response(content).ok_or_else(|| {
@@ -2140,9 +2246,7 @@ impl AiService {
         let content = resp_json["choices"][0]["message"]["content"]
             .as_str()
             .ok_or_else(|| {
-                AppError::Custom(
-                    "AI 返回格式异常：缺少 choices[0].message.content".to_string(),
-                )
+                AppError::Custom("AI 返回格式异常：缺少 choices[0].message.content".to_string())
             })?;
 
         let mut parsed = parse_plan_from_goal_response(content).ok_or_else(|| {
@@ -2328,9 +2432,7 @@ impl AiService {
         let content = resp_json["choices"][0]["message"]["content"]
             .as_str()
             .ok_or_else(|| {
-                AppError::Custom(
-                    "AI 返回格式异常：缺少 choices[0].message.content".to_string(),
-                )
+                AppError::Custom("AI 返回格式异常：缺少 choices[0].message.content".to_string())
             })?;
 
         let mut parsed = parse_plan_from_goal_response(content).ok_or_else(|| {
@@ -2451,11 +2553,15 @@ impl AiService {
             .map(|s| s.to_ascii_lowercase())
             .unwrap_or_default();
         match ext.as_str() {
-            "xlsx" | "xls" | "xlsm" | "xlsb" | "ods" => {
-                Ok(AttachmentPreview::Excel(Self::parse_excel_attachment(file_path)?))
-            }
-            "pdf" => Ok(AttachmentPreview::Pdf(Self::parse_pdf_attachment(file_path)?)),
-            _ => Ok(AttachmentPreview::Text(Self::parse_text_attachment(file_path)?)),
+            "xlsx" | "xls" | "xlsm" | "xlsb" | "ods" => Ok(AttachmentPreview::Excel(
+                Self::parse_excel_attachment(file_path)?,
+            )),
+            "pdf" => Ok(AttachmentPreview::Pdf(Self::parse_pdf_attachment(
+                file_path,
+            )?)),
+            _ => Ok(AttachmentPreview::Text(Self::parse_text_attachment(
+                file_path,
+            )?)),
         }
     }
 }
@@ -2506,10 +2612,7 @@ pub fn build_message_with_attachments(text: &str, attachments: &[MessageAttachme
                 let trunc_hint = if truncated_sheets.is_empty() {
                     String::new()
                 } else {
-                    format!(
-                        "，已自动截断 sheet：{}",
-                        truncated_sheets.join("、")
-                    )
+                    format!("，已自动截断 sheet：{}", truncated_sheets.join("、"))
                 };
                 out.push_str(&format!(
                     "## 附件 {}: {} （Excel，共 {} 行{}）\n{}\n\n",
@@ -2526,11 +2629,7 @@ pub fn build_message_with_attachments(text: &str, attachments: &[MessageAttachme
                 truncated,
                 ..
             } => {
-                let trunc_hint = if *truncated {
-                    "，尾部已截断"
-                } else {
-                    ""
-                };
+                let trunc_hint = if *truncated { "，尾部已截断" } else { "" };
                 out.push_str(&format!(
                     "## 附件 {}: {} （文本{}）\n```\n{}\n```\n\n",
                     i + 1,
@@ -2545,11 +2644,7 @@ pub fn build_message_with_attachments(text: &str, attachments: &[MessageAttachme
                 truncated,
                 ..
             } => {
-                let trunc_hint = if *truncated {
-                    "，尾部已截断"
-                } else {
-                    ""
-                };
+                let trunc_hint = if *truncated { "，尾部已截断" } else { "" };
                 out.push_str(&format!(
                     "## 附件 {}: {} （PDF 文字层{}）\n{}\n\n",
                     i + 1,
@@ -2635,7 +2730,8 @@ mod draft_note_tests {
 
     #[test]
     fn parse_with_fence() {
-        let raw = "```json\n{\"title\":\"x\",\"content\":\"c\",\"folderPath\":\"\",\"reason\":null}\n```";
+        let raw =
+            "```json\n{\"title\":\"x\",\"content\":\"c\",\"folderPath\":\"\",\"reason\":null}\n```";
         let r = parse_draft_note_response(raw).unwrap();
         assert_eq!(r.title, "x");
         assert_eq!(r.folder_path, "");
@@ -2701,7 +2797,8 @@ mod plan_today_tests {
 
     #[test]
     fn parse_plain_json() {
-        let raw = r#"{"tasks":[{"title":"写周报","priority":1,"dueDate":"2026-04-24"}],"summary":"忙"}"#;
+        let raw =
+            r#"{"tasks":[{"title":"写周报","priority":1,"dueDate":"2026-04-24"}],"summary":"忙"}"#;
         let r = parse_plan_today_response(raw).unwrap();
         assert_eq!(r.tasks.len(), 1);
         assert_eq!(r.tasks[0].title, "写周报");
@@ -2727,6 +2824,28 @@ mod plan_today_tests {
         let r = parse_plan_today_response(raw).unwrap();
         assert_eq!(r.tasks.len(), 1);
     }
+}
+
+/// 解析 AI 返回的 TaskSuggestion JSON（三轮兜底，与 plan_today 同模式）
+fn parse_task_suggestion_response(raw: &str) -> Option<TaskSuggestion> {
+    if let Ok(r) = serde_json::from_str::<TaskSuggestion>(raw.trim()) {
+        return Some(r);
+    }
+    let stripped = raw
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+    if let Ok(r) = serde_json::from_str::<TaskSuggestion>(stripped) {
+        return Some(r);
+    }
+    let start = raw.find('{')?;
+    let end = raw.rfind('}')?;
+    if end <= start {
+        return None;
+    }
+    serde_json::from_str(&raw[start..=end]).ok()
 }
 
 /// 解析 AI 返回的 PlanFromGoalResponse JSON（三轮兜底，与 plan_today 同模式）
