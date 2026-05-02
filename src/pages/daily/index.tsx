@@ -20,6 +20,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { dailyApi, noteApi } from "@/lib/api";
+import { MicButton } from "@/components/MicButton";
 import { TiptapEditor } from "@/components/editor";
 import { useAutoSave } from "@/hooks/useAutoSave";
 import { useAppStore } from "@/store";
@@ -388,6 +389,13 @@ export default function DailyPage() {
                 className="editor-title"
                 // 和下面的 Tiptap 工具栏拉开距离，避免标题与 H1/H2/B 图标紧贴
                 style={{ marginBottom: 12 }}
+                suffix={
+                  <MicButton
+                    onTranscribed={(text) =>
+                      setTitle((prev) => (prev ? `${prev} ${text}` : text))
+                    }
+                  />
+                }
               />
 
               {/* 内容编辑区 */}

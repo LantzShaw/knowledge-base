@@ -18,9 +18,10 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { Button, Tooltip, App as AntdApp } from "antd";
-import { Mic, Square, Loader2 } from "lucide-react";
+import { Mic, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { asrApi } from "@/lib/api";
+import { useAudioLevel } from "@/hooks/useAudioLevel";
 
 type Status = "idle" | "recording" | "transcribing" | "disabled";
 
@@ -54,6 +55,9 @@ export function MicButton({
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  // 用 state 触发 useAudioLevel 重建（ref 引用变化 hook 拿不到）
+  const [activeStream, setActiveStream] = useState<MediaStream | null>(null);
+  const { level, bands } = useAudioLevel(activeStream, status === "recording", 3);
 
   // 启动时拉一次 ASR 配置；后续可以监听 store 变更，但配置改动通常要重启录音组件，先不做
   useEffect(() => {
@@ -75,6 +79,7 @@ export function MicButton({
   useEffect(() => {
     return () => {
       streamRef.current?.getTracks().forEach((t) => t.stop());
+      setActiveStream(null);
     };
   }, []);
 
@@ -86,6 +91,7 @@ export function MicButton({
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
+      setActiveStream(stream);
       chunksRef.current = [];
       const recorder = new MediaRecorder(stream);
       recorder.ondataavailable = (e) => {
@@ -110,6 +116,7 @@ export function MicButton({
     if (r && r.state !== "inactive") r.stop();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    setActiveStream(null);
     setStatus("transcribing");
   }
 
@@ -182,10 +189,38 @@ export function MicButton({
   const icon = isBusy ? (
     <Loader2 size={14} className="animate-spin" />
   ) : isRecording ? (
-    <Square size={14} fill="currentColor" />
+    // 录音中：3 条 mini 柱跟麦克风分频段实时跳动；点击仍触发 stopRecording
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 1.5,
+        height: 14,
+      }}
+      aria-label="正在录音"
+    >
+      {bands.map((v, i) => (
+        <span
+          key={i}
+          style={{
+            width: 2,
+            height: Math.max(2, Math.round(2 + v * 12)),
+            background: "currentColor",
+            borderRadius: 1,
+            transition: "height 60ms ease-out",
+          }}
+        />
+      ))}
+    </span>
   ) : (
     <Mic size={14} />
   );
+
+  // 录音时按 level（0-1）放大 box-shadow，形成实时音量脉动效果
+  // 静音时 = 2px 红色细环；说话最响时 = 10px+ 渐变
+  const recordingShadow = isRecording
+    ? `0 0 0 ${2 + Math.round(level * 9)}px rgba(255, 77, 79, ${0.18 + level * 0.35})`
+    : undefined;
 
   return (
     <Tooltip title={effectiveTooltip} mouseEnterDelay={0.4}>
@@ -199,6 +234,10 @@ export function MicButton({
         onClick={handleClick}
         className={className}
         aria-label="语音输入"
+        style={{
+          boxShadow: recordingShadow,
+          transition: "box-shadow 80ms ease-out",
+        }}
       />
     </Tooltip>
   );

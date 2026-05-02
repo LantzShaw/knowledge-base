@@ -1136,13 +1136,6 @@ export default function AiChatPage() {
                     disabled={streaming}
                   />
                 </Tooltip>
-                <MicButton
-                  size="middle"
-                  disabled={streaming}
-                  onTranscribed={(text) =>
-                    setInputText((prev) => (prev ? `${prev} ${text}` : text))
-                  }
-                />
                 <TextArea
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
@@ -1151,6 +1144,13 @@ export default function AiChatPage() {
                   autoSize={{ minRows: 1, maxRows: 4 }}
                   disabled={streaming}
                   className="flex-1"
+                />
+                <MicButton
+                  size="middle"
+                  disabled={streaming}
+                  onTranscribed={(text) =>
+                    setInputText((prev) => (prev ? `${prev} ${text}` : text))
+                  }
                 />
                 {streaming ? (
                   <Button

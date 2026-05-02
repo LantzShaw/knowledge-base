@@ -25,6 +25,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { promptApi } from "@/lib/api";
+import { MicButton } from "@/components/MicButton";
 import type {
   PromptOutputMode,
   PromptTemplate,
@@ -448,10 +449,37 @@ export default function PromptsPage() {
             label="标题"
             rules={[{ required: true, message: "请输入标题" }]}
           >
-            <Input placeholder="如：润色公众号文案" maxLength={40} />
+            <Input
+              placeholder="如：润色公众号文案"
+              maxLength={40}
+              suffix={
+                <MicButton
+                  size="small"
+                  onTranscribed={(text) => {
+                    const cur: string = form.getFieldValue("title") || "";
+                    form.setFieldValue("title", cur ? `${cur} ${text}` : text);
+                  }}
+                />
+              }
+            />
           </Form.Item>
           <Form.Item name="description" label="说明（可选）">
-            <Input placeholder="一句话描述这个 Prompt 的用途" maxLength={80} />
+            <Input
+              placeholder="一句话描述这个 Prompt 的用途"
+              maxLength={80}
+              suffix={
+                <MicButton
+                  size="small"
+                  onTranscribed={(text) => {
+                    const cur: string = form.getFieldValue("description") || "";
+                    form.setFieldValue(
+                      "description",
+                      cur ? `${cur} ${text}` : text,
+                    );
+                  }}
+                />
+              }
+            />
           </Form.Item>
           <Form.Item
             name="prompt"

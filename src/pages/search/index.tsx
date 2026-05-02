@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { searchApi, taskApi } from "@/lib/api";
+import { MicButton } from "@/components/MicButton";
 import { useAppStore } from "@/store";
 import { highlightText, highlightSnippet } from "@/lib/highlight";
 import type { SearchResult, TaskSearchHit } from "@/types";
@@ -117,6 +118,14 @@ export default function SearchPage() {
           size="large"
           placeholder="搜索笔记内容 / 待办标题…"
           prefix={<SearchIcon size={18} />}
+          suffix={
+            <MicButton
+              size="small"
+              onTranscribed={(text) =>
+                handleInputChange(query ? `${query} ${text}` : text)
+              }
+            />
+          }
           value={query}
           onChange={(e) => handleInputChange(e.target.value)}
           onSearch={(value) => handleInputChange(value)}

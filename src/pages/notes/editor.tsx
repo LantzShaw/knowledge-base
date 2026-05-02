@@ -34,6 +34,7 @@ import { relativeTime, stripHtml } from "@/lib/utils";
 import { TiptapEditor } from "@/components/editor";
 import { EditorOutline } from "@/components/editor/EditorOutline";
 import { TagColorPicker } from "@/components/TagColorPicker";
+import { MicButton } from "@/components/MicButton";
 import { NoteAiDrawer } from "@/components/ai/NoteAiDrawer";
 import { MindMapView } from "@/components/notes/MindMapView";
 import type { Note, Tag, Folder, NoteLink } from "@/types";
@@ -1631,6 +1632,13 @@ export default function NoteEditorPage() {
             placeholder="笔记标题"
             variant="borderless"
             className="editor-title"
+            suffix={
+              <MicButton
+                onTranscribed={(text) =>
+                  handleTitleChange(title ? `${title} ${text}` : text)
+                }
+              />
+            }
           />
 
           {/* 文件夹 + 标签元数据 */}

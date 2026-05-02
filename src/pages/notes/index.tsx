@@ -48,6 +48,7 @@ import type { ColumnsType } from "antd/es/table";
 import { open as openDialog, save } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { noteApi, exportApi, folderApi, tagApi, trashApi } from "@/lib/api";
+import { MicButton } from "@/components/MicButton";
 import { useContextMenu } from "@/hooks/useContextMenu";
 import {
   ContextMenuOverlay,
@@ -1262,6 +1263,14 @@ export default function NoteListPage() {
         <Input
           placeholder="搜索笔记标题..."
           prefix={<Search size={14} />}
+          suffix={
+            <MicButton
+              size="small"
+              onTranscribed={(text) =>
+                setKeyword((prev) => (prev ? `${prev} ${text}` : text))
+              }
+            />
+          }
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
           onPressEnter={handleSearch}

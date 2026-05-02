@@ -18,6 +18,7 @@ import {
 import { tagApi } from "@/lib/api";
 import { useAppStore } from "@/store";
 import { TagColorPicker, TAG_COLORS } from "@/components/TagColorPicker";
+import { MicButton } from "@/components/MicButton";
 import type { Tag } from "@/types";
 import { useContextMenu } from "@/hooks/useContextMenu";
 import {
@@ -308,6 +309,14 @@ export function TagsPanel() {
           onChange={(e) => setFilter(e.target.value)}
           placeholder="筛选标签..."
           allowClear
+          suffix={
+            <MicButton
+              size="small"
+              onTranscribed={(text) =>
+                setFilter((prev) => (prev ? `${prev} ${text}` : text))
+              }
+            />
+          }
         />
       </div>
 

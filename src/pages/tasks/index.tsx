@@ -41,6 +41,7 @@ import {
 import { NewTodoButton } from "@/components/NewTodoButton";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { taskApi, taskCategoryApi } from "@/lib/api";
+import { MicButton } from "@/components/MicButton";
 import { useAppStore } from "@/store";
 import type { Task, TaskPriority, TaskCategory } from "@/types";
 
@@ -561,6 +562,14 @@ export default function TasksPage() {
       <Input
         placeholder="搜索任务标题 / 描述"
         prefix={<Search size={14} style={{ color: token.colorTextQuaternary }} />}
+        suffix={
+          <MicButton
+            size="small"
+            onTranscribed={(text) =>
+              setKeyword((prev) => (prev ? `${prev} ${text}` : text))
+            }
+          />
+        }
         value={keyword}
         onChange={(e) => setKeyword(e.target.value)}
         allowClear

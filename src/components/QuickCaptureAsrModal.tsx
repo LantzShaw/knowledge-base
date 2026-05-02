@@ -14,9 +14,10 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { Modal, Button, Input, Space, Alert, Typography, App as AntdApp } from "antd";
-import { Mic, Square, Loader2 } from "lucide-react";
+import { Square, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { asrApi, taskApi, noteApi, aiPlanApi } from "@/lib/api";
+import { useAudioLevel } from "@/hooks/useAudioLevel";
 
 const { Text } = Typography;
 
@@ -45,6 +46,11 @@ export function QuickCaptureAsrModal({ open, onClose }: Props) {
   const streamRef = useRef<MediaStream | null>(null);
   const startTsRef = useRef<number>(0);
   const tickRef = useRef<number | null>(null);
+  // 用 state 触发 useAudioLevel 重建（ref 引用变化 hook 拿不到）
+  // bandCount=3 与 MicButton 保持一致：所有位置语音可视化都是 3 条柱，
+  // 仅在 Modal 里通过更大的尺寸 / 间距来增加视觉重量
+  const [activeStream, setActiveStream] = useState<MediaStream | null>(null);
+  const { level, bands } = useAudioLevel(activeStream, phase === "recording", 3);
 
   // 打开 Modal → 拉配置 + 自动开始录音
   useEffect(() => {
@@ -85,6 +91,7 @@ export function QuickCaptureAsrModal({ open, onClose }: Props) {
     }
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    setActiveStream(null);
     if (recorderRef.current && recorderRef.current.state !== "inactive") {
       try {
         recorderRef.current.stop();
@@ -105,6 +112,7 @@ export function QuickCaptureAsrModal({ open, onClose }: Props) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
+      setActiveStream(stream);
       chunksRef.current = [];
       const recorder = new MediaRecorder(stream);
       recorder.ondataavailable = (e) => {
@@ -140,6 +148,7 @@ export function QuickCaptureAsrModal({ open, onClose }: Props) {
     }
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    setActiveStream(null);
     setPhase("transcribing");
   }
 
@@ -260,11 +269,7 @@ export function QuickCaptureAsrModal({ open, onClose }: Props) {
     <Modal
       open={open}
       onCancel={onClose}
-      title={
-        <span className="flex items-center gap-2">
-          <Mic size={16} /> 语音快速捕获
-        </span>
-      }
+      title={<span>语音快速捕获</span>}
       footer={null}
       width={560}
       destroyOnClose
@@ -296,14 +301,31 @@ export function QuickCaptureAsrModal({ open, onClose }: Props) {
 
       {enabled && phase === "recording" && (
         <div className="flex flex-col items-center gap-4 py-6">
+          {/* 实时音量波形：与 MicButton 同款 3 条柱（放大版），保持视觉一致 */}
           <div
-            className="w-16 h-16 rounded-full flex items-center justify-center"
+            className="rounded-full flex items-center justify-center"
             style={{
+              height: 80,
+              minWidth: 100,
+              padding: "0 28px",
+              gap: 6,
               background: "var(--ant-color-error-bg)",
-              boxShadow: "0 0 0 6px var(--ant-color-error-bg-hover)",
+              boxShadow: `0 0 0 ${4 + Math.round(level * 10)}px rgba(255, 77, 79, ${0.12 + level * 0.28})`,
+              transition: "box-shadow 80ms ease-out",
             }}
           >
-            <Mic size={28} style={{ color: "var(--ant-color-error)" }} />
+            {bands.map((v, i) => (
+              <div
+                key={i}
+                style={{
+                  width: 6,
+                  height: Math.max(8, Math.round(8 + v * 44)),
+                  background: "var(--ant-color-error)",
+                  borderRadius: 3,
+                  transition: "height 60ms ease-out",
+                }}
+              />
+            ))}
           </div>
           <Text style={{ fontSize: 13 }}>
             录音中… {formatDuration(elapsed)}
