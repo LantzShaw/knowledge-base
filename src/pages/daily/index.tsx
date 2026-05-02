@@ -23,6 +23,7 @@ import { dailyApi, noteApi } from "@/lib/api";
 import { TiptapEditor } from "@/components/editor";
 import { useAutoSave } from "@/hooks/useAutoSave";
 import { useAppStore } from "@/store";
+import { useAllFeaturesEnabled } from "@/hooks/useFeatureEnabled";
 import { PlanTodayModal } from "@/components/ai/PlanTodayModal";
 import { NoteAiDrawer } from "@/components/ai/NoteAiDrawer";
 import type { Note } from "@/types";
@@ -81,6 +82,8 @@ export default function DailyPage() {
   const { token } = antdTheme.useToken();
 
   const isToday = date === todayStr();
+  // "AI 规划今日"按钮依赖 ai + tasks 两个模块同时启用（按钮产物是任务，靠 AI 生成）
+  const planTodayAvailable = useAllFeaturesEnabled(["ai", "tasks"]);
 
   // 让自动保存的 save 闭包能拿到最新 note / date
   const noteRef = useRef<Note | null>(note);
@@ -335,7 +338,7 @@ export default function DailyPage() {
           {renderStatus()}
         </Space>
         <Space align="center">
-          {isToday && (
+          {isToday && planTodayAvailable && (
             <Button
               icon={<Sparkles size={14} />}
               onClick={() => setShowPlanModal(true)}

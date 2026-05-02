@@ -1,5 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import type { Editor } from "@tiptap/react";
+import { useFeatureEnabled } from "@/hooks/useFeatureEnabled";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { Button, Input, Popover, Tooltip, message, theme as antdTheme } from "antd";
@@ -89,6 +90,8 @@ function createFakeSelectionPlugin(): Plugin<DecorationSet> {
 
 export function AiWriteMenu({ editor, onAskAi }: AiWriteMenuProps) {
   const { token } = antdTheme.useToken();
+  // 设置里关闭"AI 问答"模块时，整个浮动菜单不挂载（不监听选区，零开销）
+  const aiEnabled = useFeatureEnabled("ai");
   const [visible, setVisible] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const [streaming, setStreaming] = useState(false);
@@ -464,6 +467,7 @@ export function AiWriteMenu({ editor, onAskAi }: AiWriteMenuProps) {
     setActivePrompt(null);
   }
 
+  if (!aiEnabled) return null;
   if (!visible) return null;
 
   const defaultMode: PromptOutputMode = activePrompt?.outputMode ?? "replace";

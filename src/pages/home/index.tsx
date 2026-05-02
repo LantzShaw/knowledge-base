@@ -56,6 +56,7 @@ import { NewNoteButton } from "@/components/NewNoteButton";
 import { NewTodoButton } from "@/components/NewTodoButton";
 import { HomeSearchInput } from "@/components/HomeSearchInput";
 import { useAppStore } from "@/store";
+import { useFeatureEnabled } from "@/hooks/useFeatureEnabled";
 import type {
   Note,
   DashboardStats,
@@ -85,6 +86,12 @@ export default function HomePage() {
   const { token } = antdTheme.useToken();
   const { message } = AntdApp.useApp();
   const refreshTaskStats = useAppStore((s) => s.refreshTaskStats);
+
+  // 功能模块开关：用户在设置里关闭某模块时，首页相关的卡片/按钮也要联动隐藏
+  const tasksEnabled = useFeatureEnabled("tasks");
+  const dailyEnabled = useFeatureEnabled("daily");
+  const aiEnabled = useFeatureEnabled("ai");
+  const graphEnabled = useFeatureEnabled("graph");
 
   // ─── 数据状态 ─────────────────────────────────────
   const [recentNotes, setRecentNotes] = useState<Note[]>([]);
@@ -453,43 +460,86 @@ export default function HomePage() {
         <NewNoteButton size="large" style={{ borderRadius: 8 }} />
       </div>
 
-      {/* ② 快速操作工具条 — 4 按钮(default size,32px 自然一致)
-          添加待办用 NewTodoButton 分段按钮(主按钮弹 Modal + ▼ 下拉 AI 规划) */}
-      <div className="grid grid-cols-4 gap-3">
-        <NewTodoButton
-          block
-          onSaved={() => {
-            loadDashboard();
-            refreshTaskStats();
-          }}
-        />
-        <Button
-          icon={<CalendarDays size={14} style={{ color: token.colorPrimary }} />}
-          onClick={handleTodayNote}
-          block
-          style={{ borderRadius: 8 }}
-        >
-          今日笔记
-        </Button>
-        <Button
-          icon={<Bot size={14} style={{ color: "#9333ea" }} />}
-          onClick={() => navigate("/ai")}
-          block
-          style={{ borderRadius: 8 }}
-        >
-          AI 问答
-        </Button>
-        <Button
-          icon={<GitBranch size={14} style={{ color: "#2563eb" }} />}
-          onClick={() => navigate("/graph")}
-          block
-          style={{ borderRadius: 8 }}
-        >
-          知识图谱
-        </Button>
-      </div>
+      {/* ② 快速操作工具条 — 按启用模块动态分列
+          添加待办用 NewTodoButton 分段按钮(主按钮弹 Modal + ▼ 下拉 AI 规划)
+          某模块在设置里关闭时，对应按钮自动消失，剩余按钮等宽分布 */}
+      {(() => {
+        const quickActions: { key: string; show: boolean; node: React.ReactNode }[] = [
+          {
+            key: "todo",
+            show: tasksEnabled,
+            node: (
+              <NewTodoButton
+                block
+                onSaved={() => {
+                  loadDashboard();
+                  refreshTaskStats();
+                }}
+              />
+            ),
+          },
+          {
+            key: "today",
+            show: dailyEnabled,
+            node: (
+              <Button
+                icon={<CalendarDays size={14} style={{ color: token.colorPrimary }} />}
+                onClick={handleTodayNote}
+                block
+                style={{ borderRadius: 8 }}
+              >
+                今日笔记
+              </Button>
+            ),
+          },
+          {
+            key: "ai",
+            show: aiEnabled,
+            node: (
+              <Button
+                icon={<Bot size={14} style={{ color: "#9333ea" }} />}
+                onClick={() => navigate("/ai")}
+                block
+                style={{ borderRadius: 8 }}
+              >
+                AI 问答
+              </Button>
+            ),
+          },
+          {
+            key: "graph",
+            show: graphEnabled,
+            node: (
+              <Button
+                icon={<GitBranch size={14} style={{ color: "#2563eb" }} />}
+                onClick={() => navigate("/graph")}
+                block
+                style={{ borderRadius: 8 }}
+              >
+                知识图谱
+              </Button>
+            ),
+          },
+        ];
+        const visible = quickActions.filter((a) => a.show);
+        if (visible.length === 0) return null;
+        return (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: `repeat(${visible.length}, 1fr)`,
+              gap: 12,
+            }}
+          >
+            {visible.map((a) => (
+              <div key={a.key}>{a.node}</div>
+            ))}
+          </div>
+        );
+      })()}
 
-      {/* ③ 快速记一笔 — 追加到今日 daily */}
+      {/* ③ 快速记一笔 — 追加到今日 daily（每日笔记关闭时整块隐藏） */}
+      {dailyEnabled && (
       <Card
         size="small"
         styles={{ body: { padding: "12px 14px" } }}
@@ -539,11 +589,13 @@ export default function HomePage() {
           autoSize={{ minRows: 2, maxRows: 5 }}
         />
       </Card>
+      )}
 
-      {/* ④ 双列:今日待办速览(左) + 最近笔记(右) */}
+      {/* ④ 双列:今日待办速览(左) + 最近笔记(右)；待办关闭时只剩最近笔记一列 */}
       <div className="grid grid-cols-12 gap-3">
 
-        {/* 今日待办 */}
+        {/* 今日待办：tasks 关闭则整张卡片不渲染，最近笔记自动占满 */}
+        {tasksEnabled && (
         <Card
           size="small"
           className="col-span-7"
@@ -743,11 +795,12 @@ export default function HomePage() {
             </ul>
           )}
         </Card>
+        )}
 
-        {/* 最近笔记 */}
+        {/* 最近笔记：tasks 关时占满 12 列，反之 5 列 */}
         <Card
           size="small"
-          className="col-span-5"
+          className={tasksEnabled ? "col-span-5" : "col-span-12"}
           styles={{ body: { padding: "8px 14px" } }}
           title={
             <span className="flex items-center gap-2 text-sm">
@@ -913,11 +966,11 @@ export default function HomePage() {
         </div>
       </Card>
 
-      {/* ⑥ 双列:置顶笔记 + 问 AI */}
+      {/* ⑥ 双列:置顶笔记 + 问 AI；ai 关闭时只剩置顶笔记一列 */}
       <div className="grid grid-cols-12 gap-3">
         <Card
           size="small"
-          className="col-span-5"
+          className={aiEnabled ? "col-span-5" : "col-span-12"}
           styles={{ body: { padding: "12px 14px" } }}
           title={
             <span className="flex items-center gap-2 text-sm">
@@ -957,6 +1010,7 @@ export default function HomePage() {
           )}
         </Card>
 
+        {aiEnabled && (
         <Card
           size="small"
           className="col-span-7"
@@ -1022,6 +1076,7 @@ export default function HomePage() {
             </Text>
           )}
         </Card>
+        )}
       </div>
 
       {/* 待办详情弹窗 — 点击今日待办列表项触发；只读视图 + 标记完成 + 子任务 + 编辑入口 */}
