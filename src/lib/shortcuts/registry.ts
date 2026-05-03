@@ -57,22 +57,9 @@ export const SHORTCUTS: ShortcutDef[] = [
     group: "全局快捷键（系统级，后台也可用）",
     desc: "打开搜索面板",
   },
-  {
-    id: "global.asrCapture",
-    scope: "global",
-    defaultAccel: "CommandOrControl+Shift+V",
-    group: "全局快捷键（系统级，后台也可用）",
-    desc: "语音快速捕获（录音 → 文字 → 任务/笔记）",
-  },
-  {
-    id: "global.asrToggle",
-    scope: "global",
-    defaultAccel: "CommandOrControl+Shift+Space",
-    group: "全局快捷键（系统级，后台也可用）",
-    desc: "语音 toggle：边写边说，文字直接落到当前焦点输入框",
-  },
 
   // ─── 应用内（窗口聚焦时生效） ───
+  { id: "app.asrToggle", scope: "app", defaultAccel: "CommandOrControl+Shift+Space", group: "应用内", desc: "语音 toggle：边写边说，文字注入当前焦点输入框（无焦点则打开快速捕获 Modal）" },
   { id: "app.palette", scope: "app", defaultAccel: "CommandOrControl+K", group: "应用内", desc: "打开命令面板" },
   { id: "app.newNote", scope: "app", defaultAccel: "CommandOrControl+N", group: "应用内", desc: "新建空白笔记" },
   { id: "app.save", scope: "app", defaultAccel: "CommandOrControl+S", group: "应用内", desc: "保存当前笔记" },

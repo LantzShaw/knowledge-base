@@ -1,14 +1,16 @@
 /**
- * ASR Toggle 控制器：全局快捷键「边写边说」入口。
+ * ASR Toggle 控制器：应用内「边写边说」入口（窗口聚焦时才生效）。
  *
- * - 监听后端 emit 的 `asr:toggle` 事件（默认 Ctrl+Shift+Space 触发）
+ * - 监听 window keydown：Ctrl/Cmd+Shift+Space 触发 toggle
+ *   故意不走 tauri-plugin-global-shortcut，避免在用户使用其他应用时被知识库抢走
  * - 按一下切换：idle → recording → transcribing → idle
  * - 录音前抓 activeElement 锁定注入目标，避免转写期间焦点漂走丢失目标
  * - 录音中按 Esc 取消（不转写、不注入、释放麦克风）
  * - VAD：连续静音 1500ms 自动停录，与 MicButton 同款阈值
  * - 注入策略：input/textarea 走 native setter 触发 React onChange；
  *   contenteditable 优先 execCommand("insertText")，失败回落到 Selection API
- * - 无有效焦点目标时回退：emit `asr:open_capture` 让 AppLayout 打开 QuickCaptureAsrModal
+ * - 无有效焦点目标时 fallback：dispatch window CustomEvent("asr:open_capture")
+ *   AppLayout 监听后打开 QuickCaptureAsrModal
  *
  * 与 MicButton 的关系：复用同一套录音/转写/VAD 工具链，但作为单例挂在 AppLayout
  * 顶层、跨页面常驻。MicButton 仍然嵌在各输入框旁边给鼠标用户用。
@@ -16,7 +18,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { App as AntdApp } from "antd";
 import { Mic, Loader2 } from "lucide-react";
-import { listen, emit, type UnlistenFn } from "@tauri-apps/api/event";
 import { asrApi } from "@/lib/api";
 import { useAudioLevel } from "@/hooks/useAudioLevel";
 import { useSilenceAutoStop } from "@/hooks/useSilenceAutoStop";
@@ -61,7 +62,7 @@ export function AsrToggleController() {
     // 启动前先抓焦点目标。无有效目标 → fallback 打开 QuickCaptureAsrModal
     const focused = document.activeElement;
     if (!isInjectableTarget(focused)) {
-      void emit("asr:open_capture");
+      window.dispatchEvent(new CustomEvent("asr:open_capture"));
       return;
     }
 
@@ -145,7 +146,7 @@ export function AsrToggleController() {
         const ok = injectText(targetRef.current, text);
         if (!ok) {
           // 目标已失效（DOM 卸载 / 失焦）→ fallback 打开 Modal 让用户看到结果
-          void emit("asr:open_capture");
+          window.dispatchEvent(new CustomEvent("asr:open_capture"));
           message.info(`已识别：${text.slice(0, 30)}${text.length > 30 ? "…" : ""}`);
         }
       }
@@ -167,15 +168,22 @@ export function AsrToggleController() {
     // transcribing：在转写中再按一次没意义，直接吞掉
   }, [startRecording]);
 
-  // 监听后端 asr:toggle 事件（仅注册一次）
+  // 监听窗口内 keydown：Ctrl/Cmd+Shift+Space → toggle。
+  // capture 阶段拦截，确保比 antd / TipTap 的内部处理更早跑（编辑器有时会吞按键）
   useEffect(() => {
-    let unlisten: UnlistenFn | null = null;
-    listen("asr:toggle", () => handleToggle()).then((fn) => {
-      unlisten = fn;
-    });
-    return () => {
-      unlisten?.();
-    };
+    function onKey(e: KeyboardEvent) {
+      const isToggleAccel =
+        (e.ctrlKey || e.metaKey) &&
+        e.shiftKey &&
+        !e.altKey &&
+        (e.code === "Space" || e.key === " ");
+      if (!isToggleAccel) return;
+      e.preventDefault();
+      e.stopPropagation();
+      handleToggle();
+    }
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
   }, [handleToggle]);
 
   // 录音中按 Esc 取消：在 capture 阶段拦截，确保比 antd Modal / Drawer 的 Esc 早跑

@@ -272,10 +272,11 @@ export function AppLayout() {
       setPaletteOpen(true);
     }).then((fn) => unlisteners.push(fn));
 
-    // 全局快捷键 Ctrl+Shift+V → 后端 emit `asr:open_capture` → 弹语音快速捕获 Modal
-    listen("asr:open_capture", () => {
-      setAsrCaptureOpen(true);
-    }).then((fn) => unlisteners.push(fn));
+    // 应用内 ASR 控制器 fallback：当 Ctrl+Shift+Space 触发时焦点不在可注入输入框，
+    // controller 会 dispatch window CustomEvent("asr:open_capture") → 这里打开 Modal
+    const onAsrOpenCapture = () => setAsrCaptureOpen(true);
+    window.addEventListener("asr:open_capture", onAsrOpenCapture);
+    unlisteners.push(() => window.removeEventListener("asr:open_capture", onAsrOpenCapture));
 
     listen<{ success: boolean; error?: string; stats?: { notesCount?: number } }>(
       "sync:manual-push-result",
