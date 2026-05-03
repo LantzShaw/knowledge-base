@@ -15,6 +15,11 @@
   ; 创建中文快捷方式（指向同一个 exe）
   CreateShortcut "$DESKTOP\知识库.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
   CreateShortcut "$SMPROGRAMS\$AppStartMenuFolder\知识库.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+
+  ; 覆盖 Tauri fileAssociations 默认生成的右键菜单文字
+  ; Tauri 默认写入 "Open with ${PRODUCTNAME}"（=Open with Knowledge Base），
+  ; 这里改为中文"使用知识库打开"。FILECLASS 取自 tauri.conf.json 的 name 字段。
+  WriteRegStr SHCTX "Software\Classes\Markdown 文件\shell\open" "" "使用知识库打开"
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
