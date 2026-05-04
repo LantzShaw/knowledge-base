@@ -530,7 +530,8 @@ function FolderChangeCell({
   );
 }
 
-export default function NoteListPage() {
+/** 桌面版原 NoteListPage（保留全部 1300+ 行实现） */
+function DesktopNoteListPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { token } = antdTheme.useToken();
@@ -1832,4 +1833,13 @@ export default function NoteListPage() {
       </Modal>
     </div>
   );
+}
+
+// ─── 移动端 Wrapper（T-M008 二期）───────────────────
+import { useIsMobile } from "@/hooks/useIsMobile";
+import { MobileNotes } from "./MobileNotes";
+
+export default function NoteListPage() {
+  const isMobile = useIsMobile();
+  return isMobile ? <MobileNotes /> : <DesktopNoteListPage />;
 }

@@ -80,9 +80,15 @@ function isTabActive(item: TabItem, pathname: string): boolean {
   );
 }
 
+/** 自带 FAB 的页面（路由前缀） — 这些页面下不渲染全局蓝色 + FAB，避免重叠 */
+const PAGES_WITH_OWN_FAB = ["/ai"];
+
 export function MobileLayout() {
   const navigate = useNavigate();
   const location = useLocation();
+  const hasOwnFab = PAGES_WITH_OWN_FAB.some(
+    (p) => location.pathname === p || location.pathname.startsWith(`${p}/`),
+  );
 
   // Android 物理返回键 / 手势：让 history back 优先（路由内导航），
   // 而不是让 WebView 直接关闭应用。
@@ -105,17 +111,19 @@ export function MobileLayout() {
           <Outlet />
         </div>
 
-        {/* 浮动 FAB（右下，悬浮在 Tab 上方） */}
-        <button
-          aria-label="新建"
-          onClick={() => navigate("/notes")}
-          className="fixed right-5 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-[#1677FF] text-white shadow-[0_8px_24px_rgba(22,119,255,0.4)] active:scale-95 transition-transform"
-          style={{
-            bottom: `calc(64px + env(safe-area-inset-bottom, 0px) + 16px)`,
-          }}
-        >
-          <Plus size={28} strokeWidth={2.5} />
-        </button>
+        {/* 浮动 FAB（右下，悬浮在 Tab 上方）— 在自带 FAB 的页面（如 /ai）隐藏 */}
+        {!hasOwnFab && (
+          <button
+            aria-label="新建"
+            onClick={() => navigate("/notes")}
+            className="fixed right-5 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-[#1677FF] text-white shadow-[0_8px_24px_rgba(22,119,255,0.4)] active:scale-95 transition-transform"
+            style={{
+              bottom: `calc(64px + env(safe-area-inset-bottom, 0px) + 16px)`,
+            }}
+          >
+            <Plus size={28} strokeWidth={2.5} />
+          </button>
+        )}
       </main>
 
       {/* 底部 5 Tab + 安全区 */}

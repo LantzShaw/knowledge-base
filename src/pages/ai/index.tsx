@@ -125,7 +125,7 @@ function showAiError(err: unknown) {
   }
 }
 
-export default function AiChatPage() {
+function DesktopAiChatPage() {
   const { token } = antdTheme.useToken();
   const navigate = useNavigate();
   const location = useLocation();
@@ -1536,4 +1536,12 @@ function SkillCallItem({ call, token }: { call: SkillCall; token: any }) {
 function truncateForDisplay(s: string, max: number): string {
   if (s.length <= max) return s;
   return s.slice(0, max) + `…（共 ${s.length} 字符）`;
+}
+
+import { useIsMobile } from "@/hooks/useIsMobile";
+import { MobileAi } from "./MobileAi";
+
+export default function AiChatPage() {
+  const isMobile = useIsMobile();
+  return isMobile ? <MobileAi /> : <DesktopAiChatPage />;
 }

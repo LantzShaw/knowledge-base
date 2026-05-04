@@ -238,7 +238,7 @@ function filterTitle(filter: SmartFilter): string {
   }
 }
 
-export default function TasksPage() {
+function DesktopTasksPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { token } = antdTheme.useToken();
@@ -1439,4 +1439,12 @@ function TaskRow({
     )}
     </>
   );
+}
+
+import { useIsMobile } from "@/hooks/useIsMobile";
+import { MobileTasks } from "./MobileTasks";
+
+export default function TasksPage() {
+  const isMobile = useIsMobile();
+  return isMobile ? <MobileTasks /> : <DesktopTasksPage />;
 }
