@@ -126,9 +126,27 @@
 
 #### T-M002 · `lib.rs` 桌面专属代码 cfg gate 隔离
 
-- **状态**：`pending`
+- **状态**：`completed` ✅ · 完成日期：2026-05-04 · 5 个 commit (`d6ebac8` → `fcf769d`)
 - **价值**：⭐⭐⭐⭐⭐  成本：中
 - **目标**：让 `cargo check --target aarch64-linux-android` 能过编译，且**桌面端 `cargo check` 仍能通过**
+- **完成情况**：
+  - ✅ 桌面端 cargo check 通过（仅 1 历史 dead_code warning）
+  - ✅ Android target cargo check 通过（0 errors，43 unused warnings，8.45s 增量编译）
+  - ✅ Cargo.toml 桌面专属 crate 全部 target gate（updater / autostart / global-shortcut /
+    pdfium-render / rmcp transport-child-process / rust-s3 / calamine / docx-rs）
+  - ✅ reqwest 切到 rustls-tls（双端共享，绕开 openssl-sys Android 编译失败）
+  - ✅ Capabilities 拆分：default 桌面 + mobile 简化版（顺手完成 T-M003）
+  - ✅ tauri.{android,ios}.conf.json platform-specific override（移除 sidecar / pdfium 资源）
+  - ✅ 5 个完全桌面专属 service 模块整体 cfg gate：emergency_window / popout_window /
+    excel_parser / export_word / mcp_client
+  - ✅ 桌面专属 helper 函数全部 cfg gate（10 个 lib.rs 顶层函数）
+  - ✅ AppState.mcp_external 字段 cfg gate
+  - ✅ services/ai.rs / services/skills.rs / services/task_reminder.rs 双写实现
+    （桌面 / 移动 stub）
+  - ✅ commands 层桌面专属 commands 全部加 cfg gate 在函数和 generate_handler! 中
+  - ✅ commands/mcp.rs locate_*_config 加 Android fallback
+  - ✅ services/sync_v1/backend.rs S3 分支双写（桌面真实 / 移动返错）
+  - ✅ services/pdf.rs PDFium 全部 cfg gate（桌面端 fallback / 移动端纯 pdf-extract）
 - **子任务**：
   - [ ] `mod tray;` 加 `#[cfg(desktop)]`
   - [ ] `tauri = features=["tray-icon"]` → 改为条件 feature 或 cfg gate 注册逻辑
@@ -145,7 +163,7 @@
 
 #### T-M003 · Capabilities 移动端版本
 
-- **状态**：`pending`
+- **状态**：`completed` ✅ · 完成日期：2026-05-04 · 与 T-M002 同步完成（commit `91d7aa0`）
 - **价值**：⭐⭐⭐⭐  成本：低
 - **目标**：`src-tauri/capabilities/mobile.json` 只包含移动端可用权限
 - **子任务**：
@@ -347,7 +365,7 @@
 | Phase | 任务数 | 完成数 | 状态 |
 |-------|-------|--------|------|
 | Phase 0 原型设计 | 1 | 1 | ✅ `completed` |
-| Phase 1 探针 | 5 | 1 | `in_progress` (T-M001 ✅) |
+| Phase 1 探针 | 5 | 3 | `in_progress` (T-M001 ✅ + T-M002 ✅ + T-M003 ✅) |
 | Phase 2 移植绿区 | 6 | 0 | `pending` |
 | Phase 3 黄区适配 | 4 | 0 | `pending` |
 | Phase 4 平台特化 | 5 | 0 | `pending` |
@@ -395,3 +413,7 @@ Phase 4 (依赖 Phase 3)
 - **2026-05-04** 决策：放弃 mobile 分支策略，改为 master 直接开发 + cfg gate 隔离 + commit 前桌面端回归验证
 - **2026-05-04** 扩展为 21 个任务（增加 T-M005 iOS init 独立任务、T-M015 功能模块开关、T-M016/T-M020 平台特化任务）
 - **2026-05-04** ✅ T-M001 完成（commit `44e0451`）— Android SDK 装在 `D:\software\dev\android-sdk\`，工具链全就绪，桌面端零影响
+- **2026-05-04** ✅ T-M002 完成（5 个 commit `d6ebac8` → `fcf769d`）— 桌面专属代码 cfg gate
+  完成；Android target `cargo check` 通过（0 errors）；同时顺手完成 T-M003（capabilities
+  移动端版本）；reqwest 切到 rustls-tls；rust-s3 / pdfium-render / calamine / docx-rs / 
+  tauri-plugin-{updater,autostart,global-shortcut} 全部移到 desktop target dependencies
