@@ -576,6 +576,11 @@ export const imageApi = {
   /** 从本地文件路径保存图片（用于工具栏文件选择）；返回相对路径 */
   saveFromPath: (noteId: number, sourcePath: string) =>
     invoke<string>("save_note_image_from_path", { noteId, sourcePath }),
+  /** 从远程 URL 下载并保存图片（粘贴外链图片本地化）。
+   * Rust reqwest 不受 WebView Origin/Referer/CORS 约束，可绕过钉钉/微信图床/知乎/CSDN
+   * 等图床的防盗链；referer 不传时按 host 智能匹配。返回相对路径。 */
+  downloadFromUrl: (noteId: number, url: string, referer?: string) =>
+    invoke<string>("download_image_to_assets", { noteId, url, referer }),
   /** 删除笔记的所有图片 */
   deleteNoteImages: (noteId: number) =>
     invoke<void>("delete_note_images", { noteId }),

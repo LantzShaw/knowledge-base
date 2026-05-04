@@ -995,6 +995,7 @@ pub fn run() {
             // 图片模块
             commands::image::save_note_image,
             commands::image::save_note_image_from_path,
+            commands::image::download_image_to_assets,
             commands::image::delete_note_images,
             commands::image::get_images_dir,
             commands::image::get_image_blob,

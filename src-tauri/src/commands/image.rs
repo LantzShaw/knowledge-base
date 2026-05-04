@@ -2,6 +2,7 @@ use tauri::State;
 
 use crate::services::asset_path;
 use crate::services::image::ImageService;
+use crate::services::image_download;
 use crate::state::AppState;
 
 /// 把 Service 返回的绝对路径转成相对 `state.data_dir` 的 POSIX 路径。
@@ -52,6 +53,41 @@ pub fn save_note_image_from_path(
         &state.data_dir,
         note_id,
         &source_path,
+    )
+    .map_err(|e| e.to_string())?;
+    to_relative(&state, &abs)
+}
+
+/// 从远程 URL 下载图片到 kb_assets（粘贴外链图片本地化）。
+///
+/// Why 不在前端 `fetch`：WebView 受 Origin/Referer/CORS 限制，钉钉/微信图床/知乎/CSDN
+/// 等图床防盗链直接 403。Rust 侧 reqwest 不受 WebView 同源策略约束，可按 host 智能注入
+/// Referer 绕过常见防盗链。详见 services/image_download.rs。
+#[tauri::command]
+pub async fn download_image_to_assets(
+    state: State<'_, AppState>,
+    note_id: i64,
+    url: String,
+    referer: Option<String>,
+) -> Result<String, String> {
+    let (bytes, ext) = image_download::fetch_image_bytes(&url, referer.as_deref())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 文件名复用现有 `pasted-{ts}.{ext}` 风格；safe_filename 会处理重名（同字节复用 / 加后缀）
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let file_name = format!("pasted-{}.{}", ts, ext);
+
+    let abs = ImageService::save_bytes_routed(
+        &state.db,
+        &state.vault,
+        &state.data_dir,
+        note_id,
+        &file_name,
+        &bytes,
     )
     .map_err(|e| e.to_string())?;
     to_relative(&state, &abs)

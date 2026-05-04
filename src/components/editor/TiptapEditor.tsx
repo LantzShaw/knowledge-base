@@ -638,6 +638,12 @@ interface TiptapEditorProps {
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onEditorReady?: (editor: any | null) => void;
+  /**
+   * 是否显示编辑器底部的简版统计（字数 / 字符 / 阅读时长）。
+   * 默认 true。笔记编辑器把字数挪到了顶部 MetaBar，且容器有 40vh padding-bottom，
+   * 底部 stats 会被推得离视觉底部很远 → 笔记页面应传 false 关闭它。
+   */
+  showFooterStats?: boolean;
 }
 
 export function TiptapEditor({
@@ -649,6 +655,7 @@ export function TiptapEditor({
   onWikiLinkClick,
   onAskAi,
   onEditorReady,
+  showFooterStats = true,
 }: TiptapEditorProps) {
   const isExternalUpdate = useRef(false);
 
@@ -792,8 +799,26 @@ export function TiptapEditor({
               // 路径，前端 fetch 不到（WebView 安全策略），但 Rust 侧可以直接读盘。
               const localPath = fileUriToLocalPath(src);
               rel = await imageApi.saveFromPath(effectiveNoteId!, localPath);
+            } else if (src.startsWith("http://") || src.startsWith("https://")) {
+              // 远程图：优先走 Rust reqwest（绕开 WebView Origin/Referer/CORS，
+              // 钉钉 / 微信 / 知乎 / CSDN 等防盗链图床基本只有这条路能成）。
+              // Rust 失败再回退前端 fetch（少数站点没限制反而前端能直连）。
+              try {
+                rel = await imageApi.downloadFromUrl(effectiveNoteId!, src);
+              } catch (rustErr) {
+                console.warn("[paste] rust download failed, fallback to fetch:", {
+                  srcSample: src.slice(0, 120),
+                  error: String(rustErr),
+                });
+                const file = await srcToImageFile(
+                  src,
+                  `pasted-${Date.now()}-${idx}.png`,
+                );
+                const base64 = await fileToBase64(file);
+                rel = await imageApi.save(effectiveNoteId!, file.name, base64);
+              }
             } else {
-              // http / https / data: / blob: → fetch + base64 + save
+              // data: / blob: → WebView 内部资源，前端 fetch 直接拿即可
               const file = await srcToImageFile(
                 src,
                 `pasted-${Date.now()}-${idx}.png`,
@@ -1521,14 +1546,16 @@ export function TiptapEditor({
           AiWriteMenu 接 onAskAi prop 后会在按钮行最前面渲染蓝色 CTA，
           整个菜单跟随鼠标位置出现，零重叠，无需独立定位逻辑 */}
       <AiWriteMenu editor={editor} onAskAi={onAskAi} />
-      <div
-        className="flex items-center gap-4 px-3 pt-4 pb-3 text-xs"
-        style={{ color: token.colorTextTertiary }}
-      >
-        <span>{stats.words} 字</span>
-        <span>{stats.chars} 字符</span>
-        <span>{stats.readingTime} 阅读</span>
-      </div>
+      {showFooterStats && (
+        <div
+          className="flex items-center gap-4 px-3 pt-4 pb-3 text-xs"
+          style={{ color: token.colorTextTertiary }}
+        >
+          <span>{stats.words} 字</span>
+          <span>{stats.chars} 字符</span>
+          <span>{stats.readingTime} 阅读</span>
+        </div>
+      )}
 
       {/* 节点级右键菜单（图片/视频/附件/wiki 链接） */}
       <ContextMenuOverlay
