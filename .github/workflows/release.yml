@@ -28,9 +28,38 @@ on:
 
 jobs:
   # ===========================================================================
+  # Job 0: 预创建 draft release（杜绝 4 个 build job 并发 create release 时
+  #        撞 GitHub API race（"Server Error" / "Error updating policy"））。
+  #        让所有 build job needs 它，启动时 release 已存在，tauri-action 直接
+  #        复用并上传 assets。
+  # ===========================================================================
+  prepare-release:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create draft release if missing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release $TAG already exists, skip"
+          else
+            gh release create "$TAG" \
+              --repo "$REPO" \
+              --draft \
+              --title "知识库 $TAG" \
+              --notes "See the assets to download and install this version."
+            echo "Created draft release $TAG"
+          fi
+
+  # ===========================================================================
   # Job 1: 跨平台构建
   # ===========================================================================
   release:
+    needs: prepare-release
     permissions:
       contents: write
     strategy:
