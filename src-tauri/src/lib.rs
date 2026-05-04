@@ -682,6 +682,8 @@ pub fn run() {
 
             // 若由"双击 md 文件"启动，暂存路径到 state，
             // 等前端 mount 完成后通过 take_pending_open_md_path 取走并打开
+            // 仅桌面端：移动端无双击文件启动概念
+            #[cfg(desktop)]
             if let Some(md_path) = extract_md_paths_from_args(std::env::args().skip(1))
                 .into_iter()
                 .next()
