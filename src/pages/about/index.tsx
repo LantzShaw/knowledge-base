@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Card, Typography, Descriptions, Spin, message, Button, Tooltip } from "antd";
+import { Card, Typography, Descriptions, Spin, message, Button, Tooltip, Tag } from "antd";
 import { SyncOutlined, SettingOutlined } from "@ant-design/icons";
 import { FolderOpen, ExternalLink } from "lucide-react";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
@@ -16,6 +16,7 @@ const BILIBILI_TUTORIAL_URL = "https://www.bilibili.com/video/BV1xvosBREbr";
 const ZSXQ_NAME = "后端转AI实战派";
 const ZSXQ_ID = "91839984";
 const QQ_GROUP_ID = "1090770702";
+const AUTHOR_CONTACT = "7704929366";
 
 const { Title, Text } = Typography;
 
@@ -191,6 +192,23 @@ export default function AboutPage() {
       </Card>
 
       <Card id="about-community" title="作者 & 社区">
+        <div className="flex items-start gap-3 flex-wrap" style={{ marginBottom: 12 }}>
+          <div className="flex-1 min-w-[260px]">
+            <div className="flex items-center gap-2 flex-wrap" style={{ marginBottom: 6 }}>
+              <Text strong style={{ fontSize: 14 }}>抓蛙师</Text>
+              <Tag color="geekblue" style={{ marginInlineEnd: 0 }}>Java 全栈 AI 架构师</Tag>
+              <Tag color="purple" style={{ marginInlineEnd: 0 }}>Agent 架构师</Tag>
+            </div>
+            <Typography.Paragraph
+              type="secondary"
+              style={{ fontSize: 12, marginBottom: 0, lineHeight: 1.6 }}
+            >
+              专注于 Java 后端 + 前端全栈工程实践，深耕大模型应用与 Agent
+              架构落地（RAG、工具调用、多智能体编排、知识库工程化）。
+              这款本地知识库即源于「把 AI 真正用进自己日常工作流」的长期实验。
+            </Typography.Paragraph>
+          </div>
+        </div>
         <Descriptions column={1} bordered size="small">
           <Descriptions.Item label="B 站主页">
             <div className="flex items-center justify-between gap-2">
@@ -236,6 +254,19 @@ export default function AboutPage() {
               </Text>
               <Text type="secondary" style={{ fontSize: 12 }}>
                 （Bug 反馈 / 使用交流 / 新功能讨论）
+              </Text>
+            </div>
+          </Descriptions.Item>
+          <Descriptions.Item label="联系作者">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Text style={{ fontSize: 13 }}>QQ / 微信</Text>
+              <Tooltip title="点击复制">
+                <Text copyable={{ text: AUTHOR_CONTACT }} strong style={{ fontSize: 13 }}>
+                  {AUTHOR_CONTACT}
+                </Text>
+              </Tooltip>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                （添加时请备注「来自知识库」）
               </Text>
             </div>
           </Descriptions.Item>
