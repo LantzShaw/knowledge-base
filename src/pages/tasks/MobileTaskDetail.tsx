@@ -93,6 +93,9 @@ export function MobileTaskDetail() {
   const dirtyRef = useRef(false);
   const saveTimerRef = useRef<number | null>(null);
   const savedHideTimerRef = useRef<number | null>(null);
+  // 防 React 闭包陷阱：onChange 同步调 scheduleSave 时 setState 还没生效
+  const titleRef = useRef("");
+  const descRef = useRef("");
 
   const load = useCallback(async () => {
     if (!taskId || Number.isNaN(taskId)) return;
@@ -104,6 +107,8 @@ export function MobileTaskDetail() {
       setTask(t);
       setTitle(t.title);
       setDescription(t.description ?? "");
+      titleRef.current = t.title;
+      descRef.current = t.description ?? "";
       setSubtasks(subs);
       dirtyRef.current = false;
       setStatus("idle");
@@ -120,9 +125,10 @@ export function MobileTaskDetail() {
     if (!task || !dirtyRef.current) return;
     setStatus("saving");
     try {
+      // 用 ref 读最新值，避免 React 闭包陷阱
       await taskApi.update(task.id, {
-        title,
-        description: description || null,
+        title: titleRef.current,
+        description: descRef.current || null,
       });
       dirtyRef.current = false;
       setStatus("saved");
@@ -136,7 +142,8 @@ export function MobileTaskDetail() {
       message.error(`保存失败: ${e}`);
       setStatus("idle");
     }
-  }, [task, title, description]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task]);
 
   function scheduleSave() {
     dirtyRef.current = true;
@@ -356,7 +363,9 @@ export function MobileTaskDetail() {
               <input
                 value={title}
                 onChange={(e) => {
-                  setTitle(e.target.value);
+                  const v = e.target.value;
+                  titleRef.current = v;
+                  setTitle(v);
                   scheduleSave();
                 }}
                 placeholder="任务标题"
@@ -367,7 +376,9 @@ export function MobileTaskDetail() {
               <textarea
                 value={description}
                 onChange={(e) => {
-                  setDescription(e.target.value);
+                  const v = e.target.value;
+                  descRef.current = v;
+                  setDescription(v);
                   scheduleSave();
                 }}
                 placeholder="备注…"

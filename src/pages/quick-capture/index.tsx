@@ -41,13 +41,18 @@ export default function QuickCapturePage() {
   const [elapsed, setElapsed] = useState("00:00");
 
   const debounceRef = useRef<number | null>(null);
+  // 防 React 闭包陷阱
+  const textRef = useRef("");
 
   // 加载草稿
   useEffect(() => {
     void (async () => {
       try {
         const draft = await configApi.get(DRAFT_KEY);
-        if (draft) setText(draft);
+        if (draft) {
+          setText(draft);
+          textRef.current = draft;
+        }
       } catch (e) {
         console.error("[QuickCapture] load draft failed:", e);
       }
@@ -76,10 +81,12 @@ export default function QuickCapturePage() {
   }, []);
 
   function onChange(v: string) {
+    textRef.current = v;
     setText(v);
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
     debounceRef.current = window.setTimeout(() => {
-      void persistDraft(v);
+      // 用 ref 读最新值
+      void persistDraft(textRef.current);
     }, DRAFT_AUTOSAVE_MS);
   }
 
@@ -92,7 +99,8 @@ export default function QuickCapturePage() {
   }
 
   async function handleSave() {
-    if (!text.trim() || savingMain) return;
+    const latest = textRef.current.trim();
+    if (!latest || savingMain) return;
     setSavingMain(true);
     try {
       // 落到今日日记：在原有 content 后追加
@@ -105,7 +113,7 @@ export default function QuickCapturePage() {
         hour: "2-digit",
         minute: "2-digit",
       });
-      const append = `\n\n---\n\n💭 **闪念 · ${time}**\n\n${text.trim()}\n`;
+      const append = `\n\n---\n\n💭 **闪念 · ${time}**\n\n${latest}\n`;
       const newContent = (note.content || "") + append;
       await noteApi.update(note.id, {
         title: note.title,
@@ -127,7 +135,7 @@ export default function QuickCapturePage() {
     // 关闭不丢草稿（草稿已写入），用户下次进来还能恢复
     if (debounceRef.current) {
       window.clearTimeout(debounceRef.current);
-      void persistDraft(text);
+      void persistDraft(textRef.current);
     }
     navigate(-1);
   }

@@ -68,6 +68,14 @@ export function MobileNoteEditor() {
   const saveTimerRef = useRef<number | null>(null);
   /** "已保存 刚刚" 自动隐藏定时器 */
   const savedHideTimerRef = useRef<number | null>(null);
+  /**
+   * title / content 的 ref 镜像 — 解决 React 闭包陷阱：
+   * onChange 内同步调用 scheduleSave 时，setState 还没生效，
+   * 当前渲染作用域里的 title 仍是旧值。useCallback 的 doSave
+   * 也只能读到旧值。改用 ref 由 doSave 直接读，可保证拿到最新。
+   */
+  const titleRef = useRef("");
+  const contentRef = useRef("");
 
   const load = useCallback(async () => {
     if (!noteId || Number.isNaN(noteId)) return;
@@ -76,6 +84,8 @@ export function MobileNoteEditor() {
       setNote(n);
       setTitle(n.title);
       setContent(n.content || "");
+      titleRef.current = n.title;
+      contentRef.current = n.content || "";
       dirtyRef.current = false;
       setStatus("idle");
     } catch (e) {
@@ -91,9 +101,11 @@ export function MobileNoteEditor() {
     if (!note || !dirtyRef.current) return;
     setStatus("saving");
     try {
+      // 直接从 ref 读最新值，避免闭包陷阱（用户在 1.2s debounce
+      // 期间多敲了几个字，state 已更新但 doSave closure 还是旧的）
       await noteApi.update(note.id, {
-        title,
-        content,
+        title: titleRef.current,
+        content: contentRef.current,
         folder_id: note.folder_id,
       });
       dirtyRef.current = false;
@@ -110,7 +122,9 @@ export function MobileNoteEditor() {
       message.error(`保存失败: ${e}`);
       setStatus("idle");
     }
-  }, [note, title, content]);
+    // 仅依赖 note —— title/content 通过 ref 读，无需进 deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note]);
 
   // debounced 自动保存
   function scheduleSave() {
@@ -192,6 +206,7 @@ export function MobileNoteEditor() {
     const selected = content.slice(start, end);
     const after = content.slice(end);
     const next = before + prefix + selected + suffix + after;
+    contentRef.current = next;
     setContent(next);
     scheduleSave();
     // 选中文本恢复，光标移到 prefix 之后
@@ -212,6 +227,7 @@ export function MobileNoteEditor() {
     const lineStart = before.lastIndexOf("\n") + 1;
     const next =
       content.slice(0, lineStart) + prefix + content.slice(lineStart);
+    contentRef.current = next;
     setContent(next);
     scheduleSave();
     requestAnimationFrame(() => {
@@ -281,7 +297,9 @@ export function MobileNoteEditor() {
         <input
           value={title}
           onChange={(e) => {
-            setTitle(e.target.value);
+            const v = e.target.value;
+            titleRef.current = v;
+            setTitle(v);
             scheduleSave();
           }}
           placeholder="无标题笔记"
@@ -310,7 +328,9 @@ export function MobileNoteEditor() {
           ref={textareaRef}
           value={content}
           onChange={(e) => {
-            setContent(e.target.value);
+            const v = e.target.value;
+            contentRef.current = v;
+            setContent(v);
             scheduleSave();
           }}
           placeholder="在这里写下你的想法..."
