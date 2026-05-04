@@ -154,11 +154,6 @@ impl Database {
         Ok(all_ids)
     }
 
-    pub fn folder_has_children(&self, id: i64) -> Result<bool, AppError> {
-        let (sub, active) = self.folder_children_count(id)?;
-        Ok(sub > 0 || active > 0)
-    }
-
     /// 详细版：返回 `(子文件夹数, 未在回收站的笔记数)`，
     /// 让 service 层给具体错误（"还有 2 个子文件夹"/"还有 3 篇笔记（含隐藏 / 加密 / 仍存在数据库的）"）。
     /// 隐藏笔记 / 加密笔记在 UI 默认看不到，但 is_deleted=0 仍算"占用"——这里完整计数避免用户困惑。

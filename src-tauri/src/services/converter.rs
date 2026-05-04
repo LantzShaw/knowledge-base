@@ -18,6 +18,8 @@ use crate::error::AppError;
 #[serde(rename_all = "kebab-case")]
 pub enum DocConverter {
     LibreOffice,
+    // 仅在 Windows 上构造；非 Windows 仍在 match 中引用，所以保留变体但抑制 dead_code
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     WindowsCom,
     None,
 }
@@ -25,6 +27,7 @@ pub enum DocConverter {
 /// Word COM ProgId 候选列表（按优先级，覆盖 Office + 各种 WPS 版本）
 ///
 /// 注意：ProgId 是大小写不敏感的，但 PowerShell `New-Object -ComObject` 仍按字面值匹配。
+#[cfg(target_os = "windows")]
 const WORD_PROGIDS: &[&str] = &[
     "Word.Application",   // Microsoft Office Word
     "KWps.Application",   // WPS Office 文字（旧版常见）
@@ -35,6 +38,7 @@ const WORD_PROGIDS: &[&str] = &[
 ];
 
 static CONVERTER: OnceLock<DocConverter> = OnceLock::new();
+#[cfg(target_os = "windows")]
 static AVAILABLE_PROGID: OnceLock<Option<String>> = OnceLock::new();
 
 /// 检测当前系统可用的 .doc 转换器（首次调用会探测，后续走缓存）
@@ -242,11 +246,6 @@ fn try_instantiate(progid: &str) -> Result<(), String> {
             err
         })
     }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn try_instantiate(_progid: &str) -> Result<(), String> {
-    Err("仅 Windows 支持 COM".into())
 }
 
 #[cfg(target_os = "windows")]
