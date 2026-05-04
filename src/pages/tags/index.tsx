@@ -31,7 +31,7 @@ const { Title, Text, Paragraph } = Typography;
  * 重构后只负责：展示 URL `?tagId=...` 选中标签下的笔记列表 + 重命名/删除。
  * 标签列表、筛选、新建已搬入 src/components/layout/panels/TagsPanel.tsx。
  */
-export default function TagsPage() {
+function DesktopTagsPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const selectedId = (() => {
@@ -302,4 +302,12 @@ export default function TagsPage() {
       </Modal>
     </div>
   );
+}
+
+import { useIsMobile } from "@/hooks/useIsMobile";
+import { MobileTags } from "./MobileTags";
+
+export default function TagsPage() {
+  const isMobile = useIsMobile();
+  return isMobile ? <MobileTags /> : <DesktopTagsPage />;
 }
