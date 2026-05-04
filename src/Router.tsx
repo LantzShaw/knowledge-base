@@ -13,6 +13,7 @@ import AboutPage from "@/pages/about";
 import GraphPage from "@/pages/graph";
 import AiChatPage from "@/pages/ai";
 import { MobileAiChat } from "@/pages/ai/MobileAiChat";
+import { MobileTaskDetail } from "@/pages/tasks/MobileTaskDetail";
 import TasksPage from "@/pages/tasks";
 import CardsPage from "@/pages/cards";
 import PromptsPage from "@/pages/prompts";
@@ -50,6 +51,12 @@ const router = createHashRouter([
   {
     path: "/quick-capture",
     element: <QuickCapturePage />,
+    errorElement: <RouteErrorFallback />,
+  },
+  // 任务详情：沉浸式全屏，独立路由
+  {
+    path: "/task-detail/:id",
+    element: <MobileTaskDetail />,
     errorElement: <RouteErrorFallback />,
   },
   {

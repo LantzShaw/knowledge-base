@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { Search, Filter, Flame, Calendar, Plus } from "lucide-react";
 import { taskApi } from "@/lib/api";
 import type { Task } from "@/types";
@@ -19,6 +20,7 @@ import type { Task } from "@/types";
 type GroupKey = "today" | "week" | "done";
 
 export function MobileTasks() {
+  const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<GroupKey | "all">("all");
@@ -156,7 +158,7 @@ export function MobileTasks() {
                     text={`今日 · ${todayTasks.length} 项`}
                     color="text-red-600"
                   />
-                  <Group tasks={todayTasks} onToggle={toggleTask} />
+                  <Group tasks={todayTasks} onToggle={toggleTask} onOpen={(t) => navigate(`/task-detail/${t.id}`)} />
                 </>
               )}
 
@@ -169,7 +171,7 @@ export function MobileTasks() {
                     text="本周"
                     color="text-orange-600"
                   />
-                  <Group tasks={weekTasks} onToggle={toggleTask} />
+                  <Group tasks={weekTasks} onToggle={toggleTask} onOpen={(t) => navigate(`/task-detail/${t.id}`)} />
                 </>
               )}
 
@@ -177,7 +179,7 @@ export function MobileTasks() {
             {activeTab === "all" && noDateTasks.length > 0 && (
               <>
                 <SectionHeader text={`其它 · ${noDateTasks.length} 项`} />
-                <Group tasks={noDateTasks} onToggle={toggleTask} />
+                <Group tasks={noDateTasks} onToggle={toggleTask} onOpen={(t) => navigate(`/task-detail/${t.id}`)} />
               </>
             )}
 
@@ -186,7 +188,7 @@ export function MobileTasks() {
               doneTasks.length > 0 && (
                 <>
                   <SectionHeader text={`已完成 · ${doneTasks.length} 项`} />
-                  <Group tasks={doneTasks} onToggle={toggleTask} faded />
+                  <Group tasks={doneTasks} onToggle={toggleTask} onOpen={(t) => navigate(`/task-detail/${t.id}`)} faded />
                 </>
               )}
           </>
@@ -243,16 +245,24 @@ function SectionHeader({
 function Group({
   tasks,
   onToggle,
+  onOpen,
   faded,
 }: {
   tasks: Task[];
   onToggle: (task: Task) => void;
+  onOpen: (task: Task) => void;
   faded?: boolean;
 }) {
   return (
     <div className="mx-4 mb-2 divide-y divide-slate-100 rounded-2xl bg-white">
       {tasks.map((task) => (
-        <TaskRow key={task.id} task={task} onToggle={onToggle} faded={faded} />
+        <TaskRow
+          key={task.id}
+          task={task}
+          onToggle={onToggle}
+          onOpen={onOpen}
+          faded={faded}
+        />
       ))}
     </div>
   );
@@ -261,10 +271,12 @@ function Group({
 function TaskRow({
   task,
   onToggle,
+  onOpen,
   faded,
 }: {
   task: Task;
   onToggle: (task: Task) => void;
+  onOpen: (task: Task) => void;
   faded?: boolean;
 }) {
   const due = task.due_date ? new Date(task.due_date) : null;
@@ -279,7 +291,10 @@ function TaskRow({
           onChange={() => onToggle(task)}
           className="mt-0.5 h-5 w-5 shrink-0 rounded"
         />
-        <div className="flex-1 min-w-0">
+        <button
+          onClick={() => onOpen(task)}
+          className="flex-1 min-w-0 text-left active:opacity-60"
+        >
           <div
             className={`text-sm ${
               task.status === 1
@@ -315,7 +330,7 @@ function TaskRow({
               )}
             </div>
           )}
-        </div>
+        </button>
       </div>
     </div>
   );
