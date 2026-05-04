@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ChevronLeft,
@@ -35,6 +36,38 @@ import { useAppStore } from "@/store";
 
 export default function QuickCreatePage() {
   const navigate = useNavigate();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  /**
+   * 移动端单文件导入：用 HTML5 <input type=file> 打开系统文件选择器
+   * （Tauri Mobile 的 WebView 直接支持，不需要走 tauri-plugin-dialog）
+   * 读 .md/.txt 文本 → 创建笔记 → 跳编辑器
+   */
+  function pickFile() {
+    fileInputRef.current?.click();
+  }
+
+  async function onFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      // 文件名去后缀做标题
+      const title = file.name.replace(/\.(md|markdown|txt)$/i, "");
+      const note = await noteApi.create({
+        title: title || "导入的笔记",
+        content: text,
+      });
+      useAppStore.getState().bumpNotesRefresh();
+      message.success(`已导入：${title}`);
+      navigate(`/notes/${note.id}`, { replace: true });
+    } catch (err) {
+      message.error(`导入失败: ${err}`);
+    } finally {
+      // 重置 input value，允许再次选同一文件
+      e.target.value = "";
+    }
+  }
 
   async function createBlank() {
     try {
@@ -140,8 +173,8 @@ export default function QuickCreatePage() {
             icon={<Upload size={20} className="text-slate-600" />}
             iconBg="bg-slate-100"
             title="导入文件"
-            sub=".md / .txt / .pdf / Word / Excel"
-            onClick={() => message.info("移动端导入待开发")}
+            sub="选 .md / .markdown / .txt 文件转为笔记"
+            onClick={pickFile}
           />
         </ListGroup>
 
@@ -168,6 +201,15 @@ export default function QuickCreatePage() {
           💡 主页底部 + 按钮可呼出此页
         </div>
       </div>
+
+      {/* 隐藏的文件选择器（导入文件行点击时触发） */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".md,.markdown,.txt,text/markdown,text/plain"
+        onChange={onFilePicked}
+        className="hidden"
+      />
     </div>
   );
 }
