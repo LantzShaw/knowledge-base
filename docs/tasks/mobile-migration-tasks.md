@@ -286,36 +286,44 @@
 
 #### T-M013 · 文件导入改单文件模式
 
-- **状态**：`pending`
+- **状态**：`completed` ✅ 一期 · commit `e043210`
 - **价值**：⭐⭐⭐⭐  成本：中
-- **子任务**：
-  - [ ] `commands::import::scan_markdown_folder` 在移动端改 `import_single_file`
-  - [ ] OB 整库导入：移动端改 ZIP 上传 → 服务端解压 → 逐文件导入
-  - [ ] PDF / 附件导入：用 `tauri-plugin-dialog` 单文件选择
+- **完成情况**：
+  - [x] MobileQuickCreate「导入文件」实装（HTML5 input + file.text() 读 .md/.markdown/.txt）
+  - [x] 文件名去后缀作标题 → noteApi.create → 跳编辑器
+- **未做**：
+  - [ ] PDF 解析（需后端 pdf-extract，移动端复杂）
+  - [ ] Word .docx / Excel .xlsx（calamine 是桌面专属）
+  - [ ] OB 整库 ZIP 上传
 
 #### T-M014 · 同步功能移动端 UX
 
-- **状态**：`pending`
+- **状态**：`completed` ✅ 一期 · commit `8add81d`
 - **价值**：⭐⭐⭐⭐⭐  成本：中（核心：PC ↔ 手机数据互通）
-- **子任务**：
-  - [ ] 后台调度器（`sync_scheduler` / `sync_v1_scheduler`）加 `#[cfg(desktop)]`
-  - [ ] 移动端：改"手动同步按钮" + "前台运行时定期触发"
-  - [ ] 测试 WebDAV 在 iOS 后台限制下的可靠性
-  - [ ] 测试 S3 上传大文件在移动网络下的稳定性
+- **完成情况**：
+  - [x] 后台调度器（`sync_scheduler` / `sync_v1_scheduler`）已在 T-M002 cfg gate 出去
+  - [x] /sync 路由 + MobileSync 页 — 列出 backend / 推送 / 拉取 / 测试 / 增删改
+  - [x] 仅 WebDAV（S3 在移动端 cfg gate 不能用）
+  - [x] 推/拉返回结果 toast 给用户：上传 N · 删除 N · 跳过 N · 错误 N
+  - [x] 拉取后 bumpNotesRefresh 让笔记列表立即同步
+  - [x] MobileMe 「云端同步」入口 wire 到 /sync
+- **未做（下一期）**：
+  - [ ] 监听 `sync:v1_progress` 事件显示进度条
+  - [ ] "一键同步"按钮（push + pull 串行）
+  - [ ] 网络变化提示（断网时 disable 按钮）
+  - [ ] 冲突解决专门 UI
 
 #### T-M015 · 功能模块开关页（16-feature-toggle 对应代码）
 
-- **状态**：`pending`
+- **状态**：`completed` ✅ · commits `b708c42` + `48c50d8` + `cdaa251`
 - **价值**：⭐⭐⭐⭐⭐  成本：中（PC 与移动端共用，需双向兼容）
 - **依赖**：T-M006
-- **现状**：PC 端已有 `src/components/settings/FeatureModulesSection.tsx`，闪卡默认关闭已实现
-- **子任务**：
-  - [ ] 移动端复用 PC 端 `FeatureModulesSection` 组件，加移动端样式（Card → 全屏列表）
-  - [ ] **新增移动端独有**：底部 Tab 配置（最多 5 个 Tab + 自动占第 5 格"我的"）
-  - [ ] **新增移动端独有**：主页 Dashboard 显示项开关（5 个卡片单独控制）
-  - [ ] 持久化到 `app_config`（沿用现有 `enabled_views` key）
-  - [ ] 同步：`enabled_views` 通过 V1 同步推送到所有设备
-  - [ ] **桌面端验证**：原 `FeatureModulesSection` 在 PC 上行为不变（不破现有功能）
+- **完成情况**：
+  - [x] 复用 PC 端 useAppStore.enabledViews + toggleEnabledView，写 app_config.enabled_views
+  - [x] **移动端独有**：底部 Tab 配置（4 格 + 我的固定，12 候选 tabs，自动换位）
+  - [x] **移动端独有**：主页 Dashboard 8 项显示开关（today_words / due_cards / today_tasks_card / total_notes / quick_actions / today_tasks_list / heatmap / recent_notes）
+  - [x] 持久化到 `app_config`：enabled_views / mobile_dashboard_items / mobile_tab_keys
+  - [x] **桌面端零影响**：mobile_* 配置桌面不读，桌面继续用 enabled_views 控制 ActivityBar
 
 ---
 
@@ -377,9 +385,9 @@
 | Phase 0 原型设计 | 1 | 1 | ✅ `completed` |
 | Phase 1 探针 | 5 | 4 | `in_progress` (T-M001~T-M004 ✅，T-M005 iOS 阻塞) |
 | Phase 2 移植绿区 | 6 | 4 | `in_progress` (T-M006/008/009/010 ✅，T-M007/011 待) |
-| Phase 3 黄区适配 | 4 | 1 | `in_progress` (T-M015 一期 ✅，T-M012/013/014 待) |
+| Phase 3 黄区适配 | 4 | 3 | `in_progress` (T-M013/014 一期 + T-M015 全部 ✅，T-M012 PDFium 待) |
 | Phase 4 平台特化 | 5 | 0 | `pending` |
-| **合计** | **21** | **10** | — |
+| **合计** | **21** | **12** | — |
 
 ---
 
@@ -432,3 +440,13 @@ Phase 4 (依赖 Phase 3)
   覆盖 17 页设计中的 16 页（除 09-cards 外）；
   含智能保存状态机、流式 AI 响应、模型 Drawer、自动草稿、子任务等关键交互；
   桌面端零退化（wrapper 模式不影响桌面组件）
+- **2026-05-04** ✅ 收尾批次（commits `8a173a4` → `8add81d`，6 个 commit）
+  - `8a173a4` 30 天写作热力图（MobileHome 余项）
+  - `48c50d8` T-M015 二期 Dashboard 显示项可定制
+  - `9eed66f` MobileCards 闪卡复习页（17 页设计稿全部完成）
+  - `cdaa251` T-M015 三期 底部 Tab 4 格可定制（mobileTabRegistry + 12 候选）
+  - `e043210` T-M013 一期 单文件导入（HTML5 input file.text）
+  - `8add81d` T-M014 一期 WebDAV 同步推/拉/测试 UX
+  
+  **进度从 1/21 → 12/21**。剩余主要工作：T-M005 iOS（阻塞需 Mac）、T-M007 桌面项隐藏、
+  T-M011 图谱、T-M012 PDFium、T-M016~T-M020 平台特化（Android 签名 / iOS / Intent / CI）
