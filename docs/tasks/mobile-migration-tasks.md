@@ -103,23 +103,26 @@
 
 #### T-M001 · master 上 Tauri Android 初始化
 
-- **状态**：`pending`
+- **状态**：`completed` · 完成日期：2026-05-04 · commit `44e0451`
 - **价值**：⭐⭐⭐⭐⭐  成本：中
-- **目标**：跑起来一个能编译的 Android 工程，主窗口能渲染（不要求功能可用）
-- **前置工具链**（用户当前 Windows 环境**裸**，需先安装）：
-  - [ ] JDK 17+（已有 OpenJDK 21 ✅，但 `JAVA_HOME` 未设置）
-  - [ ] Android SDK + Android Studio（含命令行工具）
-  - [ ] Android NDK 25+
-  - [ ] 配置环境变量：`JAVA_HOME` / `ANDROID_HOME` / `NDK_HOME`
-  - [ ] `rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android`
-- **子任务**：
-  - [ ] `pnpm tauri android init` → 生成 `src-tauri/gen/android/`
-  - [ ] 整理 `.gitignore`：commit Gradle 模板，忽略 `.gradle/` `build/` `local.properties`
-  - [ ] 提交：`chore(mobile): tauri android init`
-- **注意**：`pnpm tauri android dev` 在 T-M002 完成前**必然失败**（红区依赖编译不过），不强求验证 dev 启动
-- **风险**：
-  - 工具链下载量大（~2 GB），网络慢需配国内镜像
-  - JAVA_HOME 配置错误会让 Gradle 报错
+- **实际安装路径**：
+  - Android SDK：`D:\software\dev\android-sdk\`
+  - JDK：`D:\software\dev\jdk-21\`（用户已有）
+  - NDK：`D:\software\dev\android-sdk\ndk\27.0.12077973\`
+- **完成情况**：
+  - [x] JDK 21 ✅（用户已有）+ `JAVA_HOME` 设到 `D:\software\dev\jdk-21`
+  - [x] Android cmdline-tools 12.0 装在 `cmdline-tools/latest/`
+  - [x] platform-tools / build-tools 34.0.0 / android-34 / NDK 27.0.12077973 全装
+  - [x] `ANDROID_HOME` / `NDK_HOME` / `ANDROID_NDK_ROOT` 用户级永久写入
+  - [x] PATH 加 jdk-21\bin / cmdline-tools\latest\bin / platform-tools
+  - [x] SDK Licenses 全部接受
+  - [x] `rustup target add` 4 个 Android target（aarch64 / armv7 / i686 / x86_64）
+  - [x] `pnpm tauri android init` 成功 → 生成 `src-tauri/gen/android/`（41 文件）
+  - [x] `.gitignore` 自动配好（Gradle 模板保留，忽略 build / .gradle / local.properties）
+  - [x] 桌面端 0 影响：git diff 空 + `cargo check` 通过（仅 1 dead_code warning 历史遗留）
+  - [x] 提交：`chore(mobile): tauri android init` (44e0451)
+- **遗留**：
+  - [ ] `pnpm tauri android dev` 启动验证 — 推迟到 T-M002 完成后（当前桌面专属依赖编译不过 Android target，预期失败）
 
 #### T-M002 · `lib.rs` 桌面专属代码 cfg gate 隔离
 
@@ -344,7 +347,7 @@
 | Phase | 任务数 | 完成数 | 状态 |
 |-------|-------|--------|------|
 | Phase 0 原型设计 | 1 | 1 | ✅ `completed` |
-| Phase 1 探针 | 5 | 0 | `pending` |
+| Phase 1 探针 | 5 | 1 | `in_progress` (T-M001 ✅) |
 | Phase 2 移植绿区 | 6 | 0 | `pending` |
 | Phase 3 黄区适配 | 4 | 0 | `pending` |
 | Phase 4 平台特化 | 5 | 0 | `pending` |
@@ -391,3 +394,4 @@ Phase 4 (依赖 Phase 3)
 - **2026-05-04** 完成 T-M000 原型设计（17 页 HTML，已对齐 PC 端功能模块清单）
 - **2026-05-04** 决策：放弃 mobile 分支策略，改为 master 直接开发 + cfg gate 隔离 + commit 前桌面端回归验证
 - **2026-05-04** 扩展为 21 个任务（增加 T-M005 iOS init 独立任务、T-M015 功能模块开关、T-M016/T-M020 平台特化任务）
+- **2026-05-04** ✅ T-M001 完成（commit `44e0451`）— Android SDK 装在 `D:\software\dev\android-sdk\`，工具链全就绪，桌面端零影响
