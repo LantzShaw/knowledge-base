@@ -12,7 +12,7 @@ import {
   Pin,
 } from "lucide-react";
 import { systemApi, noteApi, taskApi, cardApi } from "@/lib/api";
-import type { DashboardStats, Note, Task } from "@/types";
+import type { DashboardStats, DailyWritingStat, Note, Task } from "@/types";
 import { relativeTime } from "@/lib/utils";
 
 /**
@@ -23,9 +23,8 @@ import { relativeTime } from "@/lib/utils";
  * 2. 4 数据卡（2x2 grid）：今日字数 / 待复习闪卡 / 今日待办 / 笔记总数
  * 3. 快速操作（4 列）：闪念 / 新建 / 今日笔记 / 问 AI
  * 4. 今日待办速览（最多 3 条 + 全部 →）
- * 5. 最近编辑（最多 2 条 + 全部 →）
- *
- * 暂未实现（后续 PR）：30 天写作热力图（要 get_writing_trend + 自绘 grid）
+ * 5. 30 天写作热力图（按 word_count 5 档配色）
+ * 6. 最近编辑（最多 2 条 + 全部 →）
  */
 
 interface DashboardData {
@@ -33,6 +32,7 @@ interface DashboardData {
   recentNotes: Note[];
   todayTasks: Task[];
   dueCardsCount: number;
+  trend: DailyWritingStat[];
 }
 
 const GREETING_HOURS = [
@@ -55,19 +55,21 @@ export function MobileHome() {
     recentNotes: [],
     todayTasks: [],
     dueCardsCount: 0,
+    trend: [],
   });
 
   useEffect(() => {
     let alive = true;
     void (async () => {
       try {
-        const [stats, notesPage, tasks, dueCards] = await Promise.all([
+        const [stats, notesPage, tasks, dueCards, trend] = await Promise.all([
           systemApi.getDashboardStats(),
           noteApi.list({ page: 1, page_size: 2 }).catch(
             () => ({ items: [], total: 0, page: 1, page_size: 2 }),
           ),
           taskApi.list({ status: 0 }).catch(() => [] as Task[]),
           cardApi.listDue().catch(() => []),
+          systemApi.getWritingTrend(30).catch(() => [] as DailyWritingStat[]),
         ]);
         if (!alive) return;
         setData({
@@ -75,6 +77,7 @@ export function MobileHome() {
           recentNotes: notesPage.items ?? [],
           todayTasks: (tasks as Task[]).slice(0, 3),
           dueCardsCount: (dueCards as unknown[]).length,
+          trend,
         });
       } catch (e) {
         console.error("[MobileHome] load failed:", e);
@@ -243,6 +246,17 @@ export function MobileHome() {
         )}
       </div>
 
+      {/* 30 天写作热力图 */}
+      <div className="px-4 pt-4">
+        <div className="mb-2 flex items-center justify-between px-1 text-xs">
+          <span className="font-medium text-slate-400">30 天写作</span>
+          <span className="text-slate-400">
+            共 {data.trend.reduce((s, d) => s + d.word_count, 0).toLocaleString()} 字
+          </span>
+        </div>
+        <WritingHeatmap trend={data.trend} />
+      </div>
+
       {/* 最近编辑 */}
       <div className="px-4 pt-4 pb-6">
         <div className="mb-2 flex items-center justify-between px-1 text-xs">
@@ -328,5 +342,93 @@ function EmptyHint({ icon, text }: { icon: React.ReactNode; text: string }) {
       {icon}
       <span className="text-xs">{text}</span>
     </div>
+  );
+}
+
+/**
+ * 30 天写作热力图（移动端紧凑版）。
+ * 把每日字数按 5 档配色：0 / 1-99 / 100-299 / 300-799 / 800+
+ * 周日开头，按日期升序铺；最多 5 周满布。
+ */
+function WritingHeatmap({ trend }: { trend: DailyWritingStat[] }) {
+  // 生成最近 30 天的日期序列（含今天）。先把 trend 索引到 Map。
+  const map = new Map<string, DailyWritingStat>();
+  trend.forEach((t) => map.set(t.date, t));
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days: { date: string; word_count: number; isToday: boolean }[] = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(today.getDate() - i);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    days.push({
+      date: key,
+      word_count: map.get(key)?.word_count ?? 0,
+      isToday: i === 0,
+    });
+  }
+
+  // 周日 = 0；前面补占位让首列对齐周
+  const firstDayOfWeek = new Date(days[0].date).getDay();
+  const cells: ({
+    date: string;
+    word_count: number;
+    isToday: boolean;
+  } | null)[] = [];
+  for (let i = 0; i < firstDayOfWeek; i++) cells.push(null);
+  cells.push(...days);
+
+  return (
+    <div className="rounded-2xl bg-white p-3">
+      {/* 列标 */}
+      <div className="mb-1.5 grid grid-cols-7 text-center text-[9px] text-slate-400">
+        <div>日</div>
+        <div>一</div>
+        <div>二</div>
+        <div>三</div>
+        <div>四</div>
+        <div>五</div>
+        <div>六</div>
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {cells.map((c, idx) => (
+          <HeatCell key={idx} cell={c} />
+        ))}
+      </div>
+      {/* 图例 */}
+      <div className="mt-3 flex items-center justify-end gap-1.5 text-[10px] text-slate-400">
+        <span>少</span>
+        <div className="h-2.5 w-2.5 rounded-sm bg-slate-100" />
+        <div className="h-2.5 w-2.5 rounded-sm bg-blue-100" />
+        <div className="h-2.5 w-2.5 rounded-sm bg-blue-300" />
+        <div className="h-2.5 w-2.5 rounded-sm bg-blue-500" />
+        <div className="h-2.5 w-2.5 rounded-sm bg-blue-700" />
+        <span>多</span>
+      </div>
+    </div>
+  );
+}
+
+function HeatCell({
+  cell,
+}: {
+  cell: { date: string; word_count: number; isToday: boolean } | null;
+}) {
+  if (!cell) {
+    return <div className="aspect-square" />;
+  }
+  const w = cell.word_count;
+  let bg = "bg-slate-100";
+  if (w >= 800) bg = "bg-blue-700";
+  else if (w >= 300) bg = "bg-blue-500";
+  else if (w >= 100) bg = "bg-blue-300";
+  else if (w > 0) bg = "bg-blue-100";
+  const ring = cell.isToday ? "ring-2 ring-[#1677FF] ring-offset-1" : "";
+  return (
+    <div
+      className={`aspect-square rounded-sm ${bg} ${ring}`}
+      title={`${cell.date} · ${w} 字`}
+    />
   );
 }
