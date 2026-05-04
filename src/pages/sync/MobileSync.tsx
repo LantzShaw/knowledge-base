@@ -12,9 +12,14 @@ import {
   Pencil,
 } from "lucide-react";
 import { Modal, Form, Input, message } from "antd";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { syncV1Api } from "@/lib/api";
 import { useAppStore } from "@/store";
-import type { SyncBackend, WebDavConfig } from "@/types";
+import type {
+  SyncBackend,
+  SyncV1ProgressEvent,
+  WebDavConfig,
+} from "@/types";
 import { relativeTime } from "@/lib/utils";
 
 /**
@@ -42,9 +47,27 @@ export function MobileSync() {
   const [backends, setBackends] = useState<SyncBackend[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [progress, setProgress] = useState<SyncV1ProgressEvent | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form] = Form.useForm<WebDavForm>();
+
+  // 监听后端推/拉进度事件，渲染到对应 backend 卡片下
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+    let cancelled = false;
+    void (async () => {
+      const fn = await listen<SyncV1ProgressEvent>("sync_v1:progress", (e) => {
+        setProgress(e.payload);
+      });
+      if (cancelled) fn();
+      else unlisten = fn;
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -133,6 +156,7 @@ export function MobileSync() {
 
   async function push(id: number) {
     setBusyId(id);
+    setProgress(null);
     try {
       const r = await syncV1Api.push(id);
       message.success(
@@ -144,11 +168,13 @@ export function MobileSync() {
       message.error(`推送失败: ${e}`);
     } finally {
       setBusyId(null);
+      setProgress(null);
     }
   }
 
   async function pull(id: number) {
     setBusyId(id);
+    setProgress(null);
     try {
       const r = await syncV1Api.pull(id);
       message.success(
@@ -161,6 +187,7 @@ export function MobileSync() {
       message.error(`拉取失败: ${e}`);
     } finally {
       setBusyId(null);
+      setProgress(null);
     }
   }
 
@@ -233,6 +260,11 @@ export function MobileSync() {
                 key={b.id}
                 backend={b}
                 busy={busyId === b.id}
+                progress={
+                  busyId === b.id && progress?.backendId === b.id
+                    ? progress
+                    : null
+                }
                 onPush={() => push(b.id)}
                 onPull={() => pull(b.id)}
                 onTest={() => testConn(b.id)}
@@ -292,9 +324,20 @@ export function MobileSync() {
   );
 }
 
+const PHASE_LABELS: Record<string, string> = {
+  compute: "计算清单",
+  diff: "对比远端",
+  upload: "上传",
+  download: "下载",
+  manifest: "更新清单",
+  apply: "应用本地",
+  done: "完成",
+};
+
 function BackendCard({
   backend,
   busy,
+  progress,
   onPush,
   onPull,
   onTest,
@@ -303,6 +346,7 @@ function BackendCard({
 }: {
   backend: SyncBackend;
   busy: boolean;
+  progress: SyncV1ProgressEvent | null;
   onPush: () => void;
   onPull: () => void;
   onTest: () => void;
@@ -341,6 +385,40 @@ function BackendCard({
           </div>
         </div>
       </div>
+
+      {/* 进度条（仅在 busy 时显示） */}
+      {busy && (
+        <div className="mt-3 rounded-lg bg-blue-50 px-3 py-2">
+          <div className="flex items-center justify-between text-[11px] text-blue-700">
+            <span className="font-medium">
+              {progress
+                ? PHASE_LABELS[progress.phase] ?? progress.phase
+                : "准备中…"}
+            </span>
+            {progress && progress.total > 0 && (
+              <span>
+                {progress.current} / {progress.total}
+              </span>
+            )}
+          </div>
+          {progress?.message && (
+            <div className="mt-0.5 truncate text-[10px] text-blue-600/80">
+              {progress.message}
+            </div>
+          )}
+          <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-blue-100">
+            <div
+              className="h-full bg-[#1677FF] transition-all"
+              style={{
+                width:
+                  progress && progress.total > 0
+                    ? `${Math.min(100, Math.round((progress.current / progress.total) * 100))}%`
+                    : "8%",
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* 操作按钮 */}
       <div className="mt-3 grid grid-cols-2 gap-2">
