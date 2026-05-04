@@ -280,7 +280,7 @@ function SettingsAnchorNav() {
   );
 }
 
-export default function SettingsPage() {
+function DesktopSettingsPage() {
   const [checking, setChecking] = useState(false);
   const [update, setUpdate] = useState<Update | null>(null);
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
@@ -1952,4 +1952,12 @@ export default function SettingsPage() {
       </div>
     </div>
   );
+}
+
+import { useIsMobile } from "@/hooks/useIsMobile";
+import { MobileMe } from "./MobileMe";
+
+export default function SettingsPage() {
+  const isMobile = useIsMobile();
+  return isMobile ? <MobileMe /> : <DesktopSettingsPage />;
 }
