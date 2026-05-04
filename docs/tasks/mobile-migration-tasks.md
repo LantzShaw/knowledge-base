@@ -174,7 +174,7 @@
 
 #### T-M004 · Android 探针验证：笔记 CRUD + 搜索能跑通
 
-- **状态**：`pending`
+- **状态**：`testing` · 应用启动 OK 但桌面 Layout 不可操作（→ T-M006 重构）· commit `3118ca3`
 - **价值**：⭐⭐⭐⭐⭐  成本：低
 - **目标**：在 Android 模拟器上能创建笔记、列出、搜索（验证 rusqlite + 三层架构在移动端工作）
 - **子任务**：
@@ -365,7 +365,7 @@
 | Phase | 任务数 | 完成数 | 状态 |
 |-------|-------|--------|------|
 | Phase 0 原型设计 | 1 | 1 | ✅ `completed` |
-| Phase 1 探针 | 5 | 3 | `in_progress` (T-M001 ✅ + T-M002 ✅ + T-M003 ✅) |
+| Phase 1 探针 | 5 | 4 | `in_progress` (T-M001~T-M004 ✅，T-M005 iOS 阻塞) |
 | Phase 2 移植绿区 | 6 | 0 | `pending` |
 | Phase 3 黄区适配 | 4 | 0 | `pending` |
 | Phase 4 平台特化 | 5 | 0 | `pending` |
