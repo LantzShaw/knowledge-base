@@ -83,7 +83,7 @@ function formatNextInterval(card: FsrsCard, now: Date): string {
   return `${(days / 365).toFixed(1)}年`;
 }
 
-export default function CardsPage() {
+function DesktopCardsPage() {
   const [tab, setTab] = useState<"review" | "list">("review");
   const [stats, setStats] = useState<CardStats | null>(null);
 
@@ -586,4 +586,12 @@ function CardEditModal({
       </Form>
     </Modal>
   );
+}
+
+import { useIsMobile } from "@/hooks/useIsMobile";
+import { MobileCards } from "./MobileCards";
+
+export default function CardsPage() {
+  const isMobile = useIsMobile();
+  return isMobile ? <MobileCards /> : <DesktopCardsPage />;
 }
