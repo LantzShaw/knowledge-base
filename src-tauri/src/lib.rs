@@ -130,14 +130,17 @@ fn app_data_dir_name() -> String {
 /// 否则 dev 单实例锁 / multi_instance flag / 指针文件 等会落到 prod 目录里。
 pub(crate) fn framework_app_data_dir(handle: &tauri::AppHandle) -> Result<PathBuf, tauri::Error> {
     let from_tauri = handle.path().app_data_dir()?;
+    // 桌面端：dev 模式重写到 -dev 兄弟目录（应用对 OS 的 app_data_dir 父目录有写权限）
+    // 移动端：Android 沙盒只允许应用写自己的 files/，不能在 parent 下建兄弟目录
+    //         直接返回 tauri 给的（dev/prod 用同一个目录，反正每次卸载重装都重置）
+    #[cfg(desktop)]
     if cfg!(debug_assertions) {
-        Ok(from_tauri
+        return Ok(from_tauri
             .parent()
             .map(|parent| parent.join(app_data_dir_name()))
-            .unwrap_or(from_tauri))
-    } else {
-        Ok(from_tauri)
+            .unwrap_or(from_tauri));
     }
+    Ok(from_tauri)
 }
 
 /// 在 Tauri Builder 启动前估算 app data 目录（用于早期投递判断）
