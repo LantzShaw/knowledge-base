@@ -1,0 +1,305 @@
+import { useNavigate } from "react-router-dom";
+import {
+  ChevronLeft,
+  Info,
+  Lock,
+  SlidersHorizontal,
+  Home,
+  FileText,
+  Search,
+  Trash2,
+  Info as InfoIcon,
+  Calendar,
+  CheckSquare,
+  Layers,
+  Tag,
+  GitFork,
+  Bot,
+  Sparkles,
+  EyeOff,
+} from "lucide-react";
+import { Switch, message } from "antd";
+import { useAppStore, OPTIONAL_VIEWS } from "@/store";
+import type { ActiveView } from "@/store";
+
+/**
+ * 移动端「功能模块」开关页（设计稿：16-feature-toggle.html）
+ *
+ * 路由 /feature-toggle —— 移动端专用
+ * 入口：MobileMe 「功能模块」一行
+ *
+ * 复用桌面端 useAppStore.enabledViews + toggleEnabledView：
+ * - 数据存到 app_config.enabled_views（同一个 key，桌面 / 移动共用）
+ * - 同步到 PC：通过 V1 sync push enabled_views 后桌面端也跟着变（T-M015 范围）
+ *
+ * MVP 不实装：
+ * - 底部 Tab 配置（设计稿那块网格）— 需要新 app_config key + MobileLayout 动态读取
+ * - 主页 Dashboard 显示项 — 需要新 app_config key + MobileHome 动态读取
+ * 这两个移动端独有特性放下迭代，先把桌面端已有的 8 个可选模块开关接上去
+ */
+
+interface OptionMeta {
+  view: ActiveView;
+  label: string;
+  desc: string;
+  icon: React.ReactNode;
+  iconBg: string;
+  defaultOff?: boolean;
+}
+
+const CORE_MODULES = [
+  {
+    icon: <Home size={16} className="text-slate-500" />,
+    label: "主页",
+    desc: "每日仪表盘 · 数据总览",
+  },
+  {
+    icon: <FileText size={16} className="text-slate-500" />,
+    label: "笔记",
+    desc: "笔记 CRUD / 文件夹",
+  },
+  {
+    icon: <Search size={16} className="text-slate-500" />,
+    label: "搜索",
+    desc: "全文 / 标签 / 双链",
+  },
+  {
+    icon: <Trash2 size={16} className="text-slate-500" />,
+    label: "回收站",
+    desc: "已删除笔记 30 天保留",
+  },
+  {
+    icon: <InfoIcon size={16} className="text-slate-500" />,
+    label: "关于",
+    desc: "版本 / 许可 / 反馈",
+  },
+];
+
+const OPTIONS: OptionMeta[] = [
+  {
+    view: "daily",
+    label: "每日笔记",
+    desc: "按日期写日记 / 工作日志",
+    icon: <Calendar size={16} className="text-green-600" />,
+    iconBg: "bg-green-100",
+  },
+  {
+    view: "tasks",
+    label: "待办",
+    desc: "任务管理 / 提醒 / 重复任务",
+    icon: <CheckSquare size={16} className="text-blue-600" />,
+    iconBg: "bg-blue-100",
+  },
+  {
+    view: "cards",
+    label: "闪卡复习",
+    desc: "FSRS 间隔重复 · 从批注一键转卡",
+    icon: <Layers size={16} className="text-purple-600" />,
+    iconBg: "bg-purple-100",
+    defaultOff: true,
+  },
+  {
+    view: "tags",
+    label: "标签",
+    desc: "标签管理 / 跨笔记标签视图",
+    icon: <Tag size={16} className="text-pink-600" />,
+    iconBg: "bg-pink-100",
+  },
+  {
+    view: "graph",
+    label: "知识图谱",
+    desc: "可视化笔记之间的双向链接",
+    icon: <GitFork size={16} className="text-cyan-600" />,
+    iconBg: "bg-cyan-100",
+  },
+  {
+    view: "ai",
+    label: "AI 问答",
+    desc: "和 AI 对话，让它读你的笔记",
+    icon: <Bot size={16} className="text-[#FA8C16]" />,
+    iconBg: "bg-orange-100",
+  },
+  {
+    view: "prompts",
+    label: "提示词",
+    desc: "管理常用 AI 提示词模板",
+    icon: <Sparkles size={16} className="text-yellow-600" />,
+    iconBg: "bg-yellow-100",
+  },
+  {
+    view: "hidden",
+    label: "隐藏笔记",
+    desc: "PIN 锁保护的私密笔记空间",
+    icon: <EyeOff size={16} className="text-red-600" />,
+    iconBg: "bg-red-100",
+  },
+];
+
+export default function FeatureTogglePage() {
+  const navigate = useNavigate();
+  const enabledViews = useAppStore((s) => s.enabledViews);
+  const toggleEnabledView = useAppStore((s) => s.toggleEnabledView);
+
+  function reset() {
+    // 重置：除 cards 外全开
+    OPTIONAL_VIEWS.forEach((v) => {
+      const shouldOn = v !== "cards";
+      const isOn = enabledViews.has(v);
+      if (shouldOn !== isOn) {
+        toggleEnabledView(v);
+      }
+    });
+    message.success("已重置为默认");
+  }
+
+  const enabledCount = OPTIONAL_VIEWS.filter((v) =>
+    enabledViews.has(v),
+  ).length;
+
+  return (
+    <div className="text-slate-800">
+      {/* 顶栏 */}
+      <header className="flex h-12 items-center justify-between border-b border-slate-200 bg-white px-2">
+        <button
+          onClick={() => navigate(-1)}
+          aria-label="返回"
+          className="flex h-10 w-10 items-center justify-center"
+        >
+          <ChevronLeft size={24} className="text-slate-700" />
+        </button>
+        <h1 className="text-base font-semibold">功能模块</h1>
+        <button
+          onClick={reset}
+          className="px-2 text-sm text-slate-500 active:text-slate-700"
+        >
+          重置
+        </button>
+      </header>
+
+      {/* 信息横幅 */}
+      <div className="flex items-start gap-2 border-b border-blue-200 bg-blue-50 px-4 py-3">
+        <Info size={16} className="mt-0.5 shrink-0 text-blue-600" />
+        <p className="text-xs leading-relaxed text-blue-800">
+          关闭后入口隐藏，但<strong>数据保留</strong>，重新开启即可恢复。
+          <br />
+          核心模块（主页 / 笔记 / 搜索 / 回收站 / 关于）不可关闭。
+        </p>
+      </div>
+
+      <div className="bg-slate-50 pb-12">
+        {/* 核心模块 */}
+        <SectionLabel
+          icon={<Lock size={12} />}
+          text="核心模块 · 始终启用"
+        />
+        <ListGroup>
+          {CORE_MODULES.map((m) => (
+            <CoreRow key={m.label} {...m} />
+          ))}
+        </ListGroup>
+
+        {/* 可选模块 */}
+        <SectionLabel
+          icon={<SlidersHorizontal size={12} />}
+          text={`可选模块 · ${OPTIONAL_VIEWS.length} 个，已开启 ${enabledCount}`}
+        />
+        <ListGroup>
+          {OPTIONS.map((o) => (
+            <OptionRow
+              key={o.view}
+              meta={o}
+              checked={enabledViews.has(o.view)}
+              onChange={() => toggleEnabledView(o.view)}
+            />
+          ))}
+        </ListGroup>
+
+        <div className="px-4 py-4 text-center text-[11px] text-slate-400">
+          💾 配置写入 app_config · 自动同步到桌面端
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SectionLabel({
+  icon,
+  text,
+}: {
+  icon?: React.ReactNode;
+  text: string;
+}) {
+  return (
+    <div className="flex items-center gap-1 px-4 pt-3 pb-1 text-xs font-medium text-slate-400">
+      {icon}
+      <span>{text}</span>
+    </div>
+  );
+}
+
+function ListGroup({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mx-4 mb-2 divide-y divide-slate-100 rounded-2xl bg-white">
+      {children}
+    </div>
+  );
+}
+
+function CoreRow({
+  icon,
+  label,
+  desc,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  desc: string;
+}) {
+  return (
+    <div className="flex items-center gap-3 px-4 py-3 opacity-90">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100">
+        {icon}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium text-slate-700">{label}</div>
+        <div className="text-[11px] text-slate-400">{desc}</div>
+      </div>
+      <Switch checked disabled />
+    </div>
+  );
+}
+
+function OptionRow({
+  meta,
+  checked,
+  onChange,
+}: {
+  meta: OptionMeta;
+  checked: boolean;
+  onChange: () => void;
+}) {
+  return (
+    <div
+      className={`flex items-center gap-3 px-4 py-3 ${
+        meta.defaultOff && !checked ? "bg-amber-50/40" : ""
+      }`}
+    >
+      <div
+        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${meta.iconBg}`}
+      >
+        {meta.icon}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+          {meta.label}
+          {meta.defaultOff && (
+            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-medium text-amber-700">
+              默认关
+            </span>
+          )}
+        </div>
+        <div className="text-[11px] text-slate-500">{meta.desc}</div>
+      </div>
+      <Switch checked={checked} onChange={onChange} />
+    </div>
+  );
+}

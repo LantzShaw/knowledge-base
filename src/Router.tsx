@@ -19,6 +19,7 @@ import PromptsPage from "@/pages/prompts";
 import HiddenPage from "@/pages/hidden";
 import QuickCreatePage from "@/pages/quick-create";
 import QuickCapturePage from "@/pages/quick-capture";
+import FeatureTogglePage from "@/pages/feature-toggle";
 import MigrationSplash from "@/pages/migration-splash";
 import EmergencyReminderPage from "@/pages/emergency-reminder";
 
@@ -72,6 +73,7 @@ const router = createHashRouter([
       { path: "settings", element: <SettingsPage /> },
       { path: "about", element: <AboutPage /> },
       { path: "quick-create", element: <QuickCreatePage /> },
+      { path: "feature-toggle", element: <FeatureTogglePage /> },
     ],
   },
 ]);

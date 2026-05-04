@@ -231,7 +231,7 @@ export function MobileMe() {
         <Row
           icon={<Boxes size={20} className="text-blue-500" />}
           label="功能模块"
-          right={<span className="text-xs text-slate-400">待开发</span>}
+          onClick={() => navigate("/feature-toggle")}
         />
         <Row
           icon={<Sparkles size={20} className="text-[#FA8C16]" />}
