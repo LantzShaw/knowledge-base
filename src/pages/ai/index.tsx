@@ -265,8 +265,8 @@ function DesktopAiChatPage() {
       });
       const errorUnlisten = await listen<string>("ai:error", (event) => {
         setStreaming(false);
-        setStreamingText("");
-        setStreamingSkillCalls([]);
+        // P1: 不清空 streamingText / streamingSkillCalls：保留已累积内容和工具调用结果，
+        // 让用户看到部分输出（之前清空会让"工具调完正文又消失"的体验）
         message.error(`AI 错误: ${event.payload}`);
       });
       // tool_call 事件可能多次触发（running → ok/error），按 id upsert

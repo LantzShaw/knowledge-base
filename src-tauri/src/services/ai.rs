@@ -1393,7 +1393,7 @@ impl AiService {
             )
             .await;
 
-            let (content, tool_calls) = match content {
+            let (content, mut tool_calls) = match content {
                 Ok(c) => (c, tool_calls.unwrap_or_default()),
                 Err(e) => {
                     let _ = db.delete_ai_message(user_msg.id);
@@ -1407,17 +1407,44 @@ impl AiService {
                 return Ok(());
             }
 
+            // P0: finalization 轮即使模型仍返回 tool_calls 也强制忽略，避免循环退出后 final_content 为空
+            if !allow_tools {
+                tool_calls.clear();
+            }
+
+            // P0: id 兜底合成。部分 provider（LM Studio / glm-4 等）流式 tool_calls 不带 id，
+            // 之前的 filter 会整条丢弃，导致 tool_calls 空 → 直接 break with empty content
+            for (idx, tc) in tool_calls.iter_mut().enumerate() {
+                if tc.id.trim().is_empty() {
+                    tc.id = format!("call_auto_{}_{}", round, idx);
+                }
+            }
+
             if tool_calls.is_empty() {
                 // 模型给出最终答复——剥掉伪工具调用残文（仅 finalization 轮容易触发，
                 // 其他轮模型本就该走 tool_calls 通道；剥一下零成本，多一道兜底）
-                final_content = strip_pseudo_tool_calls(&content);
+                let stripped = strip_pseudo_tool_calls(&content);
+                // P0: 空答复兜底。strip 后为空 + 已经调过工具时给用户友好提示，
+                // 否则保留原 content（避免 strip 误伤）
+                final_content = if stripped.trim().is_empty() && !content.trim().is_empty() {
+                    content
+                } else if stripped.trim().is_empty() && !all_skill_calls.is_empty() {
+                    format!(
+                        "（AI 调用了 {} 次工具但未给出最终答复，可能是模型不支持当前协议或上下文不足，请稍后重试或换个模型）",
+                        all_skill_calls.len()
+                    )
+                } else {
+                    stripped
+                };
                 break;
             }
 
             // 有工具调用：追加 assistant tool_calls 消息 + 各 tool 结果
+            // P0: content: null 改为空字符串。OpenAI spec 允许 null，但 deepseek/glm 等部分实现
+            // 遇到 null content 直接返回 400
             messages.push(json!({
                 "role": "assistant",
-                "content": if content.is_empty() { Value::Null } else { Value::String(content) },
+                "content": content,
                 "tool_calls": tool_calls.iter().map(|tc| json!({
                     "id": tc.id,
                     "type": "function",
@@ -1442,10 +1469,17 @@ impl AiService {
                 );
 
                 // 执行：dispatch_with_mcp 会按前缀路由（mcp__<id>__<name> → mcp_external，否则原 skills）
+                // P1: tool 失败时把错误包装为友好提示，避免部分模型遇到 "ERROR: ..." 直接放弃
                 let (result_text, status) =
                     match skills::dispatch_with_mcp(&app, db, &tc.name, &tc.args_json).await {
                         Ok(r) => (r, "ok"),
-                        Err(e) => (format!("ERROR: {}", e), "error"),
+                        Err(e) => (
+                            format!(
+                                "工具 `{}` 调用失败: {}。请基于其他工具的结果或常识继续回答用户。",
+                                tc.name, e
+                            ),
+                            "error",
+                        ),
                     };
 
                 let sc = SkillCall {
@@ -1548,51 +1582,36 @@ impl AiService {
 
         let mut stream = response.bytes_stream();
         let mut content = String::new();
+        // P1: reasoning 模型（deepseek-r1 / qwq / o1）正文走 reasoning_content；
+        // 流过程中独立发 ai:reasoning 事件，content 全空时再兜底拼到正文
+        let mut reasoning_content = String::new();
         // BTreeMap 按 index 有序，保证 dispatch 时工具顺序稳定
         let mut tool_accum: std::collections::BTreeMap<u64, ToolCallAccum> =
             std::collections::BTreeMap::new();
-        let mut buffer = String::new();
+        // P1: UTF-8 多字节字符可能跨 chunk 切分，String::from_utf8_lossy 在边界插入
+        // U+FFFD 替换字符并损坏 SSE 解析；改用 Vec<u8> 累积，按 \n 字节切再解码
+        let mut buffer: Vec<u8> = Vec::new();
+        // P0: finish_reason 用来判断是否异常终止（length / content_filter）
+        let mut finish_reason: Option<String> = None;
 
         loop {
             tokio::select! {
                 chunk = stream.next() => {
                     match chunk {
                         Some(Ok(bytes)) => {
-                            buffer.push_str(&String::from_utf8_lossy(&bytes));
-                            while let Some(pos) = buffer.find('\n') {
-                                let line = buffer[..pos].trim().to_string();
-                                buffer = buffer[pos + 1..].to_string();
-
-                                if line.is_empty() || line == "data: [DONE]" { continue; }
-                                if let Some(json_str) = line.strip_prefix("data: ") {
-                                    let data: Value = match serde_json::from_str(json_str) {
-                                        Ok(v) => v,
-                                        Err(_) => continue,
-                                    };
-                                    let delta = &data["choices"][0]["delta"];
-                                    // 文本 token
-                                    if let Some(c) = delta["content"].as_str() {
-                                        content.push_str(c);
-                                        let _ = app.emit("ai:token", c);
-                                    }
-                                    // tool_calls 分片
-                                    if let Some(tcs) = delta["tool_calls"].as_array() {
-                                        for tc in tcs {
-                                            let idx = tc["index"].as_u64().unwrap_or(0);
-                                            let entry = tool_accum.entry(idx)
-                                                .or_insert_with(ToolCallAccum::default);
-                                            if let Some(id) = tc["id"].as_str() {
-                                                if !id.is_empty() { entry.id = id.to_string(); }
-                                            }
-                                            if let Some(name) = tc["function"]["name"].as_str() {
-                                                entry.name.push_str(name);
-                                            }
-                                            if let Some(args) = tc["function"]["arguments"].as_str() {
-                                                entry.args_json.push_str(args);
-                                            }
-                                        }
-                                    }
-                                }
+                            buffer.extend_from_slice(&bytes);
+                            while let Some(pos) = buffer.iter().position(|b| *b == b'\n') {
+                                let line_bytes: Vec<u8> = buffer.drain(..=pos).collect();
+                                let line = String::from_utf8_lossy(&line_bytes);
+                                let line = line.trim_end_matches(&['\r', '\n'][..]);
+                                handle_openai_stream_line(
+                                    app,
+                                    line,
+                                    &mut content,
+                                    &mut reasoning_content,
+                                    &mut tool_accum,
+                                    &mut finish_reason,
+                                );
                             }
                         }
                         Some(Err(e)) => {
@@ -1611,13 +1630,104 @@ impl AiService {
             }
         }
 
-        // 收尾：过滤掉 id / name 为空的条目（极端情况下 API 返回不完整）
+        // P0: 流末尾未以 \n 结尾的 leftover 也要 flush，否则丢失最后一行 SSE
+        if !buffer.is_empty() {
+            let line = String::from_utf8_lossy(&buffer);
+            let line = line.trim_end_matches(&['\r', '\n'][..]);
+            handle_openai_stream_line(
+                app,
+                line,
+                &mut content,
+                &mut reasoning_content,
+                &mut tool_accum,
+                &mut finish_reason,
+            );
+        }
+
+        // P1: content 全空但 reasoning 非空时，把累积的 reasoning 提升为正文
+        // （前端流式过程中已经收到 ai:reasoning，这里只补一次 ai:token 让 UI 文本不为空）
+        if content.trim().is_empty() && !reasoning_content.trim().is_empty() {
+            content.push_str(&reasoning_content);
+            let _ = app.emit("ai:token", &reasoning_content);
+        }
+
+        // P0: finish_reason 异常处理。length / content_filter 视为错误抛出，
+        // 让前端 ai:error 监听器提示用户；stop / tool_calls / null 都是正常结束
+        if let Some(reason) = &finish_reason {
+            if reason != "stop" && reason != "tool_calls" {
+                let msg = format!("AI 异常终止 (finish_reason={})", reason);
+                let _ = app.emit("ai:error", &msg);
+                return (Err(AppError::Custom(msg)), None);
+            }
+        }
+
+        // 收尾：id 在外层 chat_stream_with_skills 已做兜底合成，这里只丢 name 为空的
         let tool_calls: Vec<ToolCallAccum> = tool_accum
             .into_values()
-            .filter(|t| !t.id.is_empty() && !t.name.is_empty())
+            .filter(|t| !t.name.trim().is_empty())
             .collect();
 
         (Ok(content), Some(tool_calls))
+    }
+}
+
+/// 解析单行 OpenAI SSE 流数据，累加内容并更新 tool_calls 状态。
+///
+/// 抽出 free function 是因为 stream_openai_with_tools 主循环 + 末尾 leftover flush
+/// 两处都要调用，避免重复。
+fn handle_openai_stream_line(
+    app: &AppHandle,
+    line: &str,
+    content: &mut String,
+    reasoning_content: &mut String,
+    tool_accum: &mut std::collections::BTreeMap<u64, ToolCallAccum>,
+    finish_reason: &mut Option<String>,
+) {
+    if line.is_empty() || line == "data: [DONE]" {
+        return;
+    }
+    let Some(json_str) = line.strip_prefix("data: ") else {
+        return;
+    };
+    let data: Value = match serde_json::from_str(json_str) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    let choice = &data["choices"][0];
+    if let Some(reason) = choice["finish_reason"].as_str() {
+        *finish_reason = Some(reason.to_string());
+    }
+
+    let delta = &choice["delta"];
+    if let Some(c) = delta["content"].as_str() {
+        content.push_str(c);
+        let _ = app.emit("ai:token", c);
+    }
+    // reasoning 模型（deepseek-r1 / qwq / o1）的"思考过程"，独立事件让前端可选展示
+    if let Some(r) = delta["reasoning_content"].as_str() {
+        if !r.is_empty() {
+            reasoning_content.push_str(r);
+            let _ = app.emit("ai:reasoning", r);
+        }
+    }
+    // tool_calls 分片
+    if let Some(tcs) = delta["tool_calls"].as_array() {
+        for tc in tcs {
+            let idx = tc["index"].as_u64().unwrap_or(0);
+            let entry = tool_accum.entry(idx).or_insert_with(ToolCallAccum::default);
+            if let Some(id) = tc["id"].as_str() {
+                if !id.is_empty() {
+                    entry.id = id.to_string();
+                }
+            }
+            if let Some(name) = tc["function"]["name"].as_str() {
+                entry.name.push_str(name);
+            }
+            if let Some(args) = tc["function"]["arguments"].as_str() {
+                entry.args_json.push_str(args);
+            }
+        }
     }
 }
 
