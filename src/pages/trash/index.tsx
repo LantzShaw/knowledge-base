@@ -31,7 +31,7 @@ const { Title, Text } = Typography;
  *
  * 列表 + 分页样式与 /notes 列表视图保持一致：白底卡包表格 + 外置分页。
  */
-export default function TrashPage() {
+function DesktopTrashPage() {
   const { token } = antdTheme.useToken();
 
   const [data, setData] = useState<PageResult<Note>>({
@@ -399,4 +399,12 @@ export default function TrashPage() {
       />
     </div>
   );
+}
+
+import { useIsMobile } from "@/hooks/useIsMobile";
+import { MobileTrash } from "./MobileTrash";
+
+export default function TrashPage() {
+  const isMobile = useIsMobile();
+  return isMobile ? <MobileTrash /> : <DesktopTrashPage />;
 }
