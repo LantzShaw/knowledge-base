@@ -11,7 +11,7 @@ import {
   Folder,
   Flag,
 } from "lucide-react";
-import { Modal, message } from "antd";
+import { Drawer, Modal, message } from "antd";
 import { taskApi } from "@/lib/api";
 import { useAppStore } from "@/store";
 import type { Task } from "@/types";
@@ -41,7 +41,38 @@ const SAVED_TOAST_MS = 2500;
 
 type SaveStatus = "idle" | "dirty" | "saving" | "saved";
 
-const PRIORITY_LABELS = ["紧急", "高", "中", "低"];
+// 后端 TaskPriority = 0 | 1 | 2（紧急 / 普通 / 低）
+const PRIORITY_LABELS = ["紧急", "普通", "低"];
+const PRIORITY_COLORS = [
+  "bg-red-50 text-red-700 border-red-200",
+  "bg-blue-50 text-blue-700 border-blue-200",
+  "bg-slate-50 text-slate-600 border-slate-200",
+];
+
+const REMIND_OPTIONS: { value: number | null; label: string }[] = [
+  { value: null, label: "不提醒" },
+  { value: 5, label: "提前 5 分钟" },
+  { value: 15, label: "提前 15 分钟" },
+  { value: 30, label: "提前 30 分钟" },
+  { value: 60, label: "提前 1 小时" },
+  { value: 120, label: "提前 2 小时" },
+  { value: 1440, label: "提前 1 天" },
+];
+
+/** "YYYY-MM-DDTHH:MM" → "YYYY-MM-DD HH:MM:SS"（SQLite 友好），空字符串保留为 null */
+function toSqliteDate(local: string): string | null {
+  if (!local) return null;
+  const [date, time] = local.split("T");
+  return time ? `${date} ${time}:00` : `${date} 23:59:59`;
+}
+
+/** 反向：SQLite 字符串 → datetime-local input 接受的 "YYYY-MM-DDTHH:MM" */
+function toLocalInput(sql: string | null): string {
+  if (!sql) return "";
+  const [date, time] = sql.split(" ");
+  if (!time) return `${date}T23:59`;
+  return `${date}T${time.slice(0, 5)}`;
+}
 
 export function MobileTaskDetail() {
   const navigate = useNavigate();
@@ -54,6 +85,10 @@ export function MobileTaskDetail() {
   const [subtasks, setSubtasks] = useState<Task[]>([]);
   const [status, setStatus] = useState<SaveStatus>("idle");
   const [snoozing, setSnoozing] = useState(false);
+  const [dueOpen, setDueOpen] = useState(false);
+  const [dueInput, setDueInput] = useState("");
+  const [remindOpen, setRemindOpen] = useState(false);
+  const [priorityOpen, setPriorityOpen] = useState(false);
 
   const dirtyRef = useRef(false);
   const saveTimerRef = useRef<number | null>(null);
@@ -189,6 +224,45 @@ export function MobileTaskDetail() {
       message.error(`推迟失败: ${e}`);
     } finally {
       setSnoozing(false);
+    }
+  }
+
+  function openDueEditor() {
+    setDueInput(toLocalInput(task?.due_date ?? null));
+    setDueOpen(true);
+  }
+  async function saveDue(clearOnly = false) {
+    if (!task) return;
+    try {
+      await taskApi.update(task.id, {
+        due_date: clearOnly ? null : toSqliteDate(dueInput),
+      });
+      setDueOpen(false);
+      await load();
+    } catch (e) {
+      message.error(`保存失败: ${e}`);
+    }
+  }
+
+  async function setRemind(min: number | null) {
+    if (!task) return;
+    try {
+      await taskApi.update(task.id, { remind_before_minutes: min });
+      setRemindOpen(false);
+      await load();
+    } catch (e) {
+      message.error(`保存失败: ${e}`);
+    }
+  }
+
+  async function setPriority(p: 0 | 1 | 2) {
+    if (!task) return;
+    try {
+      await taskApi.update(task.id, { priority: p });
+      setPriorityOpen(false);
+      await load();
+    } catch (e) {
+      message.error(`保存失败: ${e}`);
     }
   }
 
@@ -368,7 +442,7 @@ export function MobileTaskDetail() {
                   {dueLabel}
                 </span>
               }
-              onClick={() => message.info("移动端日期选择器待开发")}
+              onClick={openDueEditor}
             />
             <MetaRow
               icon={<Bell size={18} className="text-amber-500" />}
@@ -380,7 +454,7 @@ export function MobileTaskDetail() {
                     : "不提醒"}
                 </span>
               }
-              onClick={() => message.info("提醒设置待开发")}
+              onClick={() => setRemindOpen(true)}
             />
             <MetaRow
               icon={<Repeat size={18} className="text-blue-500" />}
@@ -392,23 +466,25 @@ export function MobileTaskDetail() {
                     : "不重复"}
                 </span>
               }
-              onClick={() => message.info("重复规则待开发")}
+              onClick={() => message.info("重复规则需要在桌面端编辑")}
             />
             <MetaRow
               icon={<Folder size={18} className="text-orange-500" />}
               label="分类"
               value={<span className="text-xs text-slate-400">未分类</span>}
-              onClick={() => message.info("分类选择待开发")}
+              onClick={() => message.info("分类需要在桌面端管理")}
             />
             <MetaRow
               icon={<Flag size={18} className="text-red-500" />}
               label="优先级"
               value={
-                <span className="text-xs text-slate-500">
-                  {PRIORITY_LABELS[task?.priority ?? 2] ?? "中"}
+                <span
+                  className={`rounded px-1.5 py-0.5 text-xs border ${PRIORITY_COLORS[task?.priority ?? 1]}`}
+                >
+                  {PRIORITY_LABELS[task?.priority ?? 1] ?? "普通"}
                 </span>
               }
-              onClick={() => message.info("优先级编辑待开发")}
+              onClick={() => setPriorityOpen(true)}
             />
           </div>
         </div>
@@ -447,6 +523,105 @@ export function MobileTaskDetail() {
           </button>
         </div>
       </footer>
+
+      {/* 截止时间编辑 Modal */}
+      <Modal
+        title="设置截止时间"
+        open={dueOpen}
+        onCancel={() => setDueOpen(false)}
+        footer={
+          <div className="flex gap-2">
+            <button
+              onClick={() => void saveDue(true)}
+              className="flex-1 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700"
+            >
+              清除
+            </button>
+            <button
+              onClick={() => setDueOpen(false)}
+              className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+            >
+              取消
+            </button>
+            <button
+              onClick={() => void saveDue(false)}
+              className="flex-1 rounded-lg bg-[#1677FF] px-3 py-2 text-sm font-medium text-white"
+            >
+              保存
+            </button>
+          </div>
+        }
+      >
+        <input
+          type="datetime-local"
+          value={dueInput}
+          onChange={(e) => setDueInput(e.target.value)}
+          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+        />
+        <div className="mt-2 text-xs text-slate-400">
+          只填日期不填时间会默认为当天 23:59
+        </div>
+      </Modal>
+
+      {/* 提醒选择 Drawer */}
+      <Drawer
+        title="提前多久提醒"
+        placement="bottom"
+        height={Math.min(REMIND_OPTIONS.length * 56 + 100, 540)}
+        open={remindOpen}
+        onClose={() => setRemindOpen(false)}
+      >
+        <div className="flex flex-col gap-2">
+          {REMIND_OPTIONS.map((opt) => {
+            const active = (task?.remind_before_minutes ?? null) === opt.value;
+            return (
+              <button
+                key={String(opt.value)}
+                onClick={() => void setRemind(opt.value)}
+                className={`flex items-center justify-between rounded-xl px-4 py-3 text-left ${
+                  active
+                    ? "border border-[#1677FF] bg-blue-50"
+                    : "border border-slate-100 bg-white"
+                }`}
+              >
+                <span className="text-sm text-slate-800">{opt.label}</span>
+                {active && (
+                  <span className="text-xs font-semibold text-[#1677FF]">
+                    ✓ 当前
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </Drawer>
+
+      {/* 优先级选择 Drawer */}
+      <Drawer
+        title="优先级"
+        placement="bottom"
+        height={320}
+        open={priorityOpen}
+        onClose={() => setPriorityOpen(false)}
+      >
+        <div className="grid grid-cols-2 gap-2">
+          {PRIORITY_LABELS.map((label, idx) => {
+            const active = task?.priority === idx;
+            return (
+              <button
+                key={label}
+                onClick={() => void setPriority(idx as 0 | 1 | 2)}
+                className={`flex flex-col items-center justify-center gap-1 rounded-xl py-4 ${PRIORITY_COLORS[idx]} ${
+                  active ? "ring-2 ring-offset-1" : ""
+                }`}
+              >
+                <Flag size={18} />
+                <span className="text-sm font-semibold">{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </Drawer>
     </div>
   );
 }

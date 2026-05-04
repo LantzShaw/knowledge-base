@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ChevronLeft,
@@ -14,7 +14,7 @@ import {
   Link as LinkIcon,
   LayoutTemplate,
 } from "lucide-react";
-import { message } from "antd";
+import { Modal, Input, message } from "antd";
 import { noteApi, dailyApi } from "@/lib/api";
 import { useAppStore } from "@/store";
 
@@ -37,6 +37,9 @@ import { useAppStore } from "@/store";
 export default function QuickCreatePage() {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [clipOpen, setClipOpen] = useState(false);
+  const [clipUrl, setClipUrl] = useState("");
+  const [clipping, setClipping] = useState(false);
 
   /**
    * 移动端单文件导入：用 HTML5 <input type=file> 打开系统文件选择器
@@ -66,6 +69,43 @@ export default function QuickCreatePage() {
     } finally {
       // 重置 input value，允许再次选同一文件
       e.target.value = "";
+    }
+  }
+
+  function openClip() {
+    // 自动从剪贴板拿 URL（移动端 WebView 多数支持 navigator.clipboard.readText）
+    setClipUrl("");
+    setClipOpen(true);
+    void (async () => {
+      try {
+        const text = await navigator.clipboard?.readText();
+        if (text && /^https?:\/\//i.test(text.trim())) {
+          setClipUrl(text.trim());
+        }
+      } catch {
+        // 用户拒绝授权剪贴板，留空让用户手动粘贴
+      }
+    })();
+  }
+
+  async function submitClip() {
+    const url = clipUrl.trim();
+    if (!url) return;
+    if (!/^https?:\/\//i.test(url)) {
+      message.error("URL 必须以 http(s):// 开头");
+      return;
+    }
+    setClipping(true);
+    try {
+      const note = await noteApi.clipUrl(url);
+      useAppStore.getState().bumpNotesRefresh();
+      message.success("已剪藏");
+      setClipOpen(false);
+      navigate(`/notes/${note.id}`, { replace: true });
+    } catch (e) {
+      message.error(`剪藏失败: ${e}`);
+    } finally {
+      setClipping(false);
     }
   }
 
@@ -152,8 +192,8 @@ export default function QuickCreatePage() {
             iconBg="bg-cyan-100"
             title="网页剪藏"
             badge="智能"
-            sub="把链接 / 文章存为笔记"
-            onClick={() => message.info("移动端剪藏待开发")}
+            sub="粘贴链接 → 自动抓成 markdown"
+            onClick={openClip}
           />
           <Row
             icon={<Mic size={20} className="text-red-600" />}
@@ -210,6 +250,29 @@ export default function QuickCreatePage() {
         onChange={onFilePicked}
         className="hidden"
       />
+
+      {/* 网页剪藏 Modal */}
+      <Modal
+        title="网页剪藏"
+        open={clipOpen}
+        onCancel={() => setClipOpen(false)}
+        onOk={submitClip}
+        okText={clipping ? "抓取中…" : "剪藏"}
+        cancelText="取消"
+        okButtonProps={{ loading: clipping, disabled: !clipUrl.trim() }}
+        destroyOnClose
+      >
+        <Input
+          autoFocus
+          value={clipUrl}
+          onChange={(e) => setClipUrl(e.target.value)}
+          placeholder="https://..."
+          onPressEnter={submitClip}
+        />
+        <div className="mt-2 text-xs text-slate-400">
+          已自动从剪贴板抓 URL；后端调 reqwest+rustls 抓页面 → readability 提取正文 → 转 markdown 入库
+        </div>
+      </Modal>
     </div>
   );
 }
