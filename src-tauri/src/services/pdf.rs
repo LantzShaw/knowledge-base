@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
+#[cfg(desktop)]
 use std::sync::{Mutex, OnceLock};
 
+#[cfg(desktop)]
 use pdfium_render::prelude::*;
 use serde::Serialize;
 
@@ -13,14 +15,21 @@ use crate::models::{Note, NoteInput};
 /// pdfium-render 的 `Pdfium` 不实现 Send（内部 `Box<dyn PdfiumLibraryBindings>`），
 /// 但 Tauri Command 在 worker 线程执行，需要跨线程共享。因此用 newtype 包裹并手动声明
 /// Send/Sync —— 安全性由外层 `Mutex` 保证（同一时刻只有一个线程持有 PDFium 引用）。
+///
+/// 仅桌面端：移动端 NDK 加载动态库受沙盒限制，不引入 PDFium。
+#[cfg(desktop)]
 struct PdfiumGuard(Pdfium);
 // SAFETY: PDFium 底层 C API 非线程安全，但我们通过 Mutex 串行化所有访问
+#[cfg(desktop)]
 unsafe impl Send for PdfiumGuard {}
+#[cfg(desktop)]
 unsafe impl Sync for PdfiumGuard {}
 
+#[cfg(desktop)]
 static PDFIUM: OnceLock<Mutex<PdfiumGuard>> = OnceLock::new();
 
-/// 应用启动时调用：把 PDFium 绑定到指定路径的动态库
+/// 应用启动时调用：把 PDFium 绑定到指定路径的动态库（仅桌面端）
+#[cfg(desktop)]
 pub fn init_pdfium(dll_path: &Path) -> Result<(), String> {
     let bindings = Pdfium::bind_to_library(dll_path).map_err(|e| e.to_string())?;
     let pdfium = Pdfium::new(bindings);
@@ -267,35 +276,50 @@ fn extract_text_with_repair(source: &Path) -> Result<String, AppError> {
         first_err.clone()
     };
 
-    // 最后的手段：PDFium fallback
-    match extract_with_pdfium(source) {
-        Ok(t) if !t.trim().is_empty() => {
-            log::info!(
-                "PDF 通过 PDFium fallback 抽取成功（pdf-extract 路径报错: {}）",
-                first_err
-            );
-            Ok(t)
+    // 最后的手段：PDFium fallback（仅桌面端）
+    #[cfg(desktop)]
+    {
+        match extract_with_pdfium(source) {
+            Ok(t) if !t.trim().is_empty() => {
+                log::info!(
+                    "PDF 通过 PDFium fallback 抽取成功（pdf-extract 路径报错: {}）",
+                    first_err
+                );
+                Ok(t)
+            }
+            Ok(_) => {
+                log::warn!("PDFium 抽取返回空文本（可能是扫描件 / 无文本层）");
+                Err(AppError::Custom(
+                    "PDF 无文本层（可能是纯图片扫描件），请先 OCR 后再导入".into(),
+                ))
+            }
+            Err(pdfium_err) => {
+                log::warn!(
+                    "PDF 全部路径失败: pdf-extract={}, repair={}, pdfium={}",
+                    first_err,
+                    second_err,
+                    pdfium_err
+                );
+                // 友好提示基于 pdf-extract 的错误文本（用户通常装的是 pdf-extract 路径）
+                Err(AppError::Custom(friendly_extract_error(&second_err)))
+            }
         }
-        Ok(_) => {
-            log::warn!("PDFium 抽取返回空文本（可能是扫描件 / 无文本层）");
-            Err(AppError::Custom(
-                "PDF 无文本层（可能是纯图片扫描件），请先 OCR 后再导入".into(),
-            ))
-        }
-        Err(pdfium_err) => {
-            log::warn!(
-                "PDF 全部路径失败: pdf-extract={}, repair={}, pdfium={}",
-                first_err,
-                second_err,
-                pdfium_err
-            );
-            // 友好提示基于 pdf-extract 的错误文本（用户通常装的是 pdf-extract 路径）
-            Err(AppError::Custom(friendly_extract_error(&second_err)))
-        }
+    }
+
+    // 移动端无 PDFium fallback，pdf-extract 路径都失败时直接返回友好错误
+    #[cfg(mobile)]
+    {
+        log::warn!(
+            "PDF 抽取失败（移动端无 PDFium fallback）: pdf-extract={}, repair={}",
+            first_err, second_err
+        );
+        Err(AppError::Custom(friendly_extract_error(&second_err)))
     }
 }
 
 /// 用 PDFium 抽取 PDF 文本（逐页拼接）。PDFium 未初始化时返回 Err。
+/// 仅桌面端：移动端无 PDFium 绑定。
+#[cfg(desktop)]
 fn extract_with_pdfium(source: &Path) -> Result<String, String> {
     let mutex = PDFIUM
         .get()

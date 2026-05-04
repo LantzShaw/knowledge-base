@@ -45,9 +45,9 @@ tauri-plugin-process = "2"
 # 系统证书池靠 rustls-native-certs 加载，避免迁移成本）
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "rustls-tls-native-roots"] }
 tokio = { version = "1", features = ["sync", "fs", "io-util", "rt", "rt-multi-thread"] }
-# T-024b S3 协议 backend：支持 AWS S3 / 阿里云 OSS / 腾讯云 COS / Cloudflare R2 / MinIO
-# default-features = false 避免拉重型 tokio 依赖；用 tokio-rustls-tls + with-tokio
-rust-s3 = { version = "0.34", default-features = false, features = ["tokio-rustls-tls"] }
+# T-024b S3 协议 backend：rust-s3 0.34 即使开 tokio-rustls-tls 也强制带 native-tls/openssl
+# 链接，移动端 NDK 不带 OpenSSL 编译失败 → 整段移到 target.desktop dependencies
+# 移动端按 T-M014 计划改"手动同步 + 仅 WebDAV/local"，等 rust-s3 修了 features 隔离再启用
 tokio-util = { version = "0.7", features = ["io"] }
 futures = "0.3"
 tauri-plugin-dialog = "2"
@@ -94,6 +94,8 @@ tauri-plugin-global-shortcut = "2"
 pdfium-render = "0.8"
 # rmcp 桌面端额外能力：spawn 外部 MCP server 子进程（移动端 fork/spawn 受限）
 rmcp = { version = "1.5", features = ["transport-child-process"] }
+# rust-s3 S3 协议 backend：rust-s3 0.34 强引入 openssl，移动端编译失败
+rust-s3 = { version = "0.34", default-features = false, features = ["tokio-rustls-tls"] }
 # Excel / ODS 解析（纯 Rust，零系统依赖；AI 智能规划"Excel 导入"模式用）
 calamine = "0.28"
 # T-020 笔记导出为 Word：纯 Rust 生成 .docx；零系统依赖

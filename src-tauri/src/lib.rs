@@ -523,27 +523,39 @@ pub fn run() {
             let data_dir_root = std::path::PathBuf::from(&resolved_data_dir.current_dir);
             std::fs::create_dir_all(&data_dir_root)?;
 
-            // dev 模式旧数据迁移：仅默认实例需要（多开实例自带独立子目录）
-            if cfg!(debug_assertions) && explicit_id.is_none() {
-                migrate_to_dev_prefix(&data_dir_root);
-            }
-
-            // 拿锁（这次真持有，存活到进程结束）
-            // ⚠️ 锁文件刻意放 framework_app_data_dir（不是 data_dir_root）：
-            //    用户改数据目录不应该突破单例约束
-            let (instance_id, lock_file) =
-                acquire_instance_lock(&framework_app_data_dir, explicit_id, lock_prefix);
-            match instance_id {
-                None => log::info!("默认实例模式"),
-                Some(n) => log::info!("多开实例模式: instance-{}", n),
-            }
-
-            // 实例数据目录：默认实例 = data_dir_root（兼容老用户）
-            //               多开实例 = data_dir_root/{prefix}instance-N
-            let instance_dir = match instance_id {
-                None => data_dir_root.clone(),
-                Some(n) => data_dir_root.join(format!("{}instance-{}", lock_prefix, n)),
+            // 多开实例 + 单实例锁：仅桌面端有此概念
+            // 桌面端：拿锁、解析 instance_id、计算实例数据目录
+            // 移动端：单实例（instance_id = None, lock_file = None, instance_dir = data_dir_root）
+            #[cfg(desktop)]
+            let (instance_id, lock_file, instance_dir) = {
+                // dev 模式旧数据迁移：仅默认实例需要（多开实例自带独立子目录）
+                if cfg!(debug_assertions) && explicit_id.is_none() {
+                    migrate_to_dev_prefix(&data_dir_root);
+                }
+                // 拿锁（这次真持有，存活到进程结束）
+                // ⚠️ 锁文件刻意放 framework_app_data_dir（不是 data_dir_root）：
+                //    用户改数据目录不应该突破单例约束
+                let (instance_id, lock_file) =
+                    acquire_instance_lock(&framework_app_data_dir, explicit_id, lock_prefix);
+                match instance_id {
+                    None => log::info!("默认实例模式"),
+                    Some(n) => log::info!("多开实例模式: instance-{}", n),
+                }
+                // 实例数据目录：默认实例 = data_dir_root（兼容老用户）
+                //               多开实例 = data_dir_root/{prefix}instance-N
+                let instance_dir = match instance_id {
+                    None => data_dir_root.clone(),
+                    Some(n) => data_dir_root.join(format!("{}instance-{}", lock_prefix, n)),
+                };
+                (instance_id, lock_file, instance_dir)
             };
+            #[cfg(mobile)]
+            let (instance_id, lock_file, instance_dir): (
+                Option<u32>,
+                Option<std::fs::File>,
+                std::path::PathBuf,
+            ) = (None, None, data_dir_root.clone());
+
             std::fs::create_dir_all(&instance_dir)?;
 
             let prefix = if cfg!(debug_assertions) { "dev-" } else { "" };
@@ -572,25 +584,29 @@ pub fn run() {
             //   Windows: pdfium.dll  / macOS: libpdfium.dylib  / Linux: libpdfium.so
             // 如果 resources/pdfium/ 下缺对应平台的库文件，仅 log warn —— pdf-extract
             // 主路径仍可工作，只是失去 PDFium fallback 这条防扫描件兜底。
-            #[cfg(target_os = "windows")]
-            const PDFIUM_LIB: &str = "resources/pdfium/pdfium.dll";
-            #[cfg(target_os = "macos")]
-            const PDFIUM_LIB: &str = "resources/pdfium/libpdfium.dylib";
-            #[cfg(target_os = "linux")]
-            const PDFIUM_LIB: &str = "resources/pdfium/libpdfium.so";
-
-            match app
-                .path()
-                .resolve(PDFIUM_LIB, tauri::path::BaseDirectory::Resource)
+            // 仅桌面端：移动端 NDK 加载动态库受沙盒限制，不引入 PDFium
+            #[cfg(desktop)]
             {
-                Ok(lib_path) => match services::pdf::init_pdfium(&lib_path) {
-                    Ok(()) => log::info!("PDFium 绑定成功: {}", lib_path.display()),
-                    Err(e) => log::warn!(
-                        "PDFium 绑定失败（fallback 不可用，仅 pdf-extract 路径可用）: {}",
-                        e
-                    ),
-                },
-                Err(e) => log::warn!("PDFium 资源路径解析失败: {}", e),
+                #[cfg(target_os = "windows")]
+                const PDFIUM_LIB: &str = "resources/pdfium/pdfium.dll";
+                #[cfg(target_os = "macos")]
+                const PDFIUM_LIB: &str = "resources/pdfium/libpdfium.dylib";
+                #[cfg(target_os = "linux")]
+                const PDFIUM_LIB: &str = "resources/pdfium/libpdfium.so";
+
+                match app
+                    .path()
+                    .resolve(PDFIUM_LIB, tauri::path::BaseDirectory::Resource)
+                {
+                    Ok(lib_path) => match services::pdf::init_pdfium(&lib_path) {
+                        Ok(()) => log::info!("PDFium 绑定成功: {}", lib_path.display()),
+                        Err(e) => log::warn!(
+                            "PDFium 绑定失败（fallback 不可用，仅 pdf-extract 路径可用）: {}",
+                            e
+                        ),
+                    },
+                    Err(e) => log::warn!("PDFium 资源路径解析失败: {}", e),
+                }
             }
 
             let sources_dir = services::source_file::SourceFileService::ensure_dir(&instance_dir)

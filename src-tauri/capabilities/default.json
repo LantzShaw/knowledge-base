@@ -1,7 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "主窗口默认权限",
+  "description": "桌面端主窗口默认权限（仅 Windows / macOS / Linux）",
+  "platforms": ["windows", "macOS", "linux"],
   "windows": ["main", "emergency-*", "popout-note-*"],
   "permissions": [
     "core:default",
