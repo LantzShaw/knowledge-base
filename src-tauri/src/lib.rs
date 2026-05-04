@@ -4,6 +4,7 @@ mod error;
 mod models;
 mod services;
 mod state;
+#[cfg(desktop)]
 mod tray;
 
 use std::fs::File;
@@ -424,13 +425,17 @@ fn run_data_dir_migration_with_splash(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 桌面端早期路径：多开实例锁 + .md 投递（移动端无此概念，整段跳过）
+    #[cfg(desktop)]
     let lock_prefix = if cfg!(debug_assertions) { "dev-" } else { "" };
+    #[cfg(desktop)]
     let explicit_id = parse_instance_arg();
 
     // 早期路径：默认实例已运行时的处理。
     // - 有 .md 投递 → 转给已有实例打开 + 退出（双击 .md 的直觉行为，不开新窗）
     // - 不允许多开（默认）→ 让已有实例把窗口前置 + 退出
     // - 允许多开（flag 文件存在）→ 继续启动，下面 acquire_instance_lock 会自动分配 instance-2/3...
+    #[cfg(desktop)]
     if explicit_id.is_none() {
         let app_data_dir = early_app_data_dir();
         let _ = std::fs::create_dir_all(&app_data_dir);
@@ -450,28 +455,35 @@ pub fn run() {
         }
     }
 
-    let builder = tauri::Builder::default();
-
-    builder
-        // ─── 插件注册 ───────────────────────────────
+    // ─── 跨平台共享插件 ────────────────────────
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        // 开机启动：传 `--start-minimized` 给系统注册项，启动时由下方 setup 判断是否隐藏窗口
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec!["--start-minimized"]),
-        ))
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(
             tauri_plugin_log::Builder::default()
                 .level(log::LevelFilter::Info)
                 .build(),
         )
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_clipboard_manager::init());
+
+    // ─── 桌面专属插件（移动端不可用：autostart / updater / global-shortcut）────
+    #[cfg(desktop)]
+    {
+        builder = builder
+            // 开机启动：传 `--start-minimized` 给系统注册项，启动时由下方 setup 判断是否隐藏窗口
+            .plugin(tauri_plugin_autostart::init(
+                tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+                Some(vec!["--start-minimized"]),
+            ))
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .plugin(tauri_plugin_global_shortcut::Builder::new().build());
+    }
+
+    builder
         // ─── 应用初始化 ─────────────────────────────
         .setup(move |app| {
             // ⚠️ 第一步：立即显示主窗口，不依赖任何后续初始化成败。
@@ -663,6 +675,8 @@ pub fn run() {
             // 默认实例：启动 .md 投递监听，接管其他实例转来的双击打开请求
             // ⚠️ 投递文件刻意走 framework_app_data_dir（不是 data_dir_root）：
             //    其他进程不知道当前用户配的自定义路径，必须用 OS 给的固定位置约定
+            // 仅桌面端：移动端没有"多实例"概念也没有"双击 .md 启动"路径
+            #[cfg(desktop)]
             if instance_id.is_none() {
                 start_md_deliver_watcher(app.handle().clone(), framework_app_data_dir.clone());
 
@@ -674,14 +688,17 @@ pub fn run() {
                 );
             }
 
-            // 系统托盘（携带实例号供 tooltip 区分）
+            // 系统托盘（仅桌面端；移动端无托盘概念）
             // 用 if let Err 兜底而非 ?：tray 是辅助功能，失败不该让整个应用启动崩。
             // 历史教训：tray::setup_tray 在 mac 上失败（如 default_window_icon 返回 None）
             // 会让 setup 闭包提前 Err return，主窗永远 visible:false 导致白屏。
-            if let Err(e) = tray::setup_tray(app, instance_id) {
-                log::error!("[tray] 初始化失败（不影响主窗运行）: {}", e);
-            } else {
-                log::info!("系统托盘初始化完成");
+            #[cfg(desktop)]
+            {
+                if let Err(e) = tray::setup_tray(app, instance_id) {
+                    log::error!("[tray] 初始化失败（不影响主窗运行）: {}", e);
+                } else {
+                    log::info!("系统托盘初始化完成");
+                }
             }
 
             // 开机启动时若带 --start-minimized 参数 且 用户在设置里开启了"启动最小化到托盘"，
