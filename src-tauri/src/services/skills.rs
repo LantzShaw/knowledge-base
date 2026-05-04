@@ -141,6 +141,8 @@ const MCP_TOOL_PREFIX: &str = "mcp__";
 ///
 /// 失败的 server（spawn 失败 / 握手失败 / list_tools 失败）只 log warn，
 /// 不阻塞 ai 对话流；用户在设置页应该会看到 server 状态。
+/// 桌面端：内置 5 + 外部 MCP；移动端：仅内置 5（没有外部 MCP server 子进程能力）
+#[cfg(desktop)]
 pub async fn tool_schemas_with_mcp(app: &AppHandle) -> Vec<Value> {
     let mut schemas = tool_schemas(); // 原 5 个内置 skills
 
@@ -215,8 +217,14 @@ pub async fn tool_schemas_with_mcp(app: &AppHandle) -> Vec<Value> {
     schemas
 }
 
+/// 移动端：仅返回内置 5 skills（无外部 MCP server）
+#[cfg(mobile)]
+pub async fn tool_schemas_with_mcp(_app: &AppHandle) -> Vec<Value> {
+    tool_schemas()
+}
+
 /// dispatch 增强版：按工具名前缀路由
-/// - `mcp__<id>__<name>` 走 mcp_external client
+/// - `mcp__<id>__<name>` 走 mcp_external client（仅桌面端）
 /// - 其他名字走原 dispatch（5 个内置 skills）
 pub async fn dispatch_with_mcp(
     app: &AppHandle,
@@ -224,6 +232,7 @@ pub async fn dispatch_with_mcp(
     name: &str,
     args_json: &str,
 ) -> Result<String, AppError> {
+    #[cfg(desktop)]
     if let Some(suffix) = name.strip_prefix(MCP_TOOL_PREFIX) {
         // 拆 <id>__<tool>
         let (id_str, tool_name) = suffix.split_once("__").ok_or_else(|| {
@@ -237,10 +246,14 @@ pub async fn dispatch_with_mcp(
             .map_err(|_| AppError::Custom(format!("MCP 工具 server_id 解析失败: {}", id_str)))?;
         return dispatch_mcp(app, server_id, tool_name, args_json).await;
     }
+    #[cfg(mobile)]
+    let _ = app; // 移动端避免未使用警告
     // 原 5 个内置 skills 走 sync 版
+    // 移动端：mcp__ 前缀的工具名也直接交给 dispatch（会返回 unknown tool 错误）
     dispatch(db, name, args_json)
 }
 
+#[cfg(desktop)]
 async fn dispatch_mcp(
     app: &AppHandle,
     server_id: i64,

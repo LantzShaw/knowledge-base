@@ -366,6 +366,8 @@ pub fn undo_task_batch(state: State<'_, AppState>, batch_id: String) -> Result<u
 /// 用户通过 Tauri dialog 选一个 Excel/ODS 文件，传文件绝对路径过来；
 /// 后端用 calamine 解析后喂给 AI，输出与 ai_plan_from_goal 相同的结构（含 batch_id）。
 /// 大文件会自动截断并通过 response.warnings 返回友好提示。
+/// 仅桌面端：calamine Excel 解析器在 Android target 编译失败
+#[cfg(desktop)]
 #[tauri::command]
 pub async fn ai_plan_from_excel(
     state: State<'_, AppState>,
@@ -378,6 +380,8 @@ pub async fn ai_plan_from_excel(
 }
 
 /// 通用 Excel 附件解析（保留作为兼容入口；新代码请用 ai_parse_attachment）。
+/// 仅桌面端：calamine 在 Android target 编译失败
+#[cfg(desktop)]
 #[tauri::command]
 pub fn ai_parse_excel(file_path: String) -> Result<ExcelPreview, String> {
     AiService::parse_excel_attachment(&file_path).map_err(|e| e.to_string())

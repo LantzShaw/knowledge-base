@@ -5,6 +5,8 @@ use tauri::AppHandle;
 use crate::models::{ExportResult, SingleExportResult};
 use crate::services;
 use crate::services::export_html::HtmlExportResult;
+// Word 导出仅桌面端（docx_rs 移动端编译失败）
+#[cfg(desktop)]
 use crate::services::export_word::WordExportResult;
 use crate::state::AppState;
 
@@ -49,6 +51,8 @@ pub fn export_single_note(
 /// T-020 导出单条笔记为 Word（.docx）
 ///
 /// `target_path` 是用户在 save dialog 选定的最终 .docx 路径
+/// 仅桌面端：docx_rs 移动端编译失败
+#[cfg(desktop)]
 #[tauri::command]
 pub fn export_single_note_to_word(
     state: tauri::State<'_, AppState>,

@@ -413,13 +413,15 @@ pub async fn mcp_update_server(
         .db
         .update_mcp_server(id, &input)
         .map_err(|e| e.to_string())?;
+    #[cfg(desktop)]
     state.mcp_external.disconnect(id).await;
     Ok(server)
 }
 
-/// 删除 server，同时清掉 client 缓存（子进程会被回收）
+/// 删除 server，同时清掉 client 缓存（子进程会被回收，仅桌面端有缓存）
 #[tauri::command]
 pub async fn mcp_delete_server(state: tauri::State<'_, AppState>, id: i64) -> Result<bool, String> {
+    #[cfg(desktop)]
     state.mcp_external.disconnect(id).await;
     state.db.delete_mcp_server(id).map_err(|e| e.to_string())
 }
@@ -435,13 +437,17 @@ pub async fn mcp_set_server_enabled(
         .db
         .set_mcp_server_enabled(id, enabled)
         .map_err(|e| e.to_string())?;
+    #[cfg(desktop)]
     if !enabled {
         state.mcp_external.disconnect(id).await;
     }
+    let _ = enabled; // 移动端避免未使用警告
     Ok(())
 }
 
 /// 列出指定外部 server 暴露的工具（首次会触发 spawn + 握手）
+/// 仅桌面端：移动端无 fork/spawn 子进程能力
+#[cfg(desktop)]
 #[tauri::command]
 pub async fn mcp_external_list_tools(
     state: tauri::State<'_, AppState>,
@@ -477,6 +483,8 @@ pub async fn mcp_external_list_tools(
 }
 
 /// 调用指定外部 server 的工具
+/// 仅桌面端：移动端无 fork/spawn 子进程能力
+#[cfg(desktop)]
 #[tauri::command]
 pub async fn mcp_external_call_tool(
     state: tauri::State<'_, AppState>,
@@ -668,26 +676,28 @@ fn locate_claude_desktop_config() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     {
         let appdata = std::env::var("APPDATA").ok()?;
-        Some(
+        return Some(
             PathBuf::from(appdata)
                 .join("Claude")
                 .join("claude_desktop_config.json"),
-        )
+        );
     }
     #[cfg(target_os = "macos")]
     {
         let home = std::env::var("HOME").ok()?;
-        Some(
+        return Some(
             PathBuf::from(home)
                 .join("Library/Application Support/Claude/claude_desktop_config.json"),
-        )
+        );
     }
     #[cfg(target_os = "linux")]
     {
         // Claude Desktop 暂不支持 Linux，但留个兼容路径（用户自定义安装时用）
         let home = std::env::var("HOME").ok()?;
-        Some(PathBuf::from(home).join(".config/Claude/claude_desktop_config.json"))
+        return Some(PathBuf::from(home).join(".config/Claude/claude_desktop_config.json"));
     }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    None
 }
 
 /// Claude Code (CLI) 配置文件 = ~/.claude.json（与 tauri-cc 写的是同一个文件）。
@@ -707,13 +717,15 @@ fn locate_cursor_config() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     {
         let userprofile = std::env::var("USERPROFILE").ok()?;
-        Some(PathBuf::from(userprofile).join(".cursor").join("mcp.json"))
+        return Some(PathBuf::from(userprofile).join(".cursor").join("mcp.json"));
     }
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
         let home = std::env::var("HOME").ok()?;
-        Some(PathBuf::from(home).join(".cursor/mcp.json"))
+        return Some(PathBuf::from(home).join(".cursor/mcp.json"));
     }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    None
 }
 
 /// 卸载结果

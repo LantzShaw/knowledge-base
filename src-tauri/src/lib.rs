@@ -26,7 +26,8 @@ const MULTI_INSTANCE_FLAG: &str = "multi_instance.enabled";
 
 // ───────── 多开实例支持 ─────────
 
-/// 从命令行参数中提取 .md / .markdown / .txt 文件路径
+/// 从命令行参数中提取 .md / .markdown / .txt 文件路径（仅桌面端：移动端无 CLI 参数）
+#[cfg(desktop)]
 fn extract_md_paths_from_args<I: IntoIterator<Item = String>>(args: I) -> Vec<String> {
     args.into_iter()
         .filter(|a| !a.starts_with('-'))
@@ -88,7 +89,8 @@ fn setup_internal_mcp(
     })
 }
 
-/// 解析命令行 `--instance N` 或 `--instance=N`
+/// 解析命令行 `--instance N` 或 `--instance=N`（仅桌面端：移动端无 CLI 参数）
+#[cfg(desktop)]
 fn parse_instance_arg() -> Option<u32> {
     let args: Vec<String> = std::env::args().collect();
     for i in 0..args.len() {
@@ -140,6 +142,8 @@ pub(crate) fn framework_app_data_dir(handle: &tauri::AppHandle) -> Result<PathBu
 
 /// 在 Tauri Builder 启动前估算 app data 目录（用于早期投递判断）
 /// 必须与 setup 里的 framework_app_data_dir 保持一致：dev 走 `-dev` 隔离目录
+/// 仅桌面端：移动端没有"启动前 estimate"概念
+#[cfg(desktop)]
 fn early_app_data_dir() -> PathBuf {
     let name = app_data_dir_name();
     #[cfg(windows)]
@@ -176,6 +180,7 @@ fn early_app_data_dir() -> PathBuf {
 /// ⚠️ flock 在 NFS / SMB 等网络文件系统上语义不可靠（老内核根本不跨节点）。
 ///    本应用 data_dir 默认 `~/.local/share`，本地 ext4/btrfs 没问题；
 ///    如果用户把 data_dir 改到网络挂载，单实例语义可能退化。
+#[cfg(desktop)]
 fn try_exclusive_lock(path: &Path) -> Result<File, ()> {
     use std::fs::OpenOptions;
 
@@ -231,6 +236,8 @@ fn try_exclusive_lock(path: &Path) -> Result<File, ()> {
 /// 自动分配实例锁
 /// - 显式 ID：直接锁该 ID
 /// - 自动模式：先试默认锁；占用则在 2..=99 中找空位
+/// 仅桌面端：移动端单实例
+#[cfg(desktop)]
 fn acquire_instance_lock(
     data_dir: &Path,
     explicit_id: Option<u32>,
@@ -257,11 +264,13 @@ fn acquire_instance_lock(
 /// 探测默认实例锁是否被占（不持有结果）
 /// 试拿一次锁，立即 drop（在 Windows 上由于 FILE_FLAG_DELETE_ON_CLOSE，
 /// 若拿到了锁文件会被自动删除，但此时本来就没有占用者，无副作用）
+#[cfg(desktop)]
 fn is_default_lock_busy(lock_path: &Path) -> bool {
     try_exclusive_lock(lock_path).is_err()
 }
 
-/// 把 .md 路径写入投递文件，给已运行的默认实例读取
+/// 把 .md 路径写入投递文件，给已运行的默认实例读取（仅桌面端）
+#[cfg(desktop)]
 fn deliver_md_to_default(app_data_dir: &Path, md_paths: &[String]) -> std::io::Result<()> {
     use std::io::Write;
     let path = app_data_dir.join(DELIVER_FILE);
@@ -277,6 +286,8 @@ fn deliver_md_to_default(app_data_dir: &Path, md_paths: &[String]) -> std::io::R
 
 /// 仅写一个空行到投递文件，触发已运行实例的 watcher 唤起主窗。
 /// 用于"不允许多开"模式下，第二个进程退出前把焦点让给已运行的实例。
+/// 仅桌面端
+#[cfg(desktop)]
 fn ping_default_to_focus(app_data_dir: &Path) -> std::io::Result<()> {
     use std::io::Write;
     let path = app_data_dir.join(DELIVER_FILE);
@@ -316,6 +327,8 @@ pub(crate) fn set_multi_instance_enabled(
 ///
 /// 「不允许多开」时，第二个进程会用 `ping_default_to_focus` 写空行触发这个唤起 ——
 /// 所以即使没有 .md 内容也要把窗口前置。
+/// 仅桌面端：移动端单实例 + 无 unminimize/show/set_focus 等 WebviewWindow 方法
+#[cfg(desktop)]
 fn start_md_deliver_watcher(handle: tauri::AppHandle, app_data_dir: PathBuf) {
     tauri::async_runtime::spawn(async move {
         let path = app_data_dir.join(DELIVER_FILE);
@@ -367,6 +380,8 @@ fn start_md_deliver_watcher(handle: tauri::AppHandle, app_data_dir: PathBuf) {
 /// 2. 主窗口此时还是 visible:false，splash 是用户唯一可见的窗口
 /// 3. setup 阻塞跑 `run_migration`，进度通过 `data_dir:migrate_progress` emit 到 splash
 /// 4. 迁移完毕 → close splash → setup 继续往下走 → 末尾 show 主窗
+/// 仅桌面端：移动端无多窗口 + 无 WebviewWindowBuilder.title() 方法
+#[cfg(desktop)]
 fn run_data_dir_migration_with_splash(
     app: &tauri::App,
     framework_app_data_dir: &std::path::Path,
@@ -492,6 +507,8 @@ pub fn run() {
             // 任意一个失败都会让 setup 提前 Err return，window.show() 永远不调 → mac 白屏。
             // 改为 setup 第一行就 show，setup 中段失败也只是功能退化，不会黑屏。
             // 唯一例外：autostart --start-minimized 模式下面会重新 hide。
+            // 仅桌面端：移动端 WebviewWindow 不提供 show/hide（系统管理可见性）
+            #[cfg(desktop)]
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
             }
@@ -503,6 +520,8 @@ pub fn run() {
 
             // T-013 完整版：检测迁移 marker → 弹 splash 窗口跑迁移 → close splash
             // 必须放在 db init 之前（迁移会动 db 文件）
+            // 仅桌面端：移动端无多窗口（splash），按 T-M013 重做迁移流程
+            #[cfg(desktop)]
             if let Ok(Some(marker)) =
                 services::data_dir::DataDirResolver::read_migration_marker(&framework_app_data_dir)
             {
@@ -676,6 +695,8 @@ pub fn run() {
             app.manage(state);
 
             // 窗口标题区分实例（DEV/PROD × 默认/实例N 四态）
+            // 仅桌面端：移动端无窗口标题概念（标题栏由系统/状态栏管理）
+            #[cfg(desktop)]
             if let Some(window) = app.get_webview_window("main") {
                 let title = match (cfg!(debug_assertions), instance_id) {
                     (true, None) => Some("知识库 [DEV]".to_string()),
@@ -719,6 +740,8 @@ pub fn run() {
 
             // 开机启动时若带 --start-minimized 参数 且 用户在设置里开启了"启动最小化到托盘"，
             // 则隐藏主窗口到托盘
+            // 仅桌面端：移动端无 --start-minimized + 无托盘 + 无 window.hide
+            #[cfg(desktop)]
             if std::env::args().any(|a| a == "--start-minimized") {
                 let start_minimized = app
                     .state::<AppState>()
@@ -737,6 +760,8 @@ pub fn run() {
             }
 
             // 自动同步调度器：仅默认实例启动，避免多实例并发推送 WebDAV 互相覆盖
+            // 仅桌面端：移动端按 T-M014 改"手动同步按钮"，且 sync_v1_scheduler 依赖 rust-s3
+            #[cfg(desktop)]
             if instance_id.is_none() {
                 let app_handle_sched = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
@@ -759,19 +784,23 @@ pub fn run() {
             // - 主窗已在 setup 第一步 show 过，这里 show 是幂等的
             // - 真正作用是 set_focus：迁移 splash 关闭后 / 多窗口创建后把焦点拉回主窗
             // - autostart --start-minimized 模式下用户已选择隐藏到托盘，跳过此步
-            let did_start_minimized = std::env::args().any(|a| a == "--start-minimized")
-                && app
-                    .state::<AppState>()
-                    .db
-                    .get_config("start_minimized")
-                    .ok()
-                    .flatten()
-                    .as_deref()
-                    == Some("1");
-            if !did_start_minimized {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
+            // 仅桌面端：移动端 WebviewWindow 不提供 show/set_focus 方法
+            #[cfg(desktop)]
+            {
+                let did_start_minimized = std::env::args().any(|a| a == "--start-minimized")
+                    && app
+                        .state::<AppState>()
+                        .db
+                        .get_config("start_minimized")
+                        .ok()
+                        .flatten()
+                        .as_deref()
+                        == Some("1");
+                if !did_start_minimized {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
                 }
             }
 
@@ -789,7 +818,10 @@ pub fn run() {
             commands::mcp::mcp_update_server,
             commands::mcp::mcp_delete_server,
             commands::mcp::mcp_set_server_enabled,
+            // 外部 MCP server 子进程仅桌面端
+            #[cfg(desktop)]
             commands::mcp::mcp_external_list_tools,
+            #[cfg(desktop)]
             commands::mcp::mcp_external_call_tool,
             commands::mcp::mcp_install_to_client,
             commands::mcp::mcp_uninstall_from_client,
@@ -833,6 +865,7 @@ pub fn run() {
             // T-014 网页剪藏
             commands::notes::clip_url_to_note,
             // 多窗口 pop-out（笔记对照 / 双显示器分屏）
+            #[cfg(desktop)]
             commands::notes::open_note_in_new_window,
             // T-007 笔记加密 / Vault
             commands::vault::vault_status,
@@ -921,7 +954,10 @@ pub fn run() {
             commands::ai::ai_plan_today,
             commands::ai::ai_extract_task_from_text,
             commands::ai::ai_plan_from_goal,
+            // Excel 解析仅桌面端（calamine 移动端编译失败，T-M013 后再决策）
+            #[cfg(desktop)]
             commands::ai::ai_plan_from_excel,
+            #[cfg(desktop)]
             commands::ai::ai_parse_excel,
             commands::ai::ai_parse_attachment,
             commands::ai::undo_task_batch,
@@ -945,6 +981,8 @@ pub fn run() {
             commands::export::export_notes,
             commands::export::export_single_note,
             // T-020 导出 Word / HTML
+            // Word 导出仅桌面端（docx_rs 移动端编译失败）
+            #[cfg(desktop)]
             commands::export::export_single_note_to_word,
             commands::export::export_single_note_to_html,
             // 笔记批量操作

@@ -38,6 +38,8 @@ pub struct AppState {
     pub mcp_internal: Option<Arc<InternalMcpClient>>,
     /// 外部 MCP server client 缓存（M5-2）。每个用户加的 server 对应一个子进程 + client。
     /// 进程级单例：第一次访问时 spawn，后续请求复用。
+    /// 仅桌面端：移动端 fork/spawn 受限，没有外部 MCP 概念
+    #[cfg(desktop)]
     pub mcp_external: Arc<crate::services::mcp_client::McpClientManager>,
     /// 实例锁文件句柄（保持存活以维持独占锁，进程退出时自动释放）
     _lock_file: Option<File>,
@@ -61,6 +63,7 @@ impl AppState {
             pending_open_md_path: Mutex::new(None),
             vault: RwLock::new(VaultState::default()),
             mcp_internal,
+            #[cfg(desktop)]
             mcp_external: Arc::new(crate::services::mcp_client::McpClientManager::new()),
             _lock_file: lock_file,
         }

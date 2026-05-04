@@ -2284,6 +2284,7 @@ impl AiService {
     /// - 单 Sheet > 30k 字符 → 取头 40 行 + 尾 10 行
     /// - 总长度 > 60k 字符 → 对最大的几个 Sheet 进一步截断
     /// - 截断信息通过 `warnings` 字段返回给前端，UI 友好提示
+    #[cfg(desktop)]
     pub async fn plan_from_excel(
         db: &Database,
         req: PlanFromExcelRequest,
@@ -2461,6 +2462,8 @@ impl AiService {
     // 跟 plan_from_excel 区别：plan_from_excel 是"Excel→四象限计划"专用通路；
     // 这里只做解析，不绑定任何 prompt 模板，便于通用问答。
     // ══════════════════════════════════════════════════════════════════
+    /// Excel 附件解析（仅桌面端：calamine 在 Android target 编译失败）
+    #[cfg(desktop)]
     pub fn parse_excel_attachment(file_path: &str) -> Result<ExcelPreview, AppError> {
         let file_path = file_path.trim();
         if file_path.is_empty() {
@@ -2485,6 +2488,11 @@ impl AiService {
             truncated_sheets: summary.truncated_sheet_names,
             chars_estimated,
         })
+    }
+    /// 移动端 stub：返回未支持错误
+    #[cfg(mobile)]
+    pub fn parse_excel_attachment(_file_path: &str) -> Result<ExcelPreview, AppError> {
+        Err(AppError::Custom("移动端暂不支持 Excel 解析".into()))
     }
 
     /// 文本类附件解析（md / txt / json / 代码等）。复用 import 的编码嗅探，
@@ -2660,7 +2668,8 @@ pub fn build_message_with_attachments(text: &str, attachments: &[MessageAttachme
     out
 }
 
-/// 根据 Excel 解析结果生成给前端的友好警告
+/// 根据 Excel 解析结果生成给前端的友好警告（仅桌面端：依赖 excel_parser）
+#[cfg(desktop)]
 fn build_excel_warnings(
     summary: &crate::services::excel_parser::ExcelSummary,
     file_name: &str,

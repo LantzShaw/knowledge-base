@@ -164,6 +164,8 @@ fn tick_once(app: &AppHandle) -> Result<(), AppError> {
         //   到主窗 Modal 流程，保证用户不会漏提醒
         // - 其它优先级：闪烁主窗任务栏 + 主窗内 Modal（前端自带短促一声"叮"）
         if task.priority == 0 {
+            // 桌面端：开全屏接管窗口；移动端：fallback 到主窗 Modal（无多窗口能力）
+            #[cfg(desktop)]
             match crate::services::emergency_window::open_for_task(app, task.id) {
                 Ok(_) => {
                     log::info!("[reminder] 紧急任务 {} 已打开全屏窗口", task.id);
@@ -174,6 +176,13 @@ fn tick_once(app: &AppHandle) -> Result<(), AppError> {
                     if let Err(e) = app.emit("task:reminder", &task) {
                         log::warn!("[reminder] emit 事件失败: {}", e);
                     }
+                }
+            }
+            #[cfg(mobile)]
+            {
+                // 移动端无紧急窗口，直接 emit 事件到主窗 Modal
+                if let Err(e) = app.emit("task:reminder", &task) {
+                    log::warn!("[reminder] emit 事件失败: {}", e);
                 }
             }
         } else {
@@ -191,6 +200,8 @@ fn tick_once(app: &AppHandle) -> Result<(), AppError> {
 /// 把主窗口拉到前台 + 闪烁任务栏抢用户注意。
 /// 用于普通/重要级提醒：用户可能把主窗最小化或隐藏到托盘了，必须先 show + unminimize +
 /// set_focus，否则 Modal 弹在隐藏窗口里用户看不见，只剩右下角系统通知 → 用户无从操作。
+/// 仅桌面端：移动端无最小化/任务栏概念，且 WebviewWindow 不提供这些方法。
+#[cfg(desktop)]
 fn surface_main_window(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.unminimize();
@@ -199,3 +210,6 @@ fn surface_main_window(app: &AppHandle) {
         let _ = win.request_user_attention(Some(tauri::UserAttentionType::Critical));
     }
 }
+/// 移动端 stub：单窗口模型，不需要拉前台
+#[cfg(mobile)]
+fn surface_main_window(_app: &AppHandle) {}
