@@ -32,6 +32,8 @@ pub mod prompt;
 pub mod quick_capture;
 pub mod safe_filename;
 pub mod search;
+// 全局快捷键仅桌面端可用
+#[cfg(desktop)]
 pub mod shortcut;
 pub mod skills;
 pub mod source_file;

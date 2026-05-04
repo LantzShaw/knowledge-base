@@ -1011,10 +1011,14 @@ pub fn run() {
             commands::tasks::snooze_task_reminder,
             commands::tasks::complete_task_occurrence,
             commands::tasks::search_tasks,
-            // 全局快捷键（settings/快捷键页用）
+            // 全局快捷键（仅桌面端；移动端无此概念）
+            #[cfg(desktop)]
             commands::shortcut::list_shortcut_bindings,
+            #[cfg(desktop)]
             commands::shortcut::set_shortcut_binding,
+            #[cfg(desktop)]
             commands::shortcut::reset_shortcut_binding,
+            #[cfg(desktop)]
             commands::shortcut::disable_shortcut_binding,
             // 待办分类
             commands::tasks::list_task_categories,

@@ -28,7 +28,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
+# ─── 跨平台核心依赖（桌面 + 移动端共用）────────────────
+# tauri：tray-icon feature 仅桌面端可用，已下移到 target.desktop dependencies
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-opener = "2"
 tauri-plugin-store = "2"
 tauri-plugin-log = "2"
@@ -38,9 +40,10 @@ thiserror = "2"
 rusqlite = { version = "0.31", features = ["bundled"] }
 log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
-tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
-reqwest = { version = "0.12", features = ["json", "stream"] }
+# reqwest：移动端 NDK 不带 OpenSSL，统一用 rustls-tls（桌面端也能用，行为一致；
+# 系统证书池靠 rustls-native-certs 加载，避免迁移成本）
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "rustls-tls-native-roots"] }
 tokio = { version = "1", features = ["sync", "fs", "io-util", "rt", "rt-multi-thread"] }
 # T-024b S3 协议 backend：支持 AWS S3 / 阿里云 OSS / 腾讯云 COS / Cloudflare R2 / MinIO
 # default-features = false 避免拉重型 tokio 依赖；用 tokio-rustls-tls + with-tokio
@@ -57,9 +60,6 @@ serde_yml = "0.0.12"
 regex = "1"
 base64 = "0.22.1"
 pdf-extract = "0.9"
-# PDFium fallback（Chrome 同款 PDF 引擎）：pdf-extract 对中文 CMap（GBK-EUC-H 等）不支持，
-# 运行时动态加载 src-tauri/resources/pdfium/pdfium.dll 作为兜底
-pdfium-render = "0.8"
 # ─── 同步功能 ────────────────────────────────────
 zip = "2.2"
 sha2 = "0.10"
@@ -69,18 +69,31 @@ aes-gcm = "0.10"
 # T-007 笔记加密：Argon2id 密码派生 + zeroize 在 drop 时清零敏感内存；rand 生成盐/nonce
 argon2 = "0.5"
 zeroize = { version = "1", features = ["zeroize_derive"] }
-rand = "0.8"
-tauri-plugin-autostart = "2"
 tauri-plugin-notification = "2"
-# 全局快捷键 + 剪贴板：用于「后台运行时按 Ctrl+Shift+N 把剪贴板内容存为新笔记」
-tauri-plugin-global-shortcut = "2"
 tauri-plugin-clipboard-manager = "2"
+rand = "0.8"
 # kb-core: 共享的 MCP server 实现（KbDb + KbServer + 12 工具），
 # 主应用在进程内 spawn KbServer，让自家 AI 对话页通过 MCP 协议消费同一套工具
 kb-core = { path = "kb-core" }
-# rmcp client：通过 in-memory transport 调用同进程的 KbServer，
-# 同时通过 child-process transport spawn 外部 MCP server（M5-2 用户加的 GitHub / Filesystem 等）
-rmcp = { version = "1.5", features = ["client", "transport-child-process"] }
+# rmcp client：in-memory transport 调用同进程 KbServer（双端通用）
+# transport-child-process 仅桌面端用（spawn 外部 MCP server），移到 target.desktop
+rmcp = { version = "1.5", features = ["client"] }
+# Excel / ODS 解析、Word 导出、txt 编码识别 — 双端通用纯 Rust 工具
+# 这些在原文件上面已声明 calamine / docx-rs / chardetng / encoding_rs 等，保持位置不变
+
+# ─── 桌面专属依赖（cfg(desktop) 编译时启用；移动端不引入）────
+[target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
+# 系统托盘 feature
+tauri = { version = "2", features = ["tray-icon"] }
+# 桌面专属插件
+tauri-plugin-updater = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-global-shortcut = "2"
+# PDFium fallback（pdf-extract 对中文 CMap 不支持，运行时动态加载 pdfium.dll 兜底）
+# 移动端 NDK 加载动态库受沙盒限制，暂不支持，待 T-M012 决策
+pdfium-render = "0.8"
+# rmcp 桌面端额外能力：spawn 外部 MCP server 子进程（移动端 fork/spawn 受限）
+rmcp = { version = "1.5", features = ["transport-child-process"] }
 # Excel / ODS 解析（纯 Rust，零系统依赖；AI 智能规划"Excel 导入"模式用）
 calamine = "0.28"
 # T-020 笔记导出为 Word：纯 Rust 生成 .docx；零系统依赖

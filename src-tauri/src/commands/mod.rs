@@ -17,6 +17,8 @@ pub mod orphan;
 pub mod pdf;
 pub mod prompt;
 pub mod search;
+// 全局快捷键仅桌面端可用（移动端无此概念）
+#[cfg(desktop)]
 pub mod shortcut;
 pub mod source_file;
 pub mod source_writeback;
