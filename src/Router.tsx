@@ -18,6 +18,7 @@ import CardsPage from "@/pages/cards";
 import PromptsPage from "@/pages/prompts";
 import HiddenPage from "@/pages/hidden";
 import QuickCreatePage from "@/pages/quick-create";
+import QuickCapturePage from "@/pages/quick-capture";
 import MigrationSplash from "@/pages/migration-splash";
 import EmergencyReminderPage from "@/pages/emergency-reminder";
 
@@ -42,6 +43,12 @@ const router = createHashRouter([
   {
     path: "/ai-chat/:id",
     element: <MobileAiChat />,
+    errorElement: <RouteErrorFallback />,
+  },
+  // 闪念捕获：沉浸式橙色全屏，独立路由（不显示底栏）
+  {
+    path: "/quick-capture",
+    element: <QuickCapturePage />,
     errorElement: <RouteErrorFallback />,
   },
   {
