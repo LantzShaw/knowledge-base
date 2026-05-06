@@ -35,10 +35,15 @@ import {
   Trash2,
   Pencil,
   RefreshCcw,
+  Share2,
+  Download,
 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { configApi, syncApi, syncV1Api } from "@/lib/api";
+import { ShareConfigModal } from "@/components/config-share/ShareConfigModal";
+import { ImportConfigModal } from "@/components/config-share/ImportConfigModal";
+import { exportWebDavBackend, type Envelope } from "@/lib/configShare";
 import type {
   SyncBackend,
   SyncBackendInput,
@@ -164,6 +169,8 @@ export function SyncV1Section() {
   const [form, setForm] = useState<BackendFormState>(EMPTY_FORM);
   const [busyBackendId, setBusyBackendId] = useState<number | null>(null);
   const [progress, setProgress] = useState<SyncV1ProgressEvent | null>(null);
+  const [shareEnv, setShareEnv] = useState<Envelope | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   useEffect(() => {
     let unlisten: UnlistenFn | undefined;
@@ -411,14 +418,25 @@ export function SyncV1Section() {
           <RefreshCcw size={14} />
           已配置的同步源：每个同步源独立维护推送 / 拉取状态
         </span>
-        <Button
-          type="primary"
-          size="small"
-          icon={<Plus size={14} />}
-          onClick={openCreateModal}
-        >
-          新增同步源
-        </Button>
+        <Space size={4}>
+          <Tooltip title="从 JSON / 二维码导入同步源">
+            <Button
+              size="small"
+              icon={<Download size={14} />}
+              onClick={() => setImportOpen(true)}
+            >
+              导入
+            </Button>
+          </Tooltip>
+          <Button
+            type="primary"
+            size="small"
+            icon={<Plus size={14} />}
+            onClick={openCreateModal}
+          >
+            新增同步源
+          </Button>
+        </Space>
       </div>
 
       <Table<SyncBackend>
@@ -498,6 +516,15 @@ export function SyncV1Section() {
                       拉取
                     </Button>
                   </Tooltip>
+                  {b.kind === "webdav" && (
+                    <Tooltip title="分享到其他设备（含加密）">
+                      <Button
+                        size="small"
+                        icon={<Share2 size={13} />}
+                        onClick={() => setShareEnv(exportWebDavBackend(b))}
+                      />
+                    </Tooltip>
+                  )}
                   <Tooltip title="编辑">
                     <Button
                       size="small"
@@ -764,6 +791,17 @@ export function SyncV1Section() {
           </div>
         </Form>
       </Modal>
+
+      <ShareConfigModal
+        open={shareEnv !== null}
+        onClose={() => setShareEnv(null)}
+        envelope={shareEnv}
+      />
+      <ImportConfigModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={() => void loadBackends()}
+      />
     </div>
   );
 }

@@ -150,6 +150,7 @@ export function ImportConfigModal({
         lines.push(`✓ WebDAV 后端 ${summary.webdavBackends} 个`);
       if (summary.aiModels > 0)
         lines.push(`✓ AI 模型 ${summary.aiModels} 个`);
+      if (summary.asrConfig) lines.push("✓ 语音识别配置");
       if (summary.featureToggles) lines.push("✓ 功能开关");
       if (summary.errors.length > 0) {
         message.error(
@@ -272,9 +273,11 @@ export function ImportConfigModal({
               ? `名称：${parsed.data.name} · URL：${parsed.data.config.url}`
               : parsed.kind === "ai-model"
                 ? `名称：${parsed.data.name} · ${parsed.data.provider} · ${parsed.data.model_id}`
-                : parsed.kind === "feature-toggles"
-                  ? "包含功能开关偏好"
-                  : "包含多项配置"
+                : parsed.kind === "asr-config"
+                  ? `服务商：${parsed.data.provider} · 模型：${parsed.data.model} · 区域：${parsed.data.region}`
+                  : parsed.kind === "feature-toggles"
+                    ? "包含功能开关偏好"
+                    : "包含多项配置"
           }
         />
       )}

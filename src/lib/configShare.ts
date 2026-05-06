@@ -17,7 +17,7 @@
  *   发到不信任的渠道。
  */
 
-import { syncV1Api, aiModelApi, configApi } from "@/lib/api";
+import { syncV1Api, aiModelApi, configApi, asrApi } from "@/lib/api";
 import { encryptWithPin, decryptWithPin } from "@/lib/configCrypto";
 import type {
   SyncBackend,
@@ -25,6 +25,7 @@ import type {
   AiModel,
   AiModelInput,
   WebDavConfig,
+  AsrConfig,
 } from "@/types";
 
 /** Envelope schema 版本号，未来不兼容时 bump */
@@ -41,6 +42,7 @@ export interface EncryptedEnvelope {
 export type ConfigKind =
   | "webdav-backend"  // SyncBackend (kind=webdav) — 含密码
   | "ai-model"         // AiModelInput — 含 api_key
+  | "asr-config"       // AsrConfig — 语音识别（含 apiKey）
   | "feature-toggles"  // 功能开关 + Dashboard 显示项 + Tab 顺序
   | "bundle";          // 一次导出多个
 
@@ -78,12 +80,14 @@ export interface FeatureTogglesData {
 export interface BundleData {
   webdavBackends?: WebDavBackendData[];
   aiModels?: AiModelData[];
+  asrConfig?: AsrConfig;
   featureToggles?: FeatureTogglesData;
 }
 
 export type Envelope =
   | EnvelopeBase<"webdav-backend", WebDavBackendData>
   | EnvelopeBase<"ai-model", AiModelData>
+  | EnvelopeBase<"asr-config", AsrConfig>
   | EnvelopeBase<"feature-toggles", FeatureTogglesData>
   | EnvelopeBase<"bundle", BundleData>;
 
@@ -124,6 +128,11 @@ export function exportAiModel(m: AiModel): Envelope {
     model_id: m.model_id,
     max_context: m.max_context,
   });
+}
+
+/** 序列化 ASR（语音识别）配置 */
+export function exportAsrConfig(cfg: AsrConfig): Envelope {
+  return envelope("asr-config", cfg);
 }
 
 /** 序列化功能开关（仅 mobile 三个 set） */
@@ -205,6 +214,7 @@ function parseInner(text: string): ParseResult {
   if (
     kind !== "webdav-backend" &&
     kind !== "ai-model" &&
+    kind !== "asr-config" &&
     kind !== "feature-toggles" &&
     kind !== "bundle"
   ) {
@@ -261,6 +271,7 @@ export async function parseEnvelope(
 export interface ImportSummary {
   webdavBackends: number;
   aiModels: number;
+  asrConfig: boolean;
   featureToggles: boolean;
   errors: string[];
 }
@@ -270,6 +281,7 @@ export async function applyEnvelope(env: Envelope): Promise<ImportSummary> {
   const summary: ImportSummary = {
     webdavBackends: 0,
     aiModels: 0,
+    asrConfig: false,
     featureToggles: false,
     errors: [],
   };
@@ -303,6 +315,15 @@ export async function applyEnvelope(env: Envelope): Promise<ImportSummary> {
         summary.aiModels = 1;
       } catch (e) {
         summary.errors.push(`AI 模型创建失败：${e}`);
+      }
+      break;
+
+    case "asr-config":
+      try {
+        await asrApi.saveConfig(env.data);
+        summary.asrConfig = true;
+      } catch (e) {
+        summary.errors.push(`语音识别配置写入失败：${e}`);
       }
       break;
 
@@ -358,6 +379,16 @@ export async function applyEnvelope(env: Envelope): Promise<ImportSummary> {
           summary.errors.push(...sub.errors);
         }
       }
+      if (env.data.asrConfig) {
+        const sub = await applyEnvelope({
+          kbConfig: ENVELOPE_VERSION,
+          kind: "asr-config",
+          exportedAt: new Date().toISOString(),
+          data: env.data.asrConfig,
+        });
+        summary.asrConfig = sub.asrConfig;
+        summary.errors.push(...sub.errors);
+      }
       if (env.data.featureToggles) {
         const sub = await applyEnvelope({
           kbConfig: ENVELOPE_VERSION,
@@ -378,6 +409,7 @@ export async function applyEnvelope(env: Envelope): Promise<ImportSummary> {
 export const KIND_LABELS: Record<ConfigKind, string> = {
   "webdav-backend": "WebDAV 同步",
   "ai-model": "AI 模型",
+  "asr-config": "语音识别（ASR）",
   "feature-toggles": "功能开关",
   "bundle": "完整配置包",
 };

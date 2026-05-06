@@ -20,7 +20,7 @@ import {
   Radio,
 } from "antd";
 import { SyncOutlined, PlusOutlined, CheckCircleFilled, CheckCircleOutlined } from "@ant-design/icons";
-import { Trash2, Pencil, FolderInput, FolderOutput, LayoutTemplate, Power, ExternalLink, Type, Zap } from "lucide-react";
+import { Trash2, Pencil, FolderInput, FolderOutput, LayoutTemplate, Power, ExternalLink, Type, Zap, Share2, Download } from "lucide-react";
 import dayjs, { type Dayjs } from "dayjs";
 import { TimePicker } from "antd";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -51,6 +51,9 @@ import { HiddenPinSection } from "@/components/hidden/HiddenPinSection";
 import { ShortcutsSection } from "@/components/settings/ShortcutsSection";
 import { MCPServerSection } from "@/components/settings/MCPServerSection";
 import { TiptapEditor } from "@/components/editor";
+import { ShareConfigModal } from "@/components/config-share/ShareConfigModal";
+import { ImportConfigModal } from "@/components/config-share/ImportConfigModal";
+import { exportAiModel, type Envelope } from "@/lib/configShare";
 import type { Folder } from "@/types";
 
 const { Title, Text } = Typography;
@@ -296,6 +299,9 @@ function DesktopSettingsPage() {
   const watchedProvider = Form.useWatch("provider", form) || "ollama";
   /** 行内"测试"按钮 loading 锁：值为正在测试的 model.id；Modal 内的测试按钮锁用 -1 */
   const [testingModelId, setTestingModelId] = useState<number | null>(null);
+  // 配置分享 / 导入
+  const [shareEnv, setShareEnv] = useState<Envelope | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   // 导入状态
   const [importing, setImporting] = useState(false);
@@ -1042,6 +1048,13 @@ function DesktopSettingsPage() {
             icon={<Pencil size={14} />}
             onClick={() => openEditModel(record)}
           />
+          <Button
+            type="text"
+            size="small"
+            icon={<Share2 size={14} />}
+            onClick={() => setShareEnv(exportAiModel(record))}
+            title="分享到其他设备（含加密）"
+          />
           <Popconfirm
             title="确认删除此模型？"
             onConfirm={() => handleDeleteModel(record.id)}
@@ -1483,14 +1496,24 @@ function DesktopSettingsPage() {
         id="settings-ai-models"
         title="AI 模型配置"
         extra={
-          <Button
-            type="primary"
-            size="small"
-            icon={<PlusOutlined />}
-            onClick={openAddModel}
-          >
-            添加模型
-          </Button>
+          <Space size={4}>
+            <Button
+              size="small"
+              icon={<Download size={14} />}
+              onClick={() => setImportOpen(true)}
+              title="从 JSON / 二维码导入模型"
+            >
+              导入
+            </Button>
+            <Button
+              type="primary"
+              size="small"
+              icon={<PlusOutlined />}
+              onClick={openAddModel}
+            >
+              添加模型
+            </Button>
+          </Space>
         }
       >
         <Table
@@ -1948,6 +1971,17 @@ function DesktopSettingsPage() {
         open={updateModalOpen}
         onClose={() => setUpdateModalOpen(false)}
         update={update}
+      />
+
+      <ShareConfigModal
+        open={shareEnv !== null}
+        onClose={() => setShareEnv(null)}
+        envelope={shareEnv}
+      />
+      <ImportConfigModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={() => void loadModels()}
       />
       </div>
     </div>

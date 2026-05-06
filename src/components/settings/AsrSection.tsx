@@ -22,9 +22,12 @@ import {
   message,
   theme as antdTheme,
 } from "antd";
-import { Mic, ExternalLink } from "lucide-react";
+import { Mic, ExternalLink, Share2, Download } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { asrApi } from "@/lib/api";
+import { ShareConfigModal } from "@/components/config-share/ShareConfigModal";
+import { ImportConfigModal } from "@/components/config-share/ImportConfigModal";
+import { exportAsrConfig, type Envelope } from "@/lib/configShare";
 import type { AsrConfig } from "@/types";
 
 const { Text, Paragraph } = Typography;
@@ -61,6 +64,28 @@ export function AsrSection() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [shareEnv, setShareEnv] = useState<Envelope | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+
+  async function reloadConfig() {
+    setLoading(true);
+    try {
+      const remote = await asrApi.getConfig();
+      setCfg(remote);
+    } catch (e) {
+      message.error(`读取语音识别配置失败：${e}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleShare() {
+    if (!cfg.apiKey.trim()) {
+      message.warning("当前还没填 API Key，没什么可分享的");
+      return;
+    }
+    setShareEnv(exportAsrConfig(cfg));
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -129,6 +154,26 @@ export function AsrSection() {
           <Mic size={16} style={{ color: token.colorPrimary }} />
           语音识别
         </span>
+      }
+      extra={
+        <Space size={4}>
+          <Button
+            size="small"
+            icon={<Share2 size={14} />}
+            onClick={handleShare}
+            title="分享到其他设备（含加密）"
+          >
+            分享
+          </Button>
+          <Button
+            size="small"
+            icon={<Download size={14} />}
+            onClick={() => setImportOpen(true)}
+            title="从 JSON / 二维码导入"
+          >
+            导入
+          </Button>
+        </Space>
       }
     >
       <Alert
@@ -233,6 +278,17 @@ export function AsrSection() {
           </Space>
         </Form.Item>
       </Form>
+
+      <ShareConfigModal
+        open={shareEnv !== null}
+        onClose={() => setShareEnv(null)}
+        envelope={shareEnv}
+      />
+      <ImportConfigModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={() => void reloadConfig()}
+      />
     </Card>
   );
 }
