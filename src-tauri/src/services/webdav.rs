@@ -56,10 +56,16 @@ impl WebDavClient {
         if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
             return Err(AppError::Custom("认证失败，请检查用户名/密码".into()));
         }
-        if status == StatusCode::NOT_FOUND {
-            return Err(AppError::Custom(
-                "云端文件夹不存在，请先在 WebDAV 服务端创建该文件夹".into(),
-            ));
+        // 坚果云对不存在的路径返回 400（不是 404），所以 400/404/409 一并按
+        // "路径不存在/无效"友好提示，避免给用户看到生硬的 "400 Bad Request"
+        if status == StatusCode::NOT_FOUND
+            || status == StatusCode::BAD_REQUEST
+            || status == StatusCode::CONFLICT
+        {
+            return Err(AppError::Custom(format!(
+                "云端文件夹不存在或路径无效（{}）。请先登录 WebDAV 服务端（如坚果云网页版），手动创建配置中填写的目录后重试",
+                status.as_u16()
+            )));
         }
         if !status.is_success() && status != StatusCode::MULTI_STATUS {
             return Err(AppError::Custom(format!("连接失败，服务器返回 {}", status)));
