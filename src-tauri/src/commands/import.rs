@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::models::{ImportConflictPolicy, ImportResult, OpenMarkdownResult, ScannedFile};
 use crate::services;
@@ -33,7 +33,9 @@ pub async fn import_selected_files(
     preserve_root: Option<bool>,
     policy: Option<ImportConflictPolicy>,
 ) -> Result<ImportResult, String> {
-    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    // ⚠️ 必须用 state.data_dir（已经过 DataDirResolver 解析 + 多开实例叠加），
+    // 不能用 app.path().app_data_dir()（那是 OS 默认 framework 目录，不跟随用户改的数据目录）
+    let app_data_dir = state.data_dir.clone();
     services::import::ImportService::import_selected_files(
         &state.db,
         &file_paths,
@@ -54,10 +56,10 @@ pub async fn import_selected_files(
 #[tauri::command]
 pub async fn open_markdown_file(
     state: tauri::State<'_, AppState>,
-    app: AppHandle,
     file_path: String,
 ) -> Result<OpenMarkdownResult, String> {
-    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    // ⚠️ 同 import_selected_files：必须用 state.data_dir
+    let app_data_dir = state.data_dir.clone();
     services::import::ImportService::import_single_markdown(&state.db, &file_path, &app_data_dir)
         .await
         .map_err(|e| e.to_string())
