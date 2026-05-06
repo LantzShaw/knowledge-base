@@ -31,6 +31,8 @@ import { UpdateModal } from "@/components/ui/UpdateModal";
 import { ExitConfirmListener } from "@/components/ui/ExitConfirmListener";
 import { CloseRequestedListener } from "@/components/ui/CloseRequestedListener";
 import { useUpdateChecker } from "@/hooks/useUpdateChecker";
+import { SyncStatusButton } from "./SyncStatusButton";
+import { syncV1Api } from "@/lib/api";
 
 const { Header, Sider, Content } = Layout;
 
@@ -328,6 +330,35 @@ export function AppLayout() {
   const [asrCaptureOpen, setAsrCaptureOpen] = useState(false);
   const { update, modalOpen, openModal, closeModal, checkManually } = useUpdateChecker();
 
+  // 启动时静默 pull：让用户从其他设备做的修改自动拉到本地，避免后续编辑产生冲突。
+  // 只主窗（label === 'main'）跑一次：pop-out 子窗共用同一个 DB，没必要重复 pull。
+  // 延迟 3s 让 UI 先就绪；失败用 message.warning 不打断当前页。
+  useEffect(() => {
+    const w = getAppWindow();
+    if (w && w.label !== "main") return;
+    const timer = setTimeout(async () => {
+      try {
+        const backends = await syncV1Api.listBackends();
+        const enabled = backends.filter((b) => b.enabled);
+        const errs: string[] = [];
+        for (const b of enabled) {
+          try {
+            await syncV1Api.pull(b.id);
+          } catch (e) {
+            errs.push(`${b.name}: ${e}`);
+          }
+        }
+        if (errs.length > 0) {
+          message.warning(`启动同步：${errs.length} 个后端拉取失败（${errs.join("；")}）`);
+        }
+      } catch {
+        // backends 列表读不到属于早期初始化阶段问题，静默
+      }
+    }, 3000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const themeMenuItems = [
     { type: "group" as const, label: "亮色主题", children: getThemesByCategory("light").map(t => ({
       key: t.key,
@@ -546,6 +577,7 @@ export function AppLayout() {
                 <Button type="text" icon={<Palette size={16} />} />
               </Tooltip>
             </Dropdown>
+            <SyncStatusButton />
             <Button
               type="text"
               icon={<SettingOutlined />}
