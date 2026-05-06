@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Modal, Tabs, message, Alert, Input } from "antd";
-import { Copy, ShieldCheck, AlertTriangle, Lock } from "lucide-react";
+import { Copy, ShieldCheck, AlertTriangle, Lock, RefreshCw } from "lucide-react";
 import QRCode from "qrcode";
 import {
   KIND_LABELS,
@@ -94,6 +94,26 @@ export function ShareConfigModal({
     }
   }
 
+  async function copyPin() {
+    if (!pin.trim()) {
+      message.warning("当前未启用加密");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(pin);
+      message.success("PIN 已复制");
+    } catch {
+      message.error("复制失败");
+    }
+  }
+
+  /** 重新生成 6 位随机 PIN（如用户怀疑当前 PIN 已泄漏） */
+  function regeneratePin() {
+    const rand = String(Math.floor(100000 + Math.random() * 900000));
+    setPin(rand);
+    message.success("已重新生成 PIN");
+  }
+
   const isEncrypted = pin.trim().length > 0;
   const title = envelope
     ? `分享 ${KIND_LABELS[envelope.kind]}`
@@ -108,18 +128,40 @@ export function ShareConfigModal({
       destroyOnClose
       width={440}
     >
-      {/* PIN 输入 */}
       <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
         <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-slate-700">
           <Lock size={12} />
-          加密 PIN（接收方需要相同 PIN 才能导入）
+          加密 PIN（接收方需相同 PIN 才能导入）
         </div>
-        <Input
+        <Input.Password
           value={pin}
           onChange={(e) => setPin(e.target.value)}
           placeholder="留空 = 明文导出（不推荐）"
           maxLength={32}
           autoComplete="off"
+          visibilityToggle
+          addonAfter={
+            <span className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={copyPin}
+                className="flex items-center gap-0.5 text-xs text-slate-600 hover:text-blue-600"
+                title="复制 PIN"
+              >
+                <Copy size={12} />
+                复制
+              </button>
+              <span className="mx-1 h-3 w-px bg-slate-300" />
+              <button
+                type="button"
+                onClick={regeneratePin}
+                className="flex items-center text-xs text-slate-600 hover:text-blue-600"
+                title="重新生成随机 PIN"
+              >
+                <RefreshCw size={12} />
+              </button>
+            </span>
+          }
         />
         {isEncrypted ? (
           <div className="mt-1.5 flex items-center gap-1 text-[11px] text-green-600">
@@ -181,10 +223,16 @@ export function ShareConfigModal({
                   </div>
                 )}
                 {isEncrypted && (
-                  <div className="rounded bg-green-50 px-2 py-1 text-[11px] text-green-700">
-                    🔒 PIN：<strong>{pin}</strong>{" "}
-                    <span className="text-slate-500">（口头告诉接收方）</span>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={copyPin}
+                    className="flex items-center gap-1.5 rounded-full border border-green-200 bg-green-50 px-3 py-1 text-[11px] text-green-700 hover:bg-green-100"
+                    title="复制 PIN"
+                  >
+                    <Lock size={11} />
+                    点击复制 PIN
+                    <Copy size={11} />
+                  </button>
                 )}
                 <p className="text-center text-xs text-slate-500">
                   在另一台设备的 <strong>导入配置</strong> → <strong>扫码</strong>
