@@ -180,6 +180,7 @@ import { attachmentApi, imageApi, systemApi, videoApi } from "@/lib/api";
 import { parseKbAsset, resolveAssetSrc, toKbAsset, KB_ASSET_SCHEME } from "@/lib/assetUrl";
 import { useAppStore } from "@/store";
 import { EditorToolbar } from "./EditorToolbar";
+import { TableBubbleMenu } from "./TableBubbleMenu";
 import { AiWriteMenu } from "./AiWriteMenu";
 import { WikiLinkDecoration } from "./WikiLinkDecoration";
 import { WikiLinkSuggestion } from "./WikiLinkSuggestion";
@@ -1542,6 +1543,8 @@ export function TiptapEditor({
     <div className="tiptap-wrapper" style={{ position: "relative" }}>
       <EditorToolbar editor={editor} noteId={noteId} ensureNoteId={ensureNoteId} />
       <EditorContent editor={editor} className="tiptap-content" />
+      {/* 表格浮动菜单：光标在 table 内时在表格上方显示加列/加行/删列/删行/合并/拆分/删表 */}
+      <TableBubbleMenu editor={editor} />
       {/* 「问 AI 这段」与续写/总结/改写等工具按钮共享同一个浮动菜单：
           AiWriteMenu 接 onAskAi prop 后会在按钮行最前面渲染蓝色 CTA，
           整个菜单跟随鼠标位置出现，零重叠，无需独立定位逻辑 */}
