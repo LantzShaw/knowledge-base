@@ -14,6 +14,7 @@ import {
   IndentIncrease,
   IndentDecrease,
   Eraser,
+  Paintbrush,
   Baseline,
   PaintBucket,
   Lightbulb,
@@ -50,6 +51,7 @@ import { insertVideoTimestamp } from "./VideoTimestamp";
 import { EmojiPicker } from "./EmojiPicker";
 import { AnnotationButton } from "./AnnotationButton";
 import { parseEmbedUrl, SUPPORTED_PROVIDERS } from "./embedVideoProviders";
+import { useFormatPainter } from "./useFormatPainter";
 
 interface ToolbarProps {
   editor: Editor;
@@ -71,6 +73,7 @@ interface ToolItem {
 }
 
 export function EditorToolbar({ editor, noteId, ensureNoteId }: ToolbarProps) {
+  const formatPainter = useFormatPainter(editor);
   const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
   /** 时间戳弹窗 state */
@@ -876,7 +879,7 @@ export function EditorToolbar({ editor, noteId, ensureNoteId }: ToolbarProps) {
         action: () => editor.chain().focus().setHorizontalRule().run(),
       },
     ],
-    // 缩进 + 清除格式
+    // 缩进 + 格式刷 + 清除格式
     [
       {
         icon: <IndentDecrease size={15} />,
@@ -887,6 +890,35 @@ export function EditorToolbar({ editor, noteId, ensureNoteId }: ToolbarProps) {
         icon: <IndentIncrease size={15} />,
         title: "增加缩进",
         action: () => editor.chain().focus().indent().run(),
+      },
+      {
+        icon: null,
+        title: "格式刷",
+        // customRender:格式刷需要 onClick(once) + onDoubleClick(persist) 两个事件,
+        // 走通用 ToolItem.action 路径覆盖不了。Tooltip 标题随 mode 变化提示用户当前态。
+        customRender: () => {
+          const tip =
+            formatPainter.mode === "persist"
+              ? "格式刷已锁定（连续应用，按 Esc 或再次单击退出）"
+              : formatPainter.mode === "once"
+                ? "格式刷已激活（选中目标文本应用一次）"
+                : "格式刷：单击吸取格式应用一次，双击进入连续模式（Esc 退出）";
+          return (
+            <Tooltip title={tip} mouseEnterDelay={0.5}>
+              <Button
+                type="text"
+                size="small"
+                icon={<Paintbrush size={15} />}
+                onClick={formatPainter.pickOnce}
+                onDoubleClick={formatPainter.pickPersist}
+                className={
+                  formatPainter.mode !== "idle" ? "toolbar-btn-active" : ""
+                }
+                style={{ minWidth: 26, height: 26, padding: 0 }}
+              />
+            </Tooltip>
+          );
+        },
       },
       {
         icon: <Eraser size={15} />,
