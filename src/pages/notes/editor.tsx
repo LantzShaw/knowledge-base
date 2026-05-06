@@ -853,6 +853,12 @@ function DesktopNoteEditorPage() {
       unlisten?.();
     };
   }, [noteId, notification, setTabDirty, clearDraft]);
+  // 用 ref 镜像最新 title / note，避免把它们写进 effect deps 触发循环
+  const titleRef = useRef(title);
+  useEffect(() => { titleRef.current = title; }, [title]);
+  const noteRef = useRef<Note | null>(note);
+  useEffect(() => { noteRef.current = note; }, [note]);
+
   useEffect(() => {
     if (skipNotesInit.current) {
       skipNotesInit.current = false;
@@ -864,8 +870,14 @@ function DesktopNoteEditorPage() {
       .get(noteId)
       .then((fresh) => {
         if (cancelled) return;
+        const prevTitle = noteRef.current?.title;
         setNote(fresh);
-        if (!dirtyRef.current) {
+        // 标题同步策略（修复侧栏改名 → 编辑器 unmount 把旧 title 写回 DB 的 bug）：
+        // - 外部把 title 改了（fresh.title !== prevTitle）
+        // - 本地用户没在编辑器里改过 title（titleRef === prevTitle）
+        // 两者都满足 ⇒ 安全同步本地输入框；任一不满足 ⇒ 保留本地，让用户保存自然胜出。
+        // 不再用 dirty 兜底——dirty 可能由正文编辑触发，与 title 是否被改无关。
+        if (fresh.title !== prevTitle && titleRef.current === prevTitle) {
           setTitle(fresh.title);
         }
       })
@@ -975,10 +987,34 @@ function DesktopNoteEditorPage() {
               },
             });
           } else if (r.kind === "missing") {
-            notification.warning({
-              message: "原文件已不可访问",
-              description: "本应用与外部 .md 的双向同步暂时中断，但你的修改已保存到本地数据库。",
-              duration: 6,
+            // 原文件丢失/移走/网盘断开 — 给用户两个选择，避免每次保存都弹同样的提示
+            Modal.confirm({
+              title: "外部 .md 原文件已不可访问",
+              content: (
+                <div>
+                  <p style={{ marginBottom: 4 }}>找不到原文件：</p>
+                  <p style={{ fontFamily: "monospace", fontSize: 12, wordBreak: "break-all" }}>
+                    {r.file_path}
+                  </p>
+                  <p style={{ marginTop: 8 }}>
+                    你的修改已保存到本地数据库。可选择<strong>解除关联</strong>把这条笔记降级为纯本地笔记（之后不再弹此提示），或<strong>稍后再说</strong>等原文件恢复后继续双向同步。
+                  </p>
+                </div>
+              ),
+              okText: "解除关联",
+              okButtonProps: { danger: true },
+              cancelText: "稍后再说",
+              onOk: async () => {
+                try {
+                  await sourceWritebackApi.clearLink(noteId);
+                  setNote((prev) =>
+                    prev ? { ...prev, source_file_path: null, source_file_type: null } : prev,
+                  );
+                  message.success("已解除外部 .md 关联，本笔记不再触发写回");
+                } catch (err) {
+                  message.error(`解除关联失败: ${err}`);
+                }
+              },
             });
           } else if (r.kind === "ok" && r.assets_copied > 0 && !silent) {
             message.info(`已同步原文件，新插入 ${r.assets_copied} 个图片复制到旁侧 .assets/`);
@@ -1244,6 +1280,38 @@ function DesktopNoteEditorPage() {
     } catch (e) {
       message.error(`打开失败: ${e}`);
     }
+  }
+
+  /** 主动解除外部 .md 双向同步关联（用户在 UI 上点击；与 Missing Modal 走同一后端 Command） */
+  function handleUnlinkSourceMd() {
+    Modal.confirm({
+      title: "解除与外部 .md 的双向同步？",
+      content: (
+        <div>
+          <p style={{ marginBottom: 4 }}>当前关联的原文件：</p>
+          <p style={{ fontFamily: "monospace", fontSize: 12, wordBreak: "break-all" }}>
+            {note?.source_file_path}
+          </p>
+          <p style={{ marginTop: 8 }}>
+            解除后这条笔记降级为纯本地笔记，保存时<strong>不再写回</strong>原 .md 文件。原文件本身不会被删除。
+          </p>
+        </div>
+      ),
+      okText: "解除关联",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        try {
+          await sourceWritebackApi.clearLink(noteId);
+          setNote((prev) =>
+            prev ? { ...prev, source_file_path: null, source_file_type: null } : prev,
+          );
+          message.success("已解除外部 .md 关联");
+        } catch (err) {
+          message.error(`解除关联失败: ${err}`);
+        }
+      },
+    });
   }
 
   async function handleExportNote() {
@@ -1584,22 +1652,57 @@ function DesktopNoteEditorPage() {
             保存
           </Button>
           {note?.source_file_path && (
-            <Tooltip
-              title={
-                note?.source_file_type === "pdf"
-                  ? "查看原始 PDF"
-                  : "用系统默认应用打开原始文件"
-              }
-            >
-              <Button
-                icon={<FileTextIcon size={16} />}
-                onClick={handleOpenSourceFile}
+            note?.source_file_type === "md" ? (
+              // 外部 .md 双向同步关联：主按钮用系统应用打开，下拉菜单提供"解除关联"
+              <Space.Compact>
+                <Tooltip title="用系统默认应用打开原始 .md 文件">
+                  <Button
+                    icon={<FileTextIcon size={16} />}
+                    onClick={handleOpenSourceFile}
+                  >
+                    MD
+                  </Button>
+                </Tooltip>
+                <Dropdown
+                  trigger={["click"]}
+                  menu={{
+                    items: [
+                      {
+                        key: "open",
+                        label: "用系统应用打开",
+                        onClick: () => void handleOpenSourceFile(),
+                      },
+                      { type: "divider" },
+                      {
+                        key: "unlink",
+                        label: "解除外部 .md 关联",
+                        danger: true,
+                        onClick: handleUnlinkSourceMd,
+                      },
+                    ],
+                  }}
+                >
+                  <Button icon={<ChevronDown size={14} />} title="更多操作" />
+                </Dropdown>
+              </Space.Compact>
+            ) : (
+              <Tooltip
+                title={
+                  note?.source_file_type === "pdf"
+                    ? "查看原始 PDF"
+                    : "用系统默认应用打开原始文件"
+                }
               >
-                {note?.source_file_type === "pdf"
-                  ? "PDF"
-                  : (note?.source_file_type ?? "源文件").toUpperCase()}
-              </Button>
-            </Tooltip>
+                <Button
+                  icon={<FileTextIcon size={16} />}
+                  onClick={handleOpenSourceFile}
+                >
+                  {note?.source_file_type === "pdf"
+                    ? "PDF"
+                    : (note?.source_file_type ?? "源文件").toUpperCase()}
+                </Button>
+              </Tooltip>
+            )
           )}
           {/* T-020 导出按钮：默认导出 Markdown；右侧下拉可选 Word / HTML */}
           <Space.Compact>

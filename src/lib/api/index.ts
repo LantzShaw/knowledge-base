@@ -525,6 +525,10 @@ export const sourceWritebackApi = {
    *  - `force=true`：忽略冲突强制覆盖（冲突 Modal 选"覆盖外部"后调用） */
   writeBack: (noteId: number, force = false) =>
     invoke<WriteBackResult>("write_back_source_md", { noteId, force }),
+  /** 解除笔记与外部 .md 的双向同步关联（原文件丢失或用户主动断开）。
+   *  调用后该笔记降级为纯本地笔记，保存不再触发写回 / 不再弹同步提示。 */
+  clearLink: (noteId: number) =>
+    invoke<void>("clear_source_md_link", { noteId }),
 };
 
 /** 导出 API */

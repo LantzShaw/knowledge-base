@@ -147,6 +147,18 @@ impl WriteBackService {
             file_path: path_str,
         })
     }
+
+    /// 解除笔记与外部 .md 的双向同步关联
+    ///
+    /// 用于：原文件被删/移走/用户主动断开。从此该笔记不再触发 writeBack，
+    /// 提示也不会再弹。同时清掉 url_mapping 与 mtime 基线，避免重新关联时残留脏数据。
+    pub fn clear_link(db: &Database, note_id: i64) -> Result<(), AppError> {
+        db.set_note_source_file(note_id, None, None)?;
+        db.clear_url_mappings(note_id)?;
+        db.clear_writeback_mtime(note_id)?;
+        log::info!("[writeback] 笔记 #{} 已解除外部 .md 关联", note_id);
+        Ok(())
+    }
 }
 
 // ───────── URL 反向替换实现 ─────────

@@ -1031,6 +1031,7 @@ pub fn run() {
             commands::source_file::read_file_as_base64,
             // 外部 .md 写回（保存即同步原文件）
             commands::source_writeback::write_back_source_md,
+            commands::source_writeback::clear_source_md_link,
             // 同步模块（V1/V2：本地 ZIP + WebDAV 全量快照）
             commands::sync::sync_export_to_file,
             commands::sync::sync_import_from_file,

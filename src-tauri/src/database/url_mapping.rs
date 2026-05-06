@@ -94,4 +94,17 @@ impl Database {
         )?;
         Ok(())
     }
+
+    /// 清空 mtime 基线（解除外部 .md 关联时用，避免脏数据残留导致下次再次关联误判冲突）
+    pub fn clear_writeback_mtime(&self, note_id: i64) -> Result<(), AppError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
+        conn.execute(
+            "UPDATE notes SET last_writeback_mtime = NULL WHERE id = ?1",
+            [note_id],
+        )?;
+        Ok(())
+    }
 }
