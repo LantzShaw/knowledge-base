@@ -113,25 +113,48 @@ export const FigureImage = ImageResize.extend({
       markdown: {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         serialize(state: any, node: any) {
-          const { src, alt, caption } = node.attrs;
-          // 有 caption → 走 raw HTML（前提是 markdown plugin 配 html: true，已开启）
+          const { src, alt, caption, width, height } = node.attrs;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const editor = (this as any).editor;
           const htmlAllowed = editor?.storage?.markdown?.options?.html;
-          if (caption && htmlAllowed) {
-            const safeAlt = String(alt ?? "")
-              .replace(/&/g, "&amp;")
-              .replace(/"/g, "&quot;");
-            const safeCap = String(caption)
-              .replace(/&/g, "&amp;")
-              .replace(/</g, "&lt;");
+
+          // 普通 markdown ![alt](url) 无法表达 width/height，所以只要存在 caption
+          // 或自定义尺寸（用户拖拽 ImageResize 调整过），都退成 raw HTML 兜底；
+          // 否则尺寸 / 图注会在下次打开笔记时丢失。
+          const hasSize =
+            (width !== undefined && width !== null && width !== "") ||
+            (height !== undefined && height !== null && height !== "");
+          const needHtml = (caption || hasSize) && htmlAllowed;
+
+          if (needHtml) {
+            const esc = (v: unknown) =>
+              String(v ?? "")
+                .replace(/&/g, "&amp;")
+                .replace(/"/g, "&quot;");
+            const safeAlt = esc(alt);
             const safeSrc = String(src ?? "").replace(/&/g, "&amp;");
-            state.write(
-              `<figure>\n<img src="${safeSrc}" alt="${safeAlt}">\n<figcaption>${safeCap}</figcaption>\n</figure>`,
-            );
+            const sizeAttr =
+              (width != null && width !== ""
+                ? ` width="${esc(width)}"`
+                : "") +
+              (height != null && height !== ""
+                ? ` height="${esc(height)}"`
+                : "");
+
+            if (caption) {
+              const safeCap = String(caption)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;");
+              state.write(
+                `<figure>\n<img src="${safeSrc}" alt="${safeAlt}"${sizeAttr}>\n<figcaption>${safeCap}</figcaption>\n</figure>`,
+              );
+            } else {
+              state.write(`<img src="${safeSrc}" alt="${safeAlt}"${sizeAttr}>`);
+            }
             state.closeBlock(node);
             return;
           }
+
           // 普通 markdown 图片（与 tiptap-markdown 默认实现一致）
           const altText = (alt ?? "").replace(/[\[\]]/g, "");
           const url = (src ?? "").replace(/[()]/g, (c: string) =>
