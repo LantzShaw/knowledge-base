@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Modal, Tabs, message, Alert } from "antd";
-import { ClipboardPaste, ScanLine } from "lucide-react";
+import { Modal, Tabs, message, Alert, Input } from "antd";
+import { ClipboardPaste, ScanLine, Lock } from "lucide-react";
 import { Html5Qrcode } from "html5-qrcode";
 import {
   KIND_LABELS,
@@ -32,27 +32,44 @@ export function ImportConfigModal({
   const [text, setText] = useState("");
   const [parsed, setParsed] = useState<Envelope | null>(null);
   const [parseErr, setParseErr] = useState<string | null>(null);
+  const [needPin, setNeedPin] = useState(false);
+  const [pin, setPin] = useState("");
   const [importing, setImporting] = useState(false);
   const [scanning, setScanning] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const scanContainerId = "config-import-qr-reader";
 
-  // 解析 text → envelope
+  // 解析 text + pin → envelope（异步因为加密走 Web Crypto）
   useEffect(() => {
     if (!text.trim()) {
       setParsed(null);
       setParseErr(null);
+      setNeedPin(false);
       return;
     }
-    const r = parseEnvelope(text);
-    if (r.ok) {
-      setParsed(r.envelope);
-      setParseErr(null);
-    } else {
-      setParsed(null);
-      setParseErr(r.reason);
-    }
-  }, [text]);
+    let alive = true;
+    void (async () => {
+      const r = await parseEnvelope(text, pin || undefined);
+      if (!alive) return;
+      if (r.ok) {
+        setParsed(r.envelope);
+        setParseErr(null);
+        setNeedPin(false);
+      } else {
+        setParsed(null);
+        if ("encrypted" in r && r.encrypted) {
+          setNeedPin(true);
+          setParseErr(pin ? "PIN 错误或数据损坏" : null); // 没输 PIN 不当错误
+        } else {
+          setNeedPin(false);
+          setParseErr(r.reason);
+        }
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [text, pin]);
 
   // Modal 关闭时清场
   useEffect(() => {
@@ -60,6 +77,8 @@ export function ImportConfigModal({
       setText("");
       setParsed(null);
       setParseErr(null);
+      setNeedPin(false);
+      setPin("");
       setTab("paste");
       void stopScan();
     }
@@ -220,6 +239,23 @@ export function ImportConfigModal({
           },
         ]}
       />
+
+      {/* 加密 envelope → 让用户输 PIN */}
+      {needPin && (
+        <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3">
+          <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-blue-700">
+            <Lock size={12} />
+            此配置已加密，请输入分享方提供的 PIN
+          </div>
+          <Input.Password
+            value={pin}
+            onChange={(e) => setPin(e.target.value)}
+            placeholder="6 位数字 PIN（默认）"
+            autoComplete="off"
+            autoFocus
+          />
+        </div>
+      )}
 
       {/* 解析结果预览 */}
       {parseErr && (

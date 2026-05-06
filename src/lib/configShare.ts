@@ -18,6 +18,7 @@
  */
 
 import { syncV1Api, aiModelApi, configApi } from "@/lib/api";
+import { encryptWithPin, decryptWithPin } from "@/lib/configCrypto";
 import type {
   SyncBackend,
   SyncBackendInput,
@@ -28,6 +29,13 @@ import type {
 
 /** Envelope schema 版本号，未来不兼容时 bump */
 export const ENVELOPE_VERSION = "v1" as const;
+export const ENCRYPTED_VERSION = "v1-enc" as const;
+
+/** 加密后的 envelope 外壳：payload = base64url(salt || iv || ciphertext) */
+export interface EncryptedEnvelope {
+  kbConfig: typeof ENCRYPTED_VERSION;
+  payload: string;
+}
 
 /** 配置类型：每种 kind 对应一组 data */
 export type ConfigKind =
@@ -132,6 +140,24 @@ export function stringifyEnvelope(env: Envelope, pretty = true): string {
   return JSON.stringify(env, null, pretty ? 2 : 0);
 }
 
+/**
+ * 用 PIN 加密 envelope，输出 EncryptedEnvelope 的 JSON 字符串。
+ * 接收方需要相同 PIN 才能解密。
+ */
+export async function stringifyEncrypted(
+  env: Envelope,
+  pin: string,
+  pretty = false,
+): Promise<string> {
+  const plain = stringifyEnvelope(env, false);
+  const payload = await encryptWithPin(plain, pin);
+  const wrapper: EncryptedEnvelope = {
+    kbConfig: ENCRYPTED_VERSION,
+    payload,
+  };
+  return JSON.stringify(wrapper, null, pretty ? 2 : 0);
+}
+
 // ──────────────────────────────────────────────────────────
 // 反序列化（导入）
 // ──────────────────────────────────────────────────────────
@@ -144,10 +170,15 @@ export interface ParseSuccess {
   ok: true;
   envelope: Envelope;
 }
-export type ParseResult = ParseError | ParseSuccess;
+export interface ParseEncrypted {
+  ok: false;
+  encrypted: true;
+  /** 后续要让用户输入 PIN，再调 parseEnvelope(text, pin) 解密 */
+  reason: "需要 PIN 解密";
+}
+export type ParseResult = ParseError | ParseSuccess | ParseEncrypted;
 
-/** 严格解析：必须是 v1 envelope，返回 typed 结构或带原因的错误 */
-export function parseEnvelope(text: string): ParseResult {
+function parseInner(text: string): ParseResult {
   if (!text || !text.trim()) {
     return { ok: false, reason: "内容为空" };
   }
@@ -161,6 +192,9 @@ export function parseEnvelope(text: string): ParseResult {
     return { ok: false, reason: "不是 JSON 对象" };
   }
   const o = raw as Record<string, unknown>;
+  if (o.kbConfig === ENCRYPTED_VERSION) {
+    return { ok: false, encrypted: true, reason: "需要 PIN 解密" };
+  }
   if (o.kbConfig !== ENVELOPE_VERSION) {
     return {
       ok: false,
@@ -180,6 +214,44 @@ export function parseEnvelope(text: string): ParseResult {
     return { ok: false, reason: "data 字段缺失或非对象" };
   }
   return { ok: true, envelope: o as unknown as Envelope };
+}
+
+/**
+ * 严格解析：可同时处理明文 envelope 和加密 envelope。
+ * - 明文 → 直接返回 envelope
+ * - 加密但未给 pin → 返回 encrypted: true，提示调用方让用户输 PIN
+ * - 加密 + pin → 尝试解密；PIN 错抛 reason
+ */
+export async function parseEnvelope(
+  text: string,
+  pin?: string,
+): Promise<ParseResult> {
+  const inner = parseInner(text);
+  if (inner.ok) return inner;
+  // 不是加密 envelope 就直接传出错误
+  if (!("encrypted" in inner)) return inner;
+  // 是加密 envelope
+  if (!pin) {
+    return inner; // ok=false + encrypted=true，让 UI 弹 PIN 输入框
+  }
+  // 尝试解密
+  let outerObj: { payload?: string };
+  try {
+    outerObj = JSON.parse(text);
+  } catch {
+    return { ok: false, reason: "外层 JSON 损坏" };
+  }
+  const payload = outerObj?.payload;
+  if (!payload || typeof payload !== "string") {
+    return { ok: false, reason: "加密 payload 缺失" };
+  }
+  let plain: string;
+  try {
+    plain = await decryptWithPin(payload, pin);
+  } catch {
+    return { ok: false, reason: "PIN 错误或数据损坏" };
+  }
+  return parseInner(plain);
 }
 
 // ──────────────────────────────────────────────────────────
