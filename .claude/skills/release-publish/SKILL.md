@@ -2,21 +2,22 @@
 
 ## 概述
 
-Knowledge Base 桌面应用采用 **CI 构建 + 本地推送 + R2 CDN** 模式：
+Knowledge Base 桌面应用采用 **CI 构建 + Claude 全自动后处理 + R2 CDN** 模式：
 
 ```
 本地：更新版本号 → 提交 → 打 Tag → 推送（触发 CI）
-  ↓ CI 构建中（不推送任何内容到 release 仓库）
+  ↓ Claude ScheduleWakeup 轮询 CI（不推送任何内容到 release 仓库）
 CI：构建 Windows + macOS + Linux 安装包 → 上传到 GitHub Release（草稿）
-  ↓ CI 完成后，用户下载产物到 D:/download/download/
-本地：上传产物到 R2 CDN + 更新 README + 复制产物 + 生成 update.json → 推送到 GitHub release 仓库 → publish Release
+  ↓ CI 完成后，Claude 用 GitHub API 自动下载草稿 release 的 13 个 asset 到 release 仓库
+本地：上传产物到 R2 CDN + 更新 README + 生成 update.json → 推送到 release 仓库 → publish Release → 触发文档站重建
 ```
 
-> **关键原则**：CI 构建完成、用户提供下载文件之前，**不要推送任何内容到 release 仓库**。
-> README 更新、产物复制、update.json 生成在获得产物后一次性完成并推送。
+> **关键原则**：CI 构建完成前，**不要推送任何内容到 release 仓库**。
+> README 更新、产物下载、update.json 生成在获得产物后一次性完成并推送。
 
 > **本地不需要执行 `pnpm tauri build`**。CI 负责构建和签名。
-> 构建完成后，用户手动从 GitHub Release 下载产物，Claude 负责本地处理和推送。
+> CI 构建完成后，**Claude 通过 GitHub API + git credential 自动下载 draft release 的 assets**，
+> 全程不需要用户手动下载（v1.8.1 起验证可行）。
 
 ### 支持平台
 
@@ -158,80 +159,167 @@ git tag "vx.y.z"
 git push github "vx.y.z"
 ```
 
-### 步骤 6：等待 CI 构建完成（15-30 分钟）
+### 步骤 6：用 ScheduleWakeup 监控 CI 构建（15–30 分钟，零干预）
 
-向用户提示：
-- CI 进度：https://github.com/bkywksj/knowledge-base/actions
-- 构建完成后去 Releases 草稿下载产物：https://github.com/bkywksj/knowledge-base/releases
+CI 构建期间不要 sleep / 不要让用户手动等。用 **ScheduleWakeup 自醒**：每 ~5 分钟检查一次 workflow run 状态，未完成就再睡，完成就推进到步骤 7。
 
-**要下载的 13 个文件**（CI 产物前缀 Windows/macOS 为 `Knowledge.Base_`，Linux 为 `knowledge-base_`，具体前缀首次 Linux CI 后按实际产物名校正）：
+**首次检查脚本**（直接调用，立刻返回当前状态）：
+
+```python
+# poll_ci.py —— 通过 GitHub API 查询 v_X.Y.Z_ 的 workflow run
+import urllib.request, json, subprocess
+proc = subprocess.run(['git', 'credential', 'fill'],
+    input='protocol=https\nhost=github.com\n', capture_output=True, text=True)
+token = next(l.split('=',1)[1] for l in proc.stdout.splitlines() if l.startswith('password='))
+
+req = urllib.request.Request('https://api.github.com/repos/bkywksj/knowledge-base/actions/runs?per_page=10')
+req.add_header('Authorization', f'Bearer {token}')
+req.add_header('Accept', 'application/vnd.github+json')
+runs = json.loads(urllib.request.urlopen(req).read())
+target = next((r for r in runs['workflow_runs'] if r['head_branch'] == 'vX.Y.Z'), None)
+if target:
+    print(f"status={target['status']} conclusion={target['conclusion']} url={target['html_url']}")
+else:
+    print('未找到 vX.Y.Z 对应的 run')
+```
+
+**判定逻辑**：
+- `status="queued"` 或 `"in_progress"` → 用 ScheduleWakeup 睡 270 秒（保持缓存温热），继续轮询
+- `status="completed"` + `conclusion="success"` → 推进到步骤 7
+- `conclusion="failure"` → 提示用户去 Actions 页面看 log，停止流程
+
+**ScheduleWakeup 调用模板**（在自己 prompt 里）：
+
+```
+delaySeconds: 270  （在 5 分钟缓存窗口内，避免缓存失效）
+prompt: 继续 v1.8.1 发布流程：再查一次 CI workflow 状态，未完成则继续睡 270s，完成则推进到步骤 7（API 下载产物）
+```
+
+> ⚠️ **不要用 `sleep` 命令阻塞 Bash**——会把上下文锁死且无法被中断。
+> ⚠️ **不要主动让用户去 Actions 页面看**——除非 CI 失败需要定位原因。
+
+### 步骤 7：用 GitHub API 自动下载 13 个产物到 release 仓库
+
+CI 完成后产物在 **draft Release** 上（tag_name = `vX.Y.Z`）。用 `git credential fill` 拿 GitHub token，然后用 `Accept: application/octet-stream` 通过 assets API 直接下到 `release` 仓库目录。**全程零浏览器、零用户操作**。
+
+#### 7a. 列产物清单（核对 13 个文件齐全）
+
+```python
+# list_assets.py
+import urllib.request, json, subprocess
+proc = subprocess.run(['git', 'credential', 'fill'],
+    input='protocol=https\nhost=github.com\n', capture_output=True, text=True)
+token = next(l.split('=',1)[1] for l in proc.stdout.splitlines() if l.startswith('password='))
+
+req = urllib.request.Request('https://api.github.com/repos/bkywksj/knowledge-base/releases?per_page=5')
+req.add_header('Authorization', f'Bearer {token}')
+req.add_header('Accept', 'application/vnd.github+json')
+releases = json.loads(urllib.request.urlopen(req).read())
+target = next(r for r in releases if r['tag_name'] == 'vX.Y.Z')
+print(f"draft={target['draft']} assets={len(target['assets'])}")
+for a in target['assets']:
+    print(f"  {a['name']:60} {a['size']/1024/1024:>8.2f} MB")
+```
+
+CI 实际会上传 **17 个 asset**（含 latest.json + 几个额外 .sig），但只需要拿其中 **13 个**：
 
 ```
 # Windows (3)
-Knowledge.Base_x.y.z_x64-setup.exe          # Windows 安装包
-Knowledge.Base_x.y.z_x64-setup.exe.sig      # Windows 签名
-Knowledge.Base_x.y.z_x64-setup.nsis.zip     # Windows updater zip
+Knowledge.Base_x.y.z_x64-setup.exe
+Knowledge.Base_x.y.z_x64-setup.exe.sig
+Knowledge.Base_x.y.z_x64-setup.nsis.zip
 
 # macOS (6)
-Knowledge.Base_x.y.z_aarch64.dmg            # macOS ARM 镜像
-Knowledge.Base_x.y.z_x64.dmg                # macOS Intel 镜像
-Knowledge.Base_aarch64.app.tar.gz           # macOS ARM updater（无版本号）
-Knowledge.Base_aarch64.app.tar.gz.sig       # macOS ARM updater 签名
-Knowledge.Base_x64.app.tar.gz               # macOS Intel updater（无版本号）
-Knowledge.Base_x64.app.tar.gz.sig           # macOS Intel updater 签名
+Knowledge.Base_x.y.z_aarch64.dmg
+Knowledge.Base_x.y.z_x64.dmg
+Knowledge.Base_aarch64.app.tar.gz
+Knowledge.Base_aarch64.app.tar.gz.sig
+Knowledge.Base_x64.app.tar.gz
+Knowledge.Base_x64.app.tar.gz.sig
 
-# Linux (4) —— 首次 CI 后按实际文件名校正，tauri-bundler 对含空格的 productName
-#          通常会规范化为 kebab-case 或 snake_case，可能是以下任一形式：
-#            knowledge-base_x.y.z_amd64.deb
-#            Knowledge Base_x.y.z_amd64.AppImage
-#            knowledge_base_x.y.z_amd64.AppImage.tar.gz
-knowledge-base_x.y.z_amd64.deb              # Linux Debian/Ubuntu 包
-knowledge-base_x.y.z_amd64.AppImage         # Linux 通用 AppImage
-knowledge-base_x.y.z_amd64.AppImage.tar.gz  # Linux AppImage updater（v1Compatible 模式）
-knowledge-base_x.y.z_amd64.AppImage.tar.gz.sig  # Linux updater 签名
+# Linux (4) —— v1.8.1 起前缀已统一为 Knowledge.Base_（与 Win/macOS 一致）
+Knowledge.Base_x.y.z_amd64.deb
+Knowledge.Base_x.y.z_amd64.AppImage
+Knowledge.Base_x.y.z_amd64.AppImage.tar.gz
+Knowledge.Base_x.y.z_amd64.AppImage.tar.gz.sig
 ```
 
-> ⚠️ **dmg 带版本号**，**macOS app.tar.gz 不带版本号**，这是 tauri-action 的约定。
-> ⚠️ **Linux AppImage.tar.gz 带版本号**（与 macOS app.tar.gz 不同），本项目 `createUpdaterArtifacts: "v1Compatible"` 模式下产出。
-> ⚠️ 用户容易漏下 `.exe` 主文件（浏览器只下 `.sig`），清点时要核对**所有 13 个都在**。
-> ⚠️ **首次 Linux CI 后**，务必把实际产物文件名回填到本文件，修正占位符。
+> ⚠️ **dmg 带版本号 / macOS app.tar.gz 不带版本号 / Linux AppImage.tar.gz 带版本号**（tauri-action 约定）
 
-使用 AskUserQuestion 询问下载目录（默认 `D:/download/download/`，回车用默认）。
+#### 7b. 用 API 下载所有 13 个产物到 release 仓库目录
 
-### 步骤 7：处理产物（Claude 自动执行）
+> 🔴 **必须使用 `PYTHONIOENCODING=utf-8` 前缀**，否则 Windows GBK 控制台遇到 ✓ 等 unicode 字符会 `UnicodeEncodeError` 中断下载。
+> 🔴 **不要绕路 `D:/download/download/`**——直接下到 `releases/vX.Y.Z/`，省去 cp 步骤。
 
 ```bash
-VERSION="x.y.z"
-DOWNLOAD_DIR="D:/download/download"   # 或用户提供的
-GITHUB_DIR="E:/my/桌面软件tauri/knowledge-base-release"
-TARGET="$GITHUB_DIR/releases/v$VERSION"
-RCLONE="$HOME/bin/rclone.exe"
+mkdir -p "E:/my/桌面软件tauri/knowledge-base-release/releases/vX.Y.Z"
+cd "E:/my/桌面软件tauri/knowledge_base" && PYTHONIOENCODING=utf-8 python -c "
+import urllib.request, json, subprocess, os, sys
 
-mkdir -p "$TARGET"
+proc = subprocess.run(['git', 'credential', 'fill'],
+    input='protocol=https\nhost=github.com\n', capture_output=True, text=True)
+token = next(l.split('=',1)[1] for l in proc.stdout.splitlines() if l.startswith('password='))
 
-# 7a. 复制 13 个产物到 release 仓库
-# Windows
-cp "$DOWNLOAD_DIR"/Knowledge.Base_${VERSION}_x64-setup.exe "$TARGET/"
-cp "$DOWNLOAD_DIR"/Knowledge.Base_${VERSION}_x64-setup.exe.sig "$TARGET/"
-cp "$DOWNLOAD_DIR"/Knowledge.Base_${VERSION}_x64-setup.nsis.zip "$TARGET/"
-# macOS
-cp "$DOWNLOAD_DIR"/Knowledge.Base_${VERSION}_aarch64.dmg "$TARGET/"
-cp "$DOWNLOAD_DIR"/Knowledge.Base_${VERSION}_x64.dmg "$TARGET/"
-cp "$DOWNLOAD_DIR"/Knowledge.Base_aarch64.app.tar.gz "$TARGET/"
-cp "$DOWNLOAD_DIR"/Knowledge.Base_aarch64.app.tar.gz.sig "$TARGET/"
-cp "$DOWNLOAD_DIR"/Knowledge.Base_x64.app.tar.gz "$TARGET/"
-cp "$DOWNLOAD_DIR"/Knowledge.Base_x64.app.tar.gz.sig "$TARGET/"
-# Linux（首次 Linux CI 后按实际文件名校正 LINUX_PREFIX 和 ARCH_SUFFIX）
-LINUX_PREFIX="knowledge-base"        # 可能是 knowledge-base / knowledge_base / "Knowledge Base"
-LINUX_ARCH="amd64"
-cp "$DOWNLOAD_DIR"/${LINUX_PREFIX}_${VERSION}_${LINUX_ARCH}.deb "$TARGET/"
-cp "$DOWNLOAD_DIR"/${LINUX_PREFIX}_${VERSION}_${LINUX_ARCH}.AppImage "$TARGET/"
-cp "$DOWNLOAD_DIR"/${LINUX_PREFIX}_${VERSION}_${LINUX_ARCH}.AppImage.tar.gz "$TARGET/"
-cp "$DOWNLOAD_DIR"/${LINUX_PREFIX}_${VERSION}_${LINUX_ARCH}.AppImage.tar.gz.sig "$TARGET/"
+VERSION = 'X.Y.Z'
+TARGET = f'E:/my/桌面软件tauri/knowledge-base-release/releases/v{VERSION}'
 
-# 7b. 上传本版本所有产物到 R2（并发快，~10 秒内完成）
-$RCLONE copy "$TARGET/" "r2:downloads/knowledge-base/v$VERSION/" --progress --stats 5s
+WANT = [
+    f'Knowledge.Base_{VERSION}_x64-setup.exe',
+    f'Knowledge.Base_{VERSION}_x64-setup.exe.sig',
+    f'Knowledge.Base_{VERSION}_x64-setup.nsis.zip',
+    f'Knowledge.Base_{VERSION}_aarch64.dmg',
+    f'Knowledge.Base_{VERSION}_x64.dmg',
+    'Knowledge.Base_aarch64.app.tar.gz',
+    'Knowledge.Base_aarch64.app.tar.gz.sig',
+    'Knowledge.Base_x64.app.tar.gz',
+    'Knowledge.Base_x64.app.tar.gz.sig',
+    f'Knowledge.Base_{VERSION}_amd64.deb',
+    f'Knowledge.Base_{VERSION}_amd64.AppImage',
+    f'Knowledge.Base_{VERSION}_amd64.AppImage.tar.gz',
+    f'Knowledge.Base_{VERSION}_amd64.AppImage.tar.gz.sig',
+]
+
+req = urllib.request.Request('https://api.github.com/repos/bkywksj/knowledge-base/releases?per_page=5')
+req.add_header('Authorization', f'Bearer {token}')
+req.add_header('Accept', 'application/vnd.github+json')
+releases = json.loads(urllib.request.urlopen(req).read())
+target_release = next(r for r in releases if r['tag_name'] == f'v{VERSION}')
+assets = {a['name']: a for a in target_release['assets']}
+total = len(WANT)
+
+for i, name in enumerate(WANT, 1):
+    if name not in assets:
+        print(f'[{i}/{total}] MISSING: {name}', flush=True)
+        sys.exit(1)
+    a = assets[name]
+    out = os.path.join(TARGET, name)
+    if os.path.exists(out) and os.path.getsize(out) == a['size']:
+        print(f'[{i}/{total}] skip cached {name}', flush=True)
+        continue
+    url = f\"https://api.github.com/repos/bkywksj/knowledge-base/releases/assets/{a['id']}\"
+    dr = urllib.request.Request(url)
+    dr.add_header('Authorization', f'Bearer {token}')
+    dr.add_header('Accept', 'application/octet-stream')
+    print(f'[{i}/{total}] downloading {name} ({a[\"size\"]/1024/1024:.1f} MB)...', flush=True)
+    with urllib.request.urlopen(dr) as resp, open(out, 'wb') as f:
+        while True:
+            chunk = resp.read(1024 * 256)
+            if not chunk: break
+            f.write(chunk)
+    print(f'  OK {name}', flush=True)
+print('all done')"
 ```
+
+下载约 30–60 秒（取决于网速；Linux AppImage 单文件 ~92 MB）。完成后 `releases/vX.Y.Z/` 下应有 13 个文件。
+
+#### 7c. 上传产物到 R2
+
+```bash
+~/bin/rclone.exe copy "E:/my/桌面软件tauri/knowledge-base-release/releases/vX.Y.Z/" \
+    "r2:downloads/knowledge-base/vX.Y.Z/" --progress --stats 5s
+```
+
+总大小 ~290 MB，上传约 60 秒（rclone 并发）。
 
 ### 步骤 8：生成两份 update.json（GitHub 版 + R2 版）
 
@@ -275,10 +363,10 @@ def build(base):
                 'url': f'{base}/Knowledge.Base_x64.app.tar.gz',
                 'signature': read_sig(f'{RELEASE_DIR}/Knowledge.Base_x64.app.tar.gz.sig'),
             },
-            # Linux x86_64（首次 CI 后按实际文件名校正 LINUX_PREFIX 占位符）
+            # Linux x86_64（v1.8.1 起前缀统一为 Knowledge.Base_）
             'linux-x86_64': {
-                'url': f'{base}/knowledge-base_{VERSION}_amd64.AppImage.tar.gz',
-                'signature': read_sig(f'{RELEASE_DIR}/knowledge-base_{VERSION}_amd64.AppImage.tar.gz.sig'),
+                'url': f'{base}/Knowledge.Base_{VERSION}_amd64.AppImage.tar.gz',
+                'signature': read_sig(f'{RELEASE_DIR}/Knowledge.Base_{VERSION}_amd64.AppImage.tar.gz.sig'),
             },
         },
     }
@@ -321,19 +409,24 @@ curl -s -o /dev/null -w "R2 update.json HTTP %{http_code}\n" \
 ```
 
 ```bash
+# 🔴 Windows Git Bash 下 /tmp 解析为 E:\tmp（不存在），必须用 $TEMP
+TMPV=$(cygpath -w "$TEMP" 2>/dev/null || echo "C:/Users/$USERNAME/AppData/Local/Temp")
+OLD="$TMPV/versions-old.json"
+NEW="$TMPV/versions.json"
+
 # NOTES 与步骤 1 询问用户时的"更新说明"保持一致（可多行，用 \n 分隔）
 RELEASE_NOTES="<本次发布说明>"
 PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 R2_PUBLIC="https://pub-9d9e6c0cb6934fb0a0c505e3c64f39b2.r2.dev/knowledge-base"
 
 # 下载当前 versions.json（不存在则初始化空数组）
-curl -s "${R2_PUBLIC}/versions.json" -o /tmp/versions-old.json 2>/dev/null \
-  || echo '{"versions":[]}' > /tmp/versions-old.json
+curl -s "${R2_PUBLIC}/versions.json" -o "$OLD" 2>/dev/null \
+  || echo '{"versions":[]}' > "$OLD"
 
 # 用 Node 脚本：把旧格式（字符串）规整为对象格式，去重后在头部插入新版本
-NOTES="$RELEASE_NOTES" PUB="$PUB_DATE" VER="v${VERSION}" node -e "
+OLDPATH="$OLD" NEWPATH="$NEW" NOTES="$RELEASE_NOTES" PUB="$PUB_DATE" VER="v${VERSION}" node -e "
 const fs = require('fs');
-const old = JSON.parse(fs.readFileSync('/tmp/versions-old.json', 'utf8'));
+const old = JSON.parse(fs.readFileSync(process.env.OLDPATH, 'utf8'));
 const existing = (old.versions || [])
   .map(v => typeof v === 'string' ? { version: v } : v)
   .filter(v => v.version && v.version !== process.env.VER);
@@ -341,11 +434,11 @@ const next = { versions: [
   { version: process.env.VER, notes: process.env.NOTES, pub_date: process.env.PUB },
   ...existing
 ] };
-fs.writeFileSync('/tmp/versions.json', JSON.stringify(next, null, 2));
+fs.writeFileSync(process.env.NEWPATH, JSON.stringify(next, null, 2));
 "
 
 # 上传覆盖 R2
-$RCLONE copyto /tmp/versions.json r2:downloads/knowledge-base/versions.json --progress
+~/bin/rclone.exe copyto "$NEW" r2:downloads/knowledge-base/versions.json --progress
 
 # 验证
 curl -s "${R2_PUBLIC}/versions.json" | head -c 500
@@ -405,27 +498,21 @@ if target and target['draft']:
 > 所以每次发布新版本更新 R2 后，必须触发文档站重新构建（腾讯 EdgeOne Pages 会在 git push
 > 检测到 diff 时自动重建），让下载页拿到最新快照。
 
+⚠️ 文档站仓库 remote 名是 **`gitee` + `github`**（**没有 `origin`**），两个都要推。
+
+用 Edit 工具改 `.last-release.json`（用 `cat > ... << EOF` 在 Git Bash 也行，但 heredoc 容易踩 cd 持久化坑）：
+
 ```bash
 DOCS_DIR="E:/my/桌面软件tauri/knowledge-base-docs"
-cd "$DOCS_DIR"
+# 1. 用 Edit 工具把 docs/public/.last-release.json 的 version 改成 vX.Y.Z，published_at 改成当前 UTC
+# 2. 提交并双推
+cd "$DOCS_DIR" && git add docs/public/.last-release.json && \
+  git commit -m "chore: 同步 v${VERSION} 发布（触发下载页快照重建）" && \
+  git push gitee master && git push github master
 
-# 更新版本标记文件（有真实 diff 才会触发 EdgeOne Pages 重建，比空 commit 更稳）
-cat > docs/public/.last-release.json << JSONEOF
-{
-  "version": "v$VERSION",
-  "published_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-}
-JSONEOF
-
-git add docs/public/.last-release.json
-git commit -m "chore: 同步 v$VERSION 发布（触发下载页快照重建）
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
-git pull --rebase origin master
-git push origin master
-
-# 如果推送超时，不要重试，提示用户手动执行：
-#   cd "E:/my/桌面软件tauri/knowledge-base-docs" && git push origin master
+# 如果任一 push 超时，不要重试，让用户手动执行：
+#   cd "E:/my/桌面软件tauri/knowledge-base-docs" && git push gitee master
+#   cd "E:/my/桌面软件tauri/knowledge-base-docs" && git push github master
 ```
 
 推送后腾讯 EdgeOne Pages 会自动重新构建文档站，`config.ts` 里的顶层 await 重新拉取
@@ -573,8 +660,22 @@ downloads/                              ← Bucket 根（与 aicoder 共享）
 | TS `noUnusedLocals` 致 CI 失败 | 未使用的 import | **打 tag 前本地 `npx tsc --noEmit`** |
 | macOS `panic_unwind` 冲突 | `Cargo.toml [profile.release] panic = "abort"` 与 html2md 子依赖冲突 | **不要设 `panic = "abort"`** |
 | macOS updater 产物缺失 | `--bundles dmg` 不产出 updater | **必须 `--bundles app,dmg`** |
-| 文件名空格问题 | productName "Knowledge Base" 含空格 | CI 产物前缀变 `Knowledge.Base_`（空格→点）|
-| 用户漏下 `.exe` | 浏览器只给 `.sig` | 清点 9 个文件都要齐全 |
+| 文件名空格问题 | productName "Knowledge Base" 含空格 | CI 产物前缀统一为 `Knowledge.Base_`（空格→点）—— Win/macOS/Linux 一致 |
+| API 下载脚本中文/Unicode 字符崩溃 | Windows GBK 控制台不能直出 ✓ 等字符 | **Python 必须加 `PYTHONIOENCODING=utf-8` 前缀**，输出用 ASCII 替代（`OK` / `MISSING`）|
+
+### Windows Git Bash 路径坑
+
+| 问题 | 根因 | 解决方案 |
+|------|------|---------|
+| `node -e` 读 `/tmp/xxx.json` 报 `ENOENT: 'E:\tmp\xxx.json'` | Git Bash 把 `/tmp` 解析为驱动器盘根的 `tmp/` | 用 `TMPV=$(cygpath -w "$TEMP")` 取真实临时目录 |
+| `cd "..."` 后下一条 `git` 又回到原目录 | Bash 工具默认每条命令独立工作目录 | 把 `cd ... && git ...` 写在一条 Bash 调用里，或用绝对路径 `git -C "$DIR" ...` |
+| docs 仓库 `git push origin master` 报 `'origin' does not appear to be a git repository` | docs 仓库 remote 名是 `gitee` + `github`，没有 `origin` | 用 `git push gitee master && git push github master` |
+
+### Gitee release 仓库历史分叉（已知问题）
+
+| 现象 | 根因 | 影响 / 处置 |
+|------|------|------------|
+| `git push gitee main:master` 报 non-fast-forward | 旧版本在 Gitee 直接推过 release commit，与 GitHub 历史已分叉 | **不影响主链路**（R2 + GitHub raw 端点正常）。本次跳过 Gitee 推送。后续如要修复，需手动选择保留谁的历史并强推一端 |
 
 ---
 
