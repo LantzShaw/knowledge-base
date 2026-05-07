@@ -121,4 +121,55 @@ export const Toggle = Node.create<ToggleOptions>({
           }),
     };
   },
+
+  // 三层 defining=true 让默认 Backspace 出不去，空折叠块没法删。
+  // 在 summary 起点 / content 第一段起点 + 整体为空时整块删掉。
+  addKeyboardShortcuts() {
+    return {
+      Backspace: ({ editor }) => {
+        const { selection } = editor.state;
+        if (!selection.empty) return false;
+        const { $from } = selection;
+        if ($from.parentOffset !== 0) return false;
+
+        const parentName = $from.parent.type.name;
+        const inSummary = parentName === "toggleSummary";
+        const inParagraph = parentName === "paragraph";
+        if (!inSummary && !inParagraph) return false;
+
+        let toggleDepth = -1;
+        for (let d = $from.depth - 1; d >= 0; d--) {
+          if ($from.node(d).type.name === "toggle") {
+            toggleDepth = d;
+            break;
+          }
+        }
+        if (toggleDepth < 0) return false;
+        const toggleNode = $from.node(toggleDepth);
+
+        // paragraph 必须是 toggleContent 的第一个直接子段
+        if (inParagraph) {
+          const grand = $from.node($from.depth - 1);
+          if (grand.type.name !== "toggleContent") return false;
+          if (grand.firstChild !== $from.parent) return false;
+        }
+
+        const summary = toggleNode.child(0);
+        const content = toggleNode.child(1);
+        const summaryEmpty = summary.content.size === 0;
+        const contentEmpty =
+          content.childCount === 1 &&
+          content.firstChild?.type.name === "paragraph" &&
+          content.firstChild.content.size === 0;
+        if (!summaryEmpty || !contentEmpty) return false;
+
+        const togglePos = $from.before(toggleDepth);
+        return editor
+          .chain()
+          .focus()
+          .deleteRange({ from: togglePos, to: togglePos + toggleNode.nodeSize })
+          .run();
+      },
+    };
+  },
 });

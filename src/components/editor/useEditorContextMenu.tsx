@@ -43,7 +43,8 @@ type EditorMenuPayload =
   | { kind: "image"; src: string; el: HTMLElement }
   | { kind: "video"; src: string; el: HTMLElement }
   | { kind: "file"; href: string; el: HTMLElement }
-  | { kind: "annotation"; comment: string; el: HTMLElement };
+  | { kind: "annotation"; comment: string; el: HTMLElement }
+  | { kind: "toggle"; el: HTMLElement };
 
 /**
  * Tiptap MutationObserver 渲染期会把 `kb-asset://` 替换成 Tauri 的 asset 协议 URL，
@@ -235,6 +236,18 @@ export function useEditorContextMenu(
           );
           return;
         }
+      }
+
+      // 5. 折叠块：放在最后让块内的图片/视频/链接/批注先匹配各自的菜单，
+      // 落到 summary 文本 / content 空白 / 三角图标 时才弹折叠块菜单
+      const toggleEl = target.closest<HTMLElement>(".tiptap-toggle");
+      if (toggleEl) {
+        e.preventDefault();
+        ctx.open(
+          { clientX: e.clientX, clientY: e.clientY },
+          { kind: "toggle", el: toggleEl },
+        );
+        return;
       }
 
       // 其他位置（普通文本 / 列表 / 表格等）→ 不拦，走浏览器原生菜单
@@ -578,6 +591,21 @@ export function useEditorContextMenu(
             } catch (err) {
               message.error(`删除失败：${err}`);
             }
+          },
+        },
+      ];
+    }
+
+    if (p.kind === "toggle") {
+      return [
+        {
+          key: "delete",
+          label: "删除折叠块",
+          icon: <Trash2 size={13} />,
+          danger: true,
+          onClick: () => {
+            ctx.close();
+            deleteNodeAtElement(p.el);
           },
         },
       ];
