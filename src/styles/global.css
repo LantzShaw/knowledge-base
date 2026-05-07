@@ -1271,6 +1271,23 @@ body,
   border-bottom-color: color-mix(in srgb, var(--ant-color-text, #fff) 8%, transparent);
 }
 
+/* ─── 查找替换：命中高亮 ───────────────────────────────────────── */
+.kb-search-match {
+  background-color: color-mix(in srgb, #faad14 35%, transparent);
+  border-radius: 2px;
+}
+.kb-search-active {
+  background-color: color-mix(in srgb, #fa8c16 65%, transparent);
+  outline: 1px solid #fa8c16;
+  outline-offset: 0;
+}
+[data-theme-category="dark"] .kb-search-match {
+  background-color: color-mix(in srgb, #faad14 30%, transparent);
+}
+[data-theme-category="dark"] .kb-search-active {
+  background-color: color-mix(in srgb, #fa8c16 55%, transparent);
+}
+
 /* ─── 视频块（带 toolbar + 高亮动画） ───────────────────────────── */
 .tiptap-video-block {
   border: 1px solid color-mix(in srgb, var(--ant-color-text, #000) 8%, transparent);
