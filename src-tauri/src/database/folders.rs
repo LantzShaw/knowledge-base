@@ -12,6 +12,7 @@ struct FolderRow {
     parent_id: Option<i64>,
     sort_order: i32,
     note_count: usize,
+    color: Option<String>,
 }
 
 impl Database {
@@ -38,7 +39,30 @@ impl Database {
             sort_order: 0,
             children: vec![],
             note_count: 0,
+            color: None,
         })
+    }
+
+    /// 设置文件夹颜色
+    ///
+    /// `color` 传 `Some("#1677ff")` 设色，传 `None` 清除（恢复默认主题色）。
+    /// 不在这里做格式校验 —— Service 层判断 hex 合法性。
+    pub fn set_folder_color(&self, id: i64, color: Option<&str>) -> Result<(), AppError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| AppError::Custom(e.to_string()))?;
+
+        let affected = conn.execute(
+            "UPDATE folders SET color = ?1 WHERE id = ?2",
+            params![color, id],
+        )?;
+
+        if affected == 0 {
+            return Err(AppError::NotFound(format!("文件夹 {} 不存在", id)));
+        }
+
+        Ok(())
     }
 
     /// 按 (parent_id, name) 查找文件夹：用于导入时同名合并/复用，避免重复创建。
@@ -248,7 +272,8 @@ impl Database {
 
         let mut stmt = conn.prepare(
             "SELECT f.id, f.name, f.parent_id, f.sort_order,
-                    (SELECT COUNT(*) FROM notes WHERE folder_id = f.id) as note_count
+                    (SELECT COUNT(*) FROM notes WHERE folder_id = f.id) as note_count,
+                    f.color
              FROM folders f ORDER BY f.sort_order, f.name",
         )?;
 
@@ -260,6 +285,7 @@ impl Database {
                     parent_id: row.get(2)?,
                     sort_order: row.get(3)?,
                     note_count: row.get(4)?,
+                    color: row.get(5)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -281,6 +307,7 @@ fn build_folder_tree(rows: &[FolderRow]) -> Vec<Folder> {
                 sort_order: r.sort_order,
                 children: build_children(rows, Some(r.id)),
                 note_count: r.note_count,
+                color: r.color.clone(),
             })
             .collect()
     }

@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use crate::error::AppError;
 
 /// 当前 Schema 版本
-pub const SCHEMA_VERSION: i32 = 34;
+pub const SCHEMA_VERSION: i32 = 35;
 
 /// 获取数据库版本
 pub fn get_version(conn: &Connection) -> Result<i32, AppError> {
@@ -64,6 +64,7 @@ pub fn migrate(conn: &Connection) -> Result<(), AppError> {
             31 => migrate_v31_to_v32(conn)?,
             32 => migrate_v32_to_v33(conn)?,
             33 => migrate_v33_to_v34(conn)?,
+            34 => migrate_v34_to_v35(conn)?,
             _ => {
                 return Err(AppError::Custom(format!("未知的数据库版本: {}", version)));
             }
@@ -1424,5 +1425,21 @@ fn migrate_v33_to_v34(conn: &Connection) -> Result<(), AppError> {
     )?;
 
     set_version(conn, 34)?;
+    Ok(())
+}
+
+/// v34 -> v35: 文件夹自定义颜色
+///
+/// 给 `folders` 表加 `color TEXT` 列，存十六进制颜色（如 `#1677ff`）。
+/// `NULL` 表示沿用默认色（由前端决定 = `token.colorPrimary`）。
+fn migrate_v34_to_v35(conn: &Connection) -> Result<(), AppError> {
+    log::info!("数据库迁移: v34 -> v35 (folders.color 自定义颜色)");
+
+    let cols = list_columns(conn, "folders")?;
+    if !cols.iter().any(|c| c == "color") {
+        conn.execute_batch("ALTER TABLE folders ADD COLUMN color TEXT;")?;
+    }
+
+    set_version(conn, 35)?;
     Ok(())
 }

@@ -906,6 +906,7 @@ pub fn run() {
             commands::folders::move_folder,
             commands::folders::reorder_folders,
             commands::folders::ensure_folder_path,
+            commands::folders::set_folder_color,
             // 搜索模块
             commands::search::search_notes,
             // 回收站模块

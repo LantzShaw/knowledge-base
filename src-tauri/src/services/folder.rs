@@ -69,6 +69,26 @@ impl FolderService {
         db.list_folders_tree()
     }
 
+    /// 设置文件夹颜色（hex `#RRGGBB`，传空字符串/None 清除）
+    pub fn set_color(db: &Database, id: i64, color: Option<&str>) -> Result<(), AppError> {
+        let normalized = color.map(str::trim).filter(|s| !s.is_empty());
+
+        if let Some(c) = normalized {
+            // 简单 hex 校验：以 # 开头 + 3 或 6 位十六进制
+            let hex = c.strip_prefix('#').unwrap_or(c);
+            let hex_ok = (hex.len() == 3 || hex.len() == 6)
+                && hex.chars().all(|ch| ch.is_ascii_hexdigit());
+            if !c.starts_with('#') || !hex_ok {
+                return Err(AppError::InvalidInput(format!(
+                    "无效的颜色值: {} (期望 #RGB 或 #RRGGBB)",
+                    c
+                )));
+            }
+        }
+
+        db.set_folder_color(id, normalized)
+    }
+
     /// T-006: 把 "工作/周报" 这样的路径字符串解析成 folder_id，不存在则一路递归创建
     ///
     /// - 路径分隔符用 "/"（跨平台友好，避免 Windows `\`）

@@ -125,6 +125,8 @@ pub struct Folder {
     pub sort_order: i32,
     pub children: Vec<Folder>,
     pub note_count: usize,
+    /// 自定义图标颜色（十六进制 `#1677ff`）；None = 默认主题色
+    pub color: Option<String>,
 }
 
 // ─── 标签 ─────────────────────────────────────

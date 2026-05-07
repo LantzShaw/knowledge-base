@@ -114,6 +114,8 @@ export interface Folder {
   sort_order: number;
   children: Folder[];
   note_count: number;
+  /** 自定义图标颜色（hex `#RRGGBB`）；null = 默认主题色 */
+  color: string | null;
 }
 
 // ─── 标签 ─────────────────────────────────────

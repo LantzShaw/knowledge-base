@@ -51,6 +51,8 @@ import {
   importWordFlow,
 } from "@/lib/noteCreator";
 import { ImportPreviewModal } from "@/components/ImportPreviewModal";
+import { TagColorPicker } from "@/components/TagColorPicker";
+import { Palette } from "lucide-react";
 
 /**
  * NotesPanel —— Activity Bar 模式下"笔记"视图的主面板内容。
@@ -100,7 +102,7 @@ function collectAllKeys(folders: Folder[]): string[] {
 /** Tree DataNode 扩展：携带 isNote 标志和原始数据，便于 renderTitle 区分 */
 type TreeNoteData = { isNote: true; note: Note };
 /** isChild：是否为子文件夹（非根级），用于 renderTitle 加视觉小点区分层级 */
-type TreeFolderData = { isNote: false; isChild: boolean };
+type TreeFolderData = { isNote: false; isChild: boolean; color: string | null };
 type TreeNodeData = TreeNoteData | TreeFolderData;
 type EnrichedNode = DataNode & { data?: TreeNodeData };
 
@@ -150,7 +152,7 @@ function foldersToTreeData(
       // 拖拽落在叶子上会被当成"同级排序"，无法 drop-into 折叠的空文件夹。
       isLeaf: false,
       children: children.length ? children : undefined,
-      data: { isNote: false, isChild: depth > 0 },
+      data: { isNote: false, isChild: depth > 0, color: f.color ?? null },
     };
   });
 }
@@ -161,6 +163,18 @@ function findFolderName(folders: Folder[], id: number): string | null {
     if (f.id === id) return f.name;
     if (f.children.length) {
       const found = findFolderName(f.children, id);
+      if (found !== null) return found;
+    }
+  }
+  return null;
+}
+
+/** 在文件夹树中按 id 查找当前 color（未设返回 null） */
+function findFolderColor(folders: Folder[], id: number): string | null {
+  for (const f of folders) {
+    if (f.id === id) return f.color ?? null;
+    if (f.children.length) {
+      const found = findFolderColor(f.children, id);
       if (found !== null) return found;
     }
   }
@@ -1170,6 +1184,41 @@ export function NotesPanel() {
       },
       { type: "divider" },
       {
+        key: "color-label",
+        label: (
+          <span
+            className="flex items-center gap-2"
+            style={{ color: token.colorTextSecondary, fontSize: 12 }}
+          >
+            <Palette size={12} />
+            图标颜色
+          </span>
+        ),
+        disabled: true,
+      },
+      {
+        type: "custom",
+        key: "color-picker",
+        render: () => (
+          <div className="px-2 pb-2 pt-1">
+            <TagColorPicker
+              value={findFolderColor(folders, folderId)}
+              allowClear
+              onChange={async (c) => {
+                close();
+                try {
+                  await folderApi.setColor(folderId, c);
+                  useAppStore.getState().bumpFoldersRefresh();
+                } catch (e) {
+                  message.error(String(e));
+                }
+              }}
+            />
+          </div>
+        ),
+      },
+      { type: "divider" },
+      {
         key: "rename",
         icon: <Edit3 size={14} />,
         label: "重命名",
@@ -1472,6 +1521,10 @@ export function NotesPanel() {
     const folderData = (node as EnrichedNode).data;
     const isChildFolder =
       folderData && folderData.isNote === false && folderData.isChild;
+    const folderColor =
+      folderData && folderData.isNote === false && folderData.color
+        ? folderData.color
+        : token.colorPrimary;
     return (
       <span
         className="flex items-center gap-1.5 w-full"
@@ -1495,7 +1548,7 @@ export function NotesPanel() {
               alignItems: "center",
             }}
           >
-            <FolderFilled style={{ color: token.colorPrimary }} />
+            <FolderFilled style={{ color: folderColor }} />
             <span
               aria-hidden
               style={{
@@ -1512,7 +1565,7 @@ export function NotesPanel() {
             />
           </span>
         ) : (
-          <FolderFilled style={{ flexShrink: 0, color: token.colorPrimary }} />
+          <FolderFilled style={{ flexShrink: 0, color: folderColor }} />
         )}
         <span className="truncate">{display}</span>
       </span>
@@ -1547,7 +1600,7 @@ export function NotesPanel() {
       title: uncatTitle,
       isLeaf: false,
       children: uncatChildren.length ? uncatChildren : undefined,
-      data: { isNote: false, isChild: false },
+      data: { isNote: false, isChild: false, color: null },
     });
     return folderTree;
   }, [folders, creatingUnderKey, notesByFolder, tabTitleByNoteId, uncategorizedNotes]);

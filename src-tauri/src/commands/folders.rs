@@ -53,6 +53,18 @@ pub fn reorder_folders(
     FolderService::reorder(&state.db, &ordered_ids).map_err(|e| e.to_string())
 }
 
+/// 设置文件夹颜色
+///
+/// `color` 传 `null` 或空串 = 清除（恢复默认主题色）。
+#[tauri::command]
+pub fn set_folder_color(
+    state: tauri::State<'_, AppState>,
+    id: i64,
+    color: Option<String>,
+) -> Result<(), String> {
+    FolderService::set_color(&state.db, id, color.as_deref()).map_err(|e| e.to_string())
+}
+
 /// T-006: 按路径字符串（如 "工作/周报"）确保文件夹存在；不存在则递归创建
 ///
 /// - 空串 / 纯空白 → 返回 null（根目录）

@@ -302,6 +302,9 @@ export const folderApi = {
   /** T-006: 按 "工作/周报" 这样的路径字符串递归确保存在，返回最深一级 folder id */
   ensurePath: (path: string) =>
     invoke<number | null>("ensure_folder_path", { path }),
+  /** 设置文件夹颜色（hex `#RRGGBB`）；传 null 清除 */
+  setColor: (id: number, color: string | null) =>
+    invoke<void>("set_folder_color", { id, color }),
 };
 
 /** 搜索 API */
