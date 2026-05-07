@@ -207,8 +207,9 @@ export const Indent = Extension.create({
 });
 
 /**
- * paragraph / heading 的 markdown 序列化：indent>0 时输出 HTML，让 Markdown
- * 文件保留缩进信息（`html: true` + parseHTML 闭环）；indent=0 时退回 prosemirror-markdown
+ * paragraph / heading 的 markdown 序列化：当节点带"非默认"属性（缩进 indent>0
+ * 或对齐 textAlign 非 left）时输出 HTML 块，让 Markdown 文件保留这些可视格式
+ * （依赖 `html: true` + 各属性 parseHTML 闭环）；都为默认时退回 prosemirror-markdown
  * 默认序列化（普通段落 / # 标题），保持 .md 可读性。
  *
  * 必须把 StarterKit 的 paragraph / heading 关掉换成这两个，否则会和我们这里的
@@ -221,14 +222,17 @@ function makeIndentMarkdownStorage(parentStorage: Record<string, unknown>) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       serialize(state: any, node: any) {
         const indent = Number(node.attrs?.indent || 0);
+        const textAlign = node.attrs?.textAlign as string | null | undefined;
+        const hasAlign = !!textAlign && textAlign !== "left";
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const editor = (this as any).editor;
         const htmlAllowed = !!editor?.storage?.markdown?.options?.html;
 
-        if (indent > 0 && htmlAllowed) {
-          // 走 HTML：renderHTML 已写入 data-indent + padding-left，
-          // 解析端 markdown-it 把 HTML 块原样保留 → ProseMirror 重建时
-          // paragraph/heading 的 parseHTML 从 data-indent 取回 indent attr。
+        if ((indent > 0 || hasAlign) && htmlAllowed) {
+          // 走 HTML：renderHTML 会同时合并 data-indent / style:padding-left /
+          // style:text-align（TextAlign / Indent 各自的 addGlobalAttributes
+          // 注入），解析端 markdown-it 把 HTML 块原样保留 → ProseMirror 重建时
+          // paragraph/heading 的 parseHTML 把这些属性还原。
           const html = getHTMLFromFragment(Fragment.from(node), node.type.schema);
           state.write(html);
           state.closeBlock(node);
