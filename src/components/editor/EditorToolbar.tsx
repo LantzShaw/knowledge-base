@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useReducer } from "react";
 import type { Editor } from "@tiptap/react";
 import { Button, Divider, Tooltip, Modal, Input, message, Dropdown, Select, ColorPicker } from "antd";
 import type { MenuProps } from "antd";
@@ -74,6 +74,29 @@ interface ToolItem {
 
 export function EditorToolbar({ editor, noteId, ensureNoteId }: ToolbarProps) {
   const formatPainter = useFormatPainter(editor);
+  // 订阅 editor 的 selection / transaction 事件，让 toolbar 跟随光标位置刷新：
+  // 段落格式下拉的 label（getCurrentBlockType）和按钮 active 高亮（isActive）
+  // 都依赖最新 editor 状态，但 EditorToolbar 自身没有 React state 联动，
+  // 必须主动 forceUpdate 才能让光标在标题/正文之间移动时下拉文本同步变化。
+  // 用 RAF 节流避免连续 transaction（如打字）触发过多重渲染。
+  const [, forceTick] = useReducer((x: number) => x + 1, 0);
+  useEffect(() => {
+    let raf = 0;
+    const schedule = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        forceTick();
+      });
+    };
+    editor.on("selectionUpdate", schedule);
+    editor.on("transaction", schedule);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      editor.off("selectionUpdate", schedule);
+      editor.off("transaction", schedule);
+    };
+  }, [editor]);
   const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
   /** 时间戳弹窗 state */
