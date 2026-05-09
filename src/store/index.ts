@@ -94,6 +94,37 @@ export const EDITOR_FONT_DEFAULTS = {
   lineHeight: 1.8,
 };
 
+/**
+ * 界面缩放因子档位（持久化）。
+ * 1.0 = 系统默认；< 1 紧凑、> 1 放大。仅作用于 UI（antd 组件 + 自定义 CSS 的 token），
+ * 不动浏览器 root font-size，避免 Tailwind text-sm 等意外漂移。
+ *
+ * 建议默认值：1.0；首次启动会按显示器逻辑分辨率推荐一档（用户未手动改时生效）。
+ */
+export const UI_SCALE_OPTIONS = [0.85, 0.9, 1.0, 1.1, 1.25, 1.5] as const;
+export const UI_SCALE_MIN = 0.75;
+export const UI_SCALE_MAX = 2.0;
+export const UI_SCALE_DEFAULT = 1.0;
+
+/**
+ * 根据当前显示器逻辑宽度推荐合适的 uiScale 档位。
+ *
+ * 桌面 Tauri 应用的 WebView 已跟随系统 DPI 缩放，所以 4K 屏 + 系统 200% 缩放后
+ * 拿到的 `screen.width` 落到约 1920；这里只看"逻辑像素宽度"决定 UI 密度。
+ *
+ * - < 1400  : 0.9   （1366×768 笔记本紧凑屏）
+ * - 1400~2047: 1.0  （1080p / 1440p 主流）
+ * - 2048~2559: 1.1  （高 DPI 笔记本 / 2K 显示器系统缩放低）
+ * - ≥ 2560  : 1.25  （大显示器原生 2K/4K 不缩放）
+ */
+export function suggestUiScale(): number {
+  const w = typeof window !== "undefined" ? window.screen?.width ?? 1920 : 1920;
+  if (w >= 2560) return 1.25;
+  if (w >= 2048) return 1.1;
+  if (w < 1400) return 0.9;
+  return 1.0;
+}
+
 // 开发/生产数据隔离：dev 用 dev-settings.json，prod 用 settings.json
 // 与后端 cfg!(debug_assertions) 加 dev- 前缀对齐；旧文件由后端 migrate_to_dev_prefix 自动迁移
 const STORE_FILE = import.meta.env.DEV ? "dev-settings.json" : "settings.json";
@@ -151,6 +182,12 @@ interface AppStore {
    * VS Code 行为：点击当前高亮图标 = 折叠/展开 SidePanel。
    */
   sidePanelVisible: boolean;
+  /**
+   * ActivityBar 自动隐藏开关（持久化）。
+   * 开启时 ActivityBar 不再占据布局宽度，鼠标移到屏幕左边缘 6px 热区时
+   * 才以浮层形式弹出；离开后 150ms 自动收起。默认关闭=始终显示。
+   */
+  autoHideActivityBar: boolean;
   /** 搜索视图：最近搜索关键词（最新在前，最多 RECENT_SEARCHES_MAX 条，持久化） */
   recentSearches: string[];
   /** 编辑器字体族（持久化） */
@@ -159,6 +196,15 @@ interface AppStore {
   editorFontSize: number;
   /** 编辑器行距倍数（持久化） */
   editorLineHeight: number;
+  /**
+   * 全局界面缩放因子（持久化）。
+   * 取值见 UI_SCALE_OPTIONS；默认 1.0（首启会被 suggestUiScale 推荐值覆盖一次）。
+   * 通过 :root --ui-scale 变量 + AntD ConfigProvider token 联动到全 UI。
+   */
+  uiScale: number;
+  /** 用户是否已经手动改过 uiScale（持久化）。
+   *  false 时首启允许 suggestUiScale 自动推荐覆盖；true 则始终尊重用户选择。 */
+  uiScaleUserSet: boolean;
   /** 笔记编辑页：右侧大纲面板是否显示（持久化）。标题数 < 2 时由组件自动隐藏，与此独立 */
   outlineVisible: boolean;
   /**
@@ -169,6 +215,11 @@ interface AppStore {
   notesCollapsedFolderKeys: string[];
   /** NotesPanel 末尾"未分类"虚拟节点是否展开（持久化） */
   notesUncategorizedExpanded: boolean;
+  /**
+   * NotesPanel 视图开关：true = 只显示文件夹节点，隐藏笔记叶子 + 隐藏"未分类"虚拟根（持久化）。
+   * 跳转到具体笔记（/notes/:id）时会被自动关闭，避免目标笔记被隐藏。
+   */
+  notesShowOnlyFolders: boolean;
   /**
    * "全局新建笔记"时套用的默认文件夹 id；null = 没设默认（新建到根目录）。
    * 由后端 app_config 持久化，应用启动时拉一次到 store。
@@ -254,6 +305,8 @@ interface AppStore {
   setSidePanelVisible: (visible: boolean) => void;
   /** 切换 SidePanel 可见性（等价于 setSidePanelVisible(!visible)） */
   toggleSidePanel: () => void;
+  /** 设置 ActivityBar 自动隐藏开关（持久化） */
+  setAutoHideActivityBar: (on: boolean) => void;
   /** 推入一条最近搜索（去重、置顶、最多 RECENT_SEARCHES_MAX 条） */
   pushRecentSearch: (q: string) => void;
   /** 删除一条最近搜索 */
@@ -268,6 +321,10 @@ interface AppStore {
   setEditorLineHeight: (lineHeight: number) => void;
   /** 重置编辑器字体到默认值 */
   resetEditorTypography: () => void;
+  /** 设置全局界面缩放（自动 clamp 到 [UI_SCALE_MIN, UI_SCALE_MAX]，标记用户已手动设置） */
+  setUiScale: (scale: number) => void;
+  /** 重置 uiScale 为 suggestUiScale() 推荐值（一键回归"自动"） */
+  resetUiScale: () => void;
   /** 切换大纲面板可见性（persist） */
   toggleOutline: () => void;
   /** 设置大纲面板可见性（persist） */
@@ -285,6 +342,8 @@ interface AppStore {
   pruneNotesCollapsedFolders: (existingKeys: string[]) => void;
   /** 设置"未分类"展开/收起 */
   setNotesUncategorizedExpanded: (expanded: boolean) => void;
+  /** 设置 NotesPanel "只显示文件夹"开关 */
+  setNotesShowOnlyFolders: (only: boolean) => void;
   /** 标记 NotesPanel 已完成首次"全部折叠"初始化（一次性） */
   markNotesFoldersInitialCollapseDone: () => void;
   /** 启动时从 app_config 拉默认文件夹 / 标签到 store（失败静默） */
@@ -387,13 +446,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
   mobileTabKeys: [...DEFAULT_MOBILE_TAB_KEYS],
   sidePanelWidth: SIDE_PANEL_DEFAULT_WIDTH,
   sidePanelVisible: true,
+  autoHideActivityBar: false,
   recentSearches: [],
   editorFontFamily: EDITOR_FONT_DEFAULTS.family,
   editorFontSize: EDITOR_FONT_DEFAULTS.size,
   editorLineHeight: EDITOR_FONT_DEFAULTS.lineHeight,
+  uiScale: UI_SCALE_DEFAULT,
+  uiScaleUserSet: false,
   outlineVisible: true,
   notesCollapsedFolderKeys: [],
   notesUncategorizedExpanded: false,
+  notesShowOnlyFolders: false,
   notesFoldersInitialCollapseDone: false,
   defaultFolderId: null,
   defaultTagIds: [],
@@ -537,6 +600,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }),
   setSidePanelVisible: (visible) => set({ sidePanelVisible: visible }),
   toggleSidePanel: () => set((s) => ({ sidePanelVisible: !s.sidePanelVisible })),
+  setAutoHideActivityBar: (on) => set({ autoHideActivityBar: on }),
   pushRecentSearch: (q) => {
     const trimmed = q.trim();
     if (!trimmed) return;
@@ -583,6 +647,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
       editorFontSize: EDITOR_FONT_DEFAULTS.size,
       editorLineHeight: EDITOR_FONT_DEFAULTS.lineHeight,
     }),
+  setUiScale: (scale) => {
+    const clamped = Math.max(UI_SCALE_MIN, Math.min(UI_SCALE_MAX, Number(scale) || UI_SCALE_DEFAULT));
+    set({ uiScale: clamped, uiScaleUserSet: true });
+  },
+  resetUiScale: () => {
+    set({ uiScale: suggestUiScale(), uiScaleUserSet: false });
+  },
   toggleOutline: () => set((s) => ({ outlineVisible: !s.outlineVisible })),
   setOutlineVisible: (visible) => set({ outlineVisible: visible }),
   setNotesFolderCollapsed: (key, collapsed) =>
@@ -611,6 +682,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }),
   setNotesUncategorizedExpanded: (expanded) =>
     set({ notesUncategorizedExpanded: expanded }),
+  setNotesShowOnlyFolders: (only) => set({ notesShowOnlyFolders: only }),
   markNotesFoldersInitialCollapseDone: () =>
     set({ notesFoldersInitialCollapseDone: true }),
   loadNoteDefaults: async () => {
@@ -738,6 +810,18 @@ export function applyEditorTypography(state: {
   root.style.setProperty("--editor-line-height", String(state.editorLineHeight));
 }
 
+/**
+ * 把 uiScale 写到 :root 的 --ui-scale 变量上，供自定义 CSS 用 calc() 引用。
+ *
+ * 故意不动 root font-size：避免 Tailwind 的 text-sm/rem 工具类被意外整体放大或缩小。
+ * antd 组件的缩放走 ConfigProvider token，自定义 CSS 由 P1 阶段把硬编码 px 收敛到
+ * 用 calc(var(--kb-font-base) * var(--ui-scale)) 度量后才完整生效。
+ */
+export function applyUiScale(scale: number) {
+  const root = document.documentElement;
+  root.style.setProperty("--ui-scale", String(scale));
+}
+
 /** 从 tauri-plugin-store 恢复持久化的偏好（主题 + 窗口置顶） */
 export async function loadThemeFromStore() {
   try {
@@ -765,6 +849,10 @@ export async function loadThemeFromStore() {
     if (typeof spv === "boolean") {
       useAppStore.getState().setSidePanelVisible(spv);
     }
+    const ahab = await store.get<boolean>("autoHideActivityBar");
+    if (typeof ahab === "boolean") {
+      useAppStore.getState().setAutoHideActivityBar(ahab);
+    }
 
     // 恢复最近搜索
     const rs = await store.get<string[]>("recentSearches");
@@ -789,6 +877,18 @@ export async function loadThemeFromStore() {
     if (typeof lh === "number" && Number.isFinite(lh)) {
       useAppStore.getState().setEditorLineHeight(lh);
     }
+
+    // 恢复界面缩放：用户已手动设置过就尊重持久化值，否则用本机推荐值
+    const uiScaleUserSet = await store.get<boolean>("uiScaleUserSet");
+    const uiScalePersisted = await store.get<number>("uiScale");
+    if (uiScaleUserSet === true && typeof uiScalePersisted === "number" && Number.isFinite(uiScalePersisted)) {
+      const clamped = Math.max(UI_SCALE_MIN, Math.min(UI_SCALE_MAX, uiScalePersisted));
+      useAppStore.setState({ uiScale: clamped, uiScaleUserSet: true });
+    } else {
+      // 首启或老用户未设置过：套用屏幕推荐值（仅本次会话生效，等用户主动改时才标记 userSet）
+      useAppStore.setState({ uiScale: suggestUiScale(), uiScaleUserSet: false });
+    }
+
     const ov = await store.get<boolean>("outlineVisible");
     if (typeof ov === "boolean") {
       useAppStore.getState().setOutlineVisible(ov);
@@ -804,6 +904,10 @@ export async function loadThemeFromStore() {
     const nue = await store.get<boolean>("notesUncategorizedExpanded");
     if (typeof nue === "boolean") {
       useAppStore.getState().setNotesUncategorizedExpanded(nue);
+    }
+    const nsof = await store.get<boolean>("notesShowOnlyFolders");
+    if (typeof nsof === "boolean") {
+      useAppStore.getState().setNotesShowOnlyFolders(nsof);
     }
     const nficd = await store.get<boolean>("notesFoldersInitialCollapseDone");
     if (typeof nficd === "boolean") {
@@ -826,6 +930,7 @@ export async function loadThemeFromStore() {
     // 不论加载成功失败，都把当前 store 值（可能是默认值，也可能是已恢复值）
     // 同步到 CSS 变量，确保首次渲染就用对字体而不是闪一下默认再切。
     applyEditorTypography(useAppStore.getState());
+    applyUiScale(useAppStore.getState().uiScale);
   }
 }
 
@@ -839,13 +944,17 @@ export async function saveThemeToStore() {
       alwaysOnTop,
       sidePanelWidth,
       sidePanelVisible,
+      autoHideActivityBar,
       recentSearches,
       editorFontFamily,
       editorFontSize,
       editorLineHeight,
+      uiScale,
+      uiScaleUserSet,
       outlineVisible,
       notesCollapsedFolderKeys,
       notesUncategorizedExpanded,
+      notesShowOnlyFolders,
       notesFoldersInitialCollapseDone,
       notesHeadingFolded,
     } = useAppStore.getState();
@@ -856,13 +965,17 @@ export async function saveThemeToStore() {
     await store.set("alwaysOnTop", alwaysOnTop);
     await store.set("sidePanelWidth", sidePanelWidth);
     await store.set("sidePanelVisible", sidePanelVisible);
+    await store.set("autoHideActivityBar", autoHideActivityBar);
     await store.set("recentSearches", recentSearches);
     await store.set("editorFontFamily", editorFontFamily);
     await store.set("editorFontSize", editorFontSize);
     await store.set("editorLineHeight", editorLineHeight);
+    await store.set("uiScale", uiScale);
+    await store.set("uiScaleUserSet", uiScaleUserSet);
     await store.set("outlineVisible", outlineVisible);
     await store.set("notesCollapsedFolderKeys", notesCollapsedFolderKeys);
     await store.set("notesUncategorizedExpanded", notesUncategorizedExpanded);
+    await store.set("notesShowOnlyFolders", notesShowOnlyFolders);
     await store.set(
       "notesFoldersInitialCollapseDone",
       notesFoldersInitialCollapseDone,
@@ -880,7 +993,7 @@ useAppStore.subscribe((state) => {
   // notesHeadingFolded 摘要：用 entries 数 + 总 anchor 数 简化对比，避免每次 stringify 大对象
   const headingFoldEntries = Object.entries(state.notesHeadingFolded);
   const headingFoldKey = `${headingFoldEntries.length}:${headingFoldEntries.reduce((acc, [, v]) => acc + v.length, 0)}:${headingFoldEntries.map(([k, v]) => `${k}=${v.join(",")}`).join("|")}`;
-  const key = `${state.lightTheme}|${state.darkTheme}|${state.themeCategory}|${state.alwaysOnTop}|${state.sidePanelWidth}|${state.sidePanelVisible}|${state.recentSearches.join(",")}|${state.editorFontFamily}|${state.editorFontSize}|${state.editorLineHeight}|${state.outlineVisible}|${state.notesCollapsedFolderKeys.join(",")}|${state.notesUncategorizedExpanded}|${state.notesFoldersInitialCollapseDone}|${headingFoldKey}`;
+  const key = `${state.lightTheme}|${state.darkTheme}|${state.themeCategory}|${state.alwaysOnTop}|${state.sidePanelWidth}|${state.sidePanelVisible}|${state.autoHideActivityBar}|${state.recentSearches.join(",")}|${state.editorFontFamily}|${state.editorFontSize}|${state.editorLineHeight}|${state.uiScale}|${state.uiScaleUserSet}|${state.outlineVisible}|${state.notesCollapsedFolderKeys.join(",")}|${state.notesUncategorizedExpanded}|${state.notesShowOnlyFolders}|${state.notesFoldersInitialCollapseDone}|${headingFoldKey}`;
   if (key !== _prevPersistKey) {
     _prevPersistKey = key;
     saveThemeToStore();
@@ -894,5 +1007,14 @@ useAppStore.subscribe((state) => {
   if (key !== _prevTypographyKey) {
     _prevTypographyKey = key;
     applyEditorTypography(state);
+  }
+});
+
+// uiScale 变化时实时同步 :root --ui-scale，让自定义 CSS 立即响应
+let _prevUiScale = NaN;
+useAppStore.subscribe((state) => {
+  if (state.uiScale !== _prevUiScale) {
+    _prevUiScale = state.uiScale;
+    applyUiScale(state.uiScale);
   }
 });

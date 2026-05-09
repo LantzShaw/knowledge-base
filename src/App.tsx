@@ -24,8 +24,31 @@ function App() {
   const themeCategory = useAppStore((s) => s.themeCategory);
   const lightTheme = useAppStore((s) => s.lightTheme);
   const darkTheme = useAppStore((s) => s.darkTheme);
+  const uiScale = useAppStore((s) => s.uiScale);
   const activeTheme = themeCategory === "light" ? lightTheme : darkTheme;
-  const tokens = getAntdTokens(activeTheme);
+  const baseTokens = getAntdTokens(activeTheme);
+  // 全局界面缩放：把 antd 的 fontSize / controlHeight / padding 等关键 token
+  // 按 uiScale 倍率联动。1.0 时与 antd 默认完全一致；< 1 紧凑、> 1 放大。
+  // 自定义 CSS 通过 :root --ui-scale 由 store 同步（见 applyUiScale）。
+  const scaledTokens = {
+    ...baseTokens,
+    fontSize: Math.round(14 * uiScale),
+    fontSizeSM: Math.round(12 * uiScale),
+    fontSizeLG: Math.round(16 * uiScale),
+    fontSizeXL: Math.round(20 * uiScale),
+    fontSizeHeading1: Math.round(38 * uiScale),
+    fontSizeHeading2: Math.round(30 * uiScale),
+    fontSizeHeading3: Math.round(24 * uiScale),
+    fontSizeHeading4: Math.round(20 * uiScale),
+    fontSizeHeading5: Math.round(16 * uiScale),
+    controlHeight: Math.round(32 * uiScale),
+    controlHeightSM: Math.round(24 * uiScale),
+    controlHeightLG: Math.round(40 * uiScale),
+    paddingXS: Math.round(8 * uiScale),
+    paddingSM: Math.round(12 * uiScale),
+    padding: Math.round(16 * uiScale),
+    paddingLG: Math.round(24 * uiScale),
+  };
 
   // 同步主题到 DOM，供 CSS 选择器使用
   useEffect(() => {
@@ -87,7 +110,7 @@ function App() {
       theme={{
         algorithm:
           themeCategory === "dark" ? theme.darkAlgorithm : theme.defaultAlgorithm,
-        token: tokens,
+        token: scaledTokens,
       }}
     >
       <AntdApp style={{ height: "100%" }}>

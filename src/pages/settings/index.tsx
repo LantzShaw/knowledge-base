@@ -20,7 +20,7 @@ import {
   Radio,
 } from "antd";
 import { SyncOutlined, PlusOutlined, CheckCircleFilled, CheckCircleOutlined } from "@ant-design/icons";
-import { Trash2, Pencil, FolderInput, FolderOutput, LayoutTemplate, Power, ExternalLink, Type, Zap, Share2, Download } from "lucide-react";
+import { Trash2, Pencil, FolderInput, FolderOutput, LayoutTemplate, Power, ExternalLink, Type, Zap, Share2, Download, PanelLeft } from "lucide-react";
 import dayjs, { type Dayjs } from "dayjs";
 import { TimePicker } from "antd";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -36,6 +36,8 @@ import {
   EDITOR_FONT_STACKS,
   EDITOR_FONT_SIZE_OPTIONS,
   EDITOR_LINE_HEIGHT_OPTIONS,
+  UI_SCALE_OPTIONS,
+  suggestUiScale,
   type EditorFontFamily,
 } from "@/store";
 import { importWordFiles } from "@/lib/wordImport";
@@ -221,6 +223,7 @@ const MODEL_PRESETS: Record<string, { value: string; label: string }[]> = {
 const SETTINGS_NAV_ITEMS: { id: string; label: string }[] = [
   { id: "settings-update", label: "软件更新" },
   { id: "settings-startup", label: "启动设置" },
+  { id: "settings-sidebar", label: "侧边栏" },
   { id: "settings-features", label: "功能模块" },
   { id: "settings-hidden-pin", label: "隐藏笔记 PIN" },
   { id: "settings-shortcuts", label: "全局快捷键" },
@@ -462,6 +465,15 @@ function DesktopSettingsPage() {
   const setEditorFontSize = useAppStore((s) => s.setEditorFontSize);
   const setEditorLineHeight = useAppStore((s) => s.setEditorLineHeight);
   const resetEditorTypography = useAppStore((s) => s.resetEditorTypography);
+
+  // 全局界面缩放
+  const uiScale = useAppStore((s) => s.uiScale);
+  const setUiScale = useAppStore((s) => s.setUiScale);
+  const resetUiScale = useAppStore((s) => s.resetUiScale);
+  const recommendedScale = useMemo(() => suggestUiScale(), []);
+
+  const autoHideActivityBar = useAppStore((s) => s.autoHideActivityBar);
+  const setAutoHideActivityBar = useAppStore((s) => s.setAutoHideActivityBar);
 
   // 订阅全局 foldersRefreshTick：Sidebar 修改文件夹后自动刷新设置页的文件夹选项
   // 走 idle defer：从笔记页切到设置页瞬间，路由 commit + 编辑器 destroy 已经吃掉一帧时间，
@@ -1181,6 +1193,30 @@ function DesktopSettingsPage() {
         </div>
       </Card>
 
+      <Card
+        id="settings-sidebar"
+        title={
+          <span className="flex items-center gap-2">
+            <PanelLeft size={16} />
+            侧边栏
+          </span>
+        }
+      >
+        <div className="flex items-center justify-between py-1">
+          <div>
+            <div>自动隐藏侧边菜单栏</div>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              开启后，鼠标移开时自动隐藏左侧图标栏；
+              鼠标移到窗口最左侧 6px 区域会重新弹出。默认关闭=始终显示。
+            </Text>
+          </div>
+          <Switch
+            checked={autoHideActivityBar}
+            onChange={(on) => setAutoHideActivityBar(on)}
+          />
+        </div>
+      </Card>
+
       <FeatureModulesSection />
 
       <div id="settings-hidden-pin">
@@ -1190,6 +1226,48 @@ function DesktopSettingsPage() {
       <div id="settings-shortcuts">
         <ShortcutsSection />
       </div>
+
+      <Card
+        id="settings-ui-scale"
+        title={
+          <span className="flex items-center gap-2">
+            <LayoutTemplate size={16} />
+            界面显示
+          </span>
+        }
+        style={{ marginBottom: 16 }}
+      >
+        <div className="flex items-center justify-between py-1">
+          <div>
+            <div>界面缩放</div>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              整体放大/缩小所有按钮、菜单、表格等界面元素；不影响编辑器正文字号。
+              {Math.abs(uiScale - recommendedScale) > 0.001 && (
+                <>
+                  {" "}本机推荐：
+                  <Button
+                    type="link"
+                    size="small"
+                    style={{ padding: 0, fontSize: 12, height: "auto" }}
+                    onClick={resetUiScale}
+                  >
+                    {Math.round(recommendedScale * 100)}%
+                  </Button>
+                </>
+              )}
+            </Text>
+          </div>
+          <Select
+            value={uiScale}
+            onChange={setUiScale}
+            style={{ width: 140 }}
+            options={UI_SCALE_OPTIONS.map((s) => ({
+              value: s,
+              label: `${Math.round(s * 100)}%${s === 1.0 ? "（默认）" : ""}`,
+            }))}
+          />
+        </div>
+      </Card>
 
       <Card
         id="settings-editor"

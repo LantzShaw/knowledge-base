@@ -57,32 +57,32 @@ interface ActivityItem {
  */
 const MAIN_GROUPS: ActivityItem[][] = [
   // 概览
-  [{ view: "home", route: "/", label: "首页", icon: <Home size={18} />, core: true }],
+  [{ view: "home", route: "/", label: "首页", icon: <Home size={20} />, core: true }],
   // 创作 / 工作流
   [
-    { view: "notes", route: "/notes", label: "笔记", icon: <NotebookText size={18} />, core: true },
-    { view: "daily", route: "/daily", label: "每日笔记", icon: <Calendar size={18} /> },
-    { view: "tasks", route: "/tasks", label: "待办", icon: <CheckSquare size={18} /> },
-    { view: "cards", route: "/cards", label: "卡片复习", icon: <Layers size={18} /> },
+    { view: "notes", route: "/notes", label: "笔记", icon: <NotebookText size={20} />, core: true },
+    { view: "daily", route: "/daily", label: "每日笔记", icon: <Calendar size={20} /> },
+    { view: "tasks", route: "/tasks", label: "待办", icon: <CheckSquare size={20} /> },
+    { view: "cards", route: "/cards", label: "卡片复习", icon: <Layers size={20} /> },
   ],
   // 检索 / 发现
   [
-    { view: "search", route: "/search", label: "搜索", icon: <Search size={18} />, core: true },
-    { view: "tags", route: "/tags", label: "标签", icon: <Tags size={18} /> },
-    { view: "graph", route: "/graph", label: "知识图谱", icon: <GitBranch size={18} /> },
+    { view: "search", route: "/search", label: "搜索", icon: <Search size={20} />, core: true },
+    { view: "tags", route: "/tags", label: "标签", icon: <Tags size={20} /> },
+    { view: "graph", route: "/graph", label: "知识图谱", icon: <GitBranch size={20} /> },
   ],
   // AI 辅助
   [
-    { view: "ai", route: "/ai", label: "AI 问答", icon: <Bot size={18} /> },
-    { view: "prompts", route: "/prompts", label: "提示词", icon: <Sparkles size={18} /> },
+    { view: "ai", route: "/ai", label: "AI 问答", icon: <Bot size={20} /> },
+    { view: "prompts", route: "/prompts", label: "提示词", icon: <Sparkles size={20} /> },
   ],
 ];
 
 /** 底部视图（放最下方，视觉上与主视图分组） */
 const BOTTOM_ITEMS: ActivityItem[] = [
-  { view: "hidden", route: "/hidden", label: "隐藏笔记", icon: <EyeOff size={18} /> },
-  { view: "trash", route: "/trash", label: "回收站", icon: <Trash2 size={18} />, core: true },
-  { view: "about", route: "/about", label: "关于", icon: <Info size={18} />, core: true },
+  { view: "hidden", route: "/hidden", label: "隐藏笔记", icon: <EyeOff size={20} /> },
+  { view: "trash", route: "/trash", label: "回收站", icon: <Trash2 size={20} />, core: true },
+  { view: "about", route: "/about", label: "关于", icon: <Info size={20} />, core: true },
 ];
 
 /** 路由 → ActiveView 的反查映射（用于根据 URL 推导高亮态） */
@@ -225,7 +225,7 @@ export function ActivityBar() {
             flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
-            gap: 2,
+            gap: 5,
             padding: "4px 2px",
             background: isActive ? `${token.colorPrimary}14` : "transparent",
             color: isActive ? token.colorPrimary : token.colorTextSecondary,
@@ -236,7 +236,7 @@ export function ActivityBar() {
           {iconNode}
           <span
             style={{
-              fontSize: 10,
+              fontSize: 12,
               lineHeight: 1.1,
               fontWeight: isActive ? 600 : 400,
               maxWidth: "100%",

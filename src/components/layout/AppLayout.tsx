@@ -115,6 +115,7 @@ export function AppLayout() {
     activeView,
     sidePanelWidth, setSidePanelWidth,
     sidePanelVisible, toggleSidePanel,
+    autoHideActivityBar,
   } = useAppStore();
   const activeTheme = themeCategory === "light" ? lightTheme : darkTheme;
   const { token } = antdTheme.useToken();
@@ -148,6 +149,37 @@ export function AppLayout() {
   // 这样 panel 出现/消失不会让主内容横向 reflow，彻底消掉"home → notes"卡顿
   const siderWidth = ACTIVITY_BAR_WIDTH;
 
+  // ActivityBar 自动隐藏：开启后 Sider 不参与布局（主区让出 64px），ActivityBar 改为
+  // 浮层；鼠标进入屏幕左边缘 6px 热区或浮层本体时弹出，离开后 150ms 自动收起。
+  // 用 ref 持有定时器避免 React rerender 引入抖动。
+  const [activityBarShown, setActivityBarShown] = useState(false);
+  const hideTimerRef = useRef<number | null>(null);
+  const showActivityBar = useCallback(() => {
+    if (hideTimerRef.current != null) {
+      window.clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+    setActivityBarShown(true);
+  }, []);
+  const scheduleHideActivityBar = useCallback(() => {
+    if (hideTimerRef.current != null) window.clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = window.setTimeout(() => {
+      setActivityBarShown(false);
+      hideTimerRef.current = null;
+    }, 150);
+  }, []);
+  useEffect(() => {
+    // 关闭自动隐藏后清掉残留定时器；浮层不再渲染，状态值无所谓
+    if (!autoHideActivityBar && hideTimerRef.current != null) {
+      window.clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+  }, [autoHideActivityBar]);
+
+  // 自动隐藏开启时 Sider 不参与布局，主区获得 64px 额外空间
+  const effectiveSiderWidth =
+    !focusMode && !autoHideActivityBar ? ACTIVITY_BAR_WIDTH : 0;
+
   // SidePanel 容器 DOM 引用：拖拽时直接改样式，避免 React 每 mousemove 重渲染
   const panelRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<HTMLDivElement>(null);
@@ -167,7 +199,7 @@ export function AppLayout() {
           panel.style.width = `${w}px`;
         }
         if (handleRef.current) {
-          handleRef.current.style.left = `${ACTIVITY_BAR_WIDTH + w - 2}px`;
+          handleRef.current.style.left = `${effectiveSiderWidth + w - 2}px`;
         }
       }
 
@@ -203,7 +235,7 @@ export function AppLayout() {
       document.body.style.cursor = "col-resize";
       document.body.classList.add("sidebar-resizing");
     },
-    [sidePanelWidth, setSidePanelWidth],
+    [sidePanelWidth, setSidePanelWidth, effectiveSiderWidth],
   );
   const navigate = useNavigate();
 
@@ -439,7 +471,7 @@ export function AppLayout() {
       }}
     >
       {activeTheme === "dark-starry" && <StarryBackground />}
-      {!focusMode && (
+      {!focusMode && !autoHideActivityBar && (
         <Sider
           width={siderWidth}
           style={{
@@ -451,6 +483,46 @@ export function AppLayout() {
         >
           <ActivityBar />
         </Sider>
+      )}
+      {/* ActivityBar 自动隐藏模式：左边缘 6px 热区 + 浮层式 ActivityBar */}
+      {!focusMode && autoHideActivityBar && (
+        <>
+          <div
+            aria-hidden
+            onMouseEnter={showActivityBar}
+            style={{
+              position: "absolute",
+              left: 0,
+              top: IS_MAC ? 28 : 0,
+              bottom: 0,
+              width: 6,
+              zIndex: 60,
+              background: "transparent",
+            }}
+          />
+          <div
+            onMouseEnter={showActivityBar}
+            onMouseLeave={scheduleHideActivityBar}
+            style={{
+              position: "absolute",
+              left: 0,
+              top: IS_MAC ? 28 : 0,
+              bottom: 0,
+              width: ACTIVITY_BAR_WIDTH,
+              transform: activityBarShown
+                ? "translateX(0)"
+                : `translateX(-${ACTIVITY_BAR_WIDTH}px)`,
+              transition: "transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1)",
+              zIndex: 61,
+              borderRight: `1px solid ${token.colorBorderSecondary}`,
+              boxShadow: activityBarShown
+                ? "2px 0 12px rgba(0,0,0,0.15)"
+                : "none",
+            }}
+          >
+            <ActivityBar />
+          </div>
+        </>
       )}
       {/*
         SidePanel 浮层：用 absolute 覆盖在主区上方而不是占布局位置。
@@ -464,7 +536,7 @@ export function AppLayout() {
           style={{
             position: "absolute",
             top: IS_MAC ? 28 : 0,
-            left: ACTIVITY_BAR_WIDTH,
+            left: effectiveSiderWidth,
             width: sidePanelWidth,
             bottom: 0,
             // 高透明度让主区背景自然透出，视觉融入主体不显"浮层卡片"
@@ -493,7 +565,7 @@ export function AppLayout() {
           style={{
             position: "absolute",
             top: 0,
-            left: ACTIVITY_BAR_WIDTH + sidePanelWidth - 2,
+            left: effectiveSiderWidth + sidePanelWidth - 2,
             width: 5,
             height: "100%",
             cursor: "col-resize",
