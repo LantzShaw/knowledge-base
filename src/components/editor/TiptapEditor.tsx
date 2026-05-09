@@ -182,8 +182,9 @@ const TableWithMarkdown = Table.extend({
 import { common, createLowlight } from "lowlight";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useRef, useCallback, useState } from "react";
-import { message } from "antd";
+import { message, Modal, Input } from "antd";
 import { theme as antdTheme } from "antd";
+import { SUPPORTED_PROVIDERS } from "./embedVideoProviders";
 import { attachmentApi, imageApi, systemApi, videoApi } from "@/lib/api";
 import { parseKbAsset, resolveAssetSrc, toKbAsset, KB_ASSET_SCHEME } from "@/lib/assetUrl";
 import { useAppStore } from "@/store";
@@ -678,6 +679,27 @@ export function TiptapEditor({
   // SlashCommand 媒体项需要函数式取最新 noteId 才能在切笔记后正确插入。
   const noteIdRef = useRef(noteId);
   noteIdRef.current = noteId;
+
+  // 斜杠菜单"嵌入网络视频"项需要在 React 树里弹 URL 输入框。
+  // 用一个 pending resolver 桥接异步流程：
+  //   slash command 调 requestEmbedUrl() → 创建 Promise 把 resolve 存到 ref →
+  //   显示 Modal → 用户确认/取消 → resolve(url|null) → Promise 在命令侧完成。
+  const [embedSlashOpen, setEmbedSlashOpen] = useState(false);
+  const [embedSlashUrl, setEmbedSlashUrl] = useState("");
+  const embedResolverRef = useRef<((url: string | null) => void) | null>(null);
+  const requestEmbedUrl = useCallback((): Promise<string | null> => {
+    return new Promise((resolve) => {
+      embedResolverRef.current = resolve;
+      setEmbedSlashUrl("");
+      setEmbedSlashOpen(true);
+    });
+  }, []);
+  const closeEmbedSlash = useCallback((url: string | null) => {
+    setEmbedSlashOpen(false);
+    const fn = embedResolverRef.current;
+    embedResolverRef.current = null;
+    fn?.(url);
+  }, []);
   useEffect(() => {
     wikiClickRef.current = onWikiLinkClick;
   }, [onWikiLinkClick]);
@@ -1151,6 +1173,7 @@ export function TiptapEditor({
       SlashCommand.configure({
         getNoteId: () => noteIdRef.current,
         ensureNoteId: () => ensureNoteIdRef.current?.(),
+        requestEmbedUrl,
       }),
       // 标题折叠（H1–H3 左侧 chevron 折叠到下一同级标题；走 noteId 维度持久化）
       HeadingFold.configure({
@@ -1625,6 +1648,31 @@ export function TiptapEditor({
           AiWriteMenu 接 onAskAi prop 后会在按钮行最前面渲染蓝色 CTA，
           整个菜单跟随鼠标位置出现，零重叠，无需独立定位逻辑 */}
       <AiWriteMenu editor={editor} onAskAi={onAskAi} />
+      {/* 斜杠菜单"嵌入网络视频"项的 URL 输入弹窗。
+          确认走 closeEmbedSlash(url)，取消走 closeEmbedSlash(null)；
+          实际解析与节点插入由 slashCommandItems 内的 command 完成。 */}
+      <Modal
+        title="嵌入网络视频"
+        open={embedSlashOpen}
+        onOk={() => closeEmbedSlash(embedSlashUrl.trim() || null)}
+        onCancel={() => closeEmbedSlash(null)}
+        okText="嵌入"
+        cancelText="取消"
+        destroyOnClose
+      >
+        <div className="space-y-2">
+          <Input
+            autoFocus
+            value={embedSlashUrl}
+            onChange={(e) => setEmbedSlashUrl(e.target.value)}
+            onPressEnter={() => closeEmbedSlash(embedSlashUrl.trim() || null)}
+            placeholder="粘贴 B 站 / YouTube / 腾讯 / 优酷 视频链接"
+          />
+          <div className="text-xs" style={{ color: token.colorTextTertiary }}>
+            支持：{SUPPORTED_PROVIDERS}
+          </div>
+        </div>
+      </Modal>
       {showFooterStats && (
         <div
           className="flex items-center gap-4 px-3 pt-4 pb-3 text-xs"

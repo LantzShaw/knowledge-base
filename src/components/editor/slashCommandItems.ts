@@ -25,10 +25,12 @@ import {
   Calculator,
   ImagePlus,
   Film,
+  Globe,
   type LucideIcon,
 } from "lucide-react";
 import { imageApi, videoApi } from "@/lib/api";
 import { toKbAsset } from "@/lib/assetUrl";
+import { parseEmbedUrl, SUPPORTED_PROVIDERS } from "./embedVideoProviders";
 
 export interface SlashCommandItem {
   /** 唯一 key，用于 React 列表渲染 */
@@ -58,6 +60,12 @@ export interface SlashCommandItem {
 export interface SlashCommandBuildOptions {
   getNoteId: () => number | undefined;
   ensureNoteId: () => Promise<number> | undefined;
+  /**
+   * 弹出"嵌入网络视频"输入框，由 React 树里的 Modal 实现。
+   * 返回用户输入的 URL（去空格），取消则返回 null。
+   * 未配置时嵌入视频项会给提示并放弃。
+   */
+  requestEmbedUrl?: () => Promise<string | null>;
 }
 
 const BASIC_SLASH_ITEMS: SlashCommandItem[] = [
@@ -457,6 +465,48 @@ function createMediaSlashItems(
             message.error(`视频插入失败: ${e}`);
           }
         }
+      },
+    },
+    {
+      key: "embedVideo",
+      title: "嵌入网络视频",
+      subtitle: `粘贴 ${SUPPORTED_PROVIDERS} 链接`,
+      group: "媒体",
+      icon: Globe,
+      keywords: [
+        "嵌入视频",
+        "embed",
+        "video",
+        "online",
+        "youtube",
+        "bilibili",
+        "wlsp",
+        "qrsp",
+      ],
+      command: async ({ editor, range }) => {
+        editor.chain().focus().deleteRange(range).run();
+
+        if (!opts.requestEmbedUrl) {
+          message.warning("当前编辑器未配置嵌入视频弹窗");
+          return;
+        }
+        const raw = await opts.requestEmbedUrl();
+        if (!raw) return;
+        const parsed = parseEmbedUrl(raw);
+        if (!parsed) {
+          message.error(`无法识别的链接，目前支持：${SUPPORTED_PROVIDERS}`);
+          return;
+        }
+        editor
+          .chain()
+          .focus()
+          .setEmbedVideo({
+            src: parsed.embedUrl,
+            originalUrl: parsed.originalUrl,
+            provider: parsed.provider,
+          })
+          .run();
+        message.success(`已嵌入${parsed.providerName}视频`);
       },
     },
   ];
