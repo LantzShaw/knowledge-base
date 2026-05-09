@@ -248,6 +248,15 @@ function makeIndentMarkdownStorage(parentStorage: Record<string, unknown>) {
           state.closeBlock(node);
           return;
         }
+        // 空段落：Markdown 没有"空段落"概念，markdown-it 会把多个连续空行折叠成
+        // 单个段落分隔符，导致用户按 Enter 留出的视觉空行保存后丢失。改写为
+        // <p><br></p> HTML 块（依赖 html: true），markdown-it 原样保留 HTML 块，
+        // 重读时解析回带 hardBreak 的段落，视觉空行被保留。
+        if (name === "paragraph" && node.content.size === 0 && htmlAllowed) {
+          state.write("<p><br></p>");
+          state.closeBlock(node);
+          return;
+        }
         // paragraph / 默认
         state.renderInline(node);
         state.closeBlock(node);
