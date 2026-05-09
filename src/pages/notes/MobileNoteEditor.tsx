@@ -388,6 +388,10 @@ function ToolButton({
 }) {
   return (
     <button
+      // mousedown / touchstart 阶段阻止默认 — 否则点击工具按钮会让 textarea 失焦，
+      // selectionStart 重置为 0，所有插入都跑到文档开头，看起来像"按钮没生效"。
+      onMouseDown={(e) => e.preventDefault()}
+      onTouchStart={(e) => e.preventDefault()}
       onClick={onClick}
       className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg active:bg-slate-100"
     >
