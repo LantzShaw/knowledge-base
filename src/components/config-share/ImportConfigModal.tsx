@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Modal, Tabs, message, Alert, Input } from "antd";
 import { ClipboardPaste, ScanLine, Lock } from "lucide-react";
 import { Html5Qrcode } from "html5-qrcode";
+import { readText as readClipboardText } from "@tauri-apps/plugin-clipboard-manager";
 import {
   KIND_LABELS,
   applyEnvelope,
@@ -39,7 +40,10 @@ export function ImportConfigModal({
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const scanContainerId = "config-import-qr-reader";
 
-  // 解析 text + pin → envelope（异步因为加密走 Web Crypto）
+  // 解析 text + pin → envelope。
+  // 1) PIN 长度门槛：默认 6 位，用户边敲边解密会在第 1-5 位时全部失败弹红色，体验差。
+  //    < 4 位时不带 PIN 调用，仅检测是否加密 envelope（设 needPin=true，不报错）。
+  // 2) debounce 350ms：PBKDF2 100k 迭代算一次约 50-100ms，连续按键不必每次跑。
   useEffect(() => {
     if (!text.trim()) {
       setParsed(null);
@@ -48,8 +52,9 @@ export function ImportConfigModal({
       return;
     }
     let alive = true;
-    void (async () => {
-      const r = await parseEnvelope(text, pin || undefined);
+    const tryPin = pin.length >= 4 ? pin : undefined;
+    const timer = setTimeout(async () => {
+      const r = await parseEnvelope(text, tryPin);
       if (!alive) return;
       if (r.ok) {
         setParsed(r.envelope);
@@ -59,15 +64,19 @@ export function ImportConfigModal({
         setParsed(null);
         if ("encrypted" in r && r.encrypted) {
           setNeedPin(true);
-          setParseErr(pin ? "PIN 错误或数据损坏" : null); // 没输 PIN 不当错误
+          setParseErr(null); // 加密但未输够 PIN 不当错误
+        } else if (tryPin) {
+          // 已尝试解密但失败 → 真的是 PIN 错
+          setParseErr("PIN 错误或数据损坏");
         } else {
           setNeedPin(false);
           setParseErr(r.reason);
         }
       }
-    })();
+    }, 350);
     return () => {
       alive = false;
+      clearTimeout(timer);
     };
   }, [text, pin]);
 
@@ -86,17 +95,26 @@ export function ImportConfigModal({
   }, [open]);
 
   async function pasteFromClipboard() {
+    // 优先走 Tauri 原生剪贴板插件 — Android WebView 的 navigator.clipboard.readText
+    // 默认被禁；plugin 走 JNI 直接读系统剪贴板，桌面 / 移动端都能用。
+    // 退路：如果 plugin 调用异常（例如开发服务器尚未注入 IPC），再尝试浏览器 API。
+    let t = "";
     try {
-      const t = await navigator.clipboard.readText();
-      if (!t?.trim()) {
-        message.warning("剪贴板是空的");
+      t = await readClipboardText();
+    } catch {
+      try {
+        t = await navigator.clipboard.readText();
+      } catch {
+        message.error("剪贴板读取失败（请手动粘贴）");
         return;
       }
-      setText(t);
-      message.success("已粘贴");
-    } catch {
-      message.error("剪贴板读取失败（请手动粘贴）");
     }
+    if (!t?.trim()) {
+      message.warning("剪贴板是空的");
+      return;
+    }
+    setText(t);
+    message.success("已粘贴");
   }
 
   async function startScan() {

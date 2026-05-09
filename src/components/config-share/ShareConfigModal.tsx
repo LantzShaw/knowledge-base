@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Modal, Tabs, message, Alert, Input } from "antd";
 import { Copy, ShieldCheck, AlertTriangle, Lock, RefreshCw } from "lucide-react";
 import QRCode from "qrcode";
+import { writeText as writeClipboardText } from "@tauri-apps/plugin-clipboard-manager";
 import {
   KIND_LABELS,
   stringifyEnvelope,
@@ -85,13 +86,25 @@ export function ShareConfigModal({
     };
   }, [envelope, pin]);
 
-  async function copyJson() {
+  // 走 Tauri plugin 优先（Android WebView 不支持 navigator.clipboard.writeText），
+  // 失败再回落到浏览器 API。
+  async function writeClipboard(s: string): Promise<boolean> {
     try {
-      await navigator.clipboard.writeText(text);
-      message.success("已复制到剪贴板");
+      await writeClipboardText(s);
+      return true;
     } catch {
-      message.error("自动复制失败，请手动选中复制");
+      try {
+        await navigator.clipboard.writeText(s);
+        return true;
+      } catch {
+        return false;
+      }
     }
+  }
+
+  async function copyJson() {
+    if (await writeClipboard(text)) message.success("已复制到剪贴板");
+    else message.error("自动复制失败，请手动选中复制");
   }
 
   async function copyPin() {
@@ -99,12 +112,8 @@ export function ShareConfigModal({
       message.warning("当前未启用加密");
       return;
     }
-    try {
-      await navigator.clipboard.writeText(pin);
-      message.success("PIN 已复制");
-    } catch {
-      message.error("复制失败");
-    }
+    if (await writeClipboard(pin)) message.success("PIN 已复制");
+    else message.error("复制失败");
   }
 
   /** 重新生成 6 位随机 PIN（如用户怀疑当前 PIN 已泄漏） */
