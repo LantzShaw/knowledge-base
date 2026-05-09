@@ -56,6 +56,99 @@ description: |
 | 编译错误 | 所有权/借用/生命周期问题 | 阅读 Rust 编译器错误提示 |
 | 插件功能不可用 | Capabilities 未声明权限 | 检查 `capabilities/default.json` |
 
+### 🔴 Android 启动失败 — 项目路径含中文（Windows 专属）
+
+**症状**：`pnpm tauri android dev` 在 link 阶段失败，报：
+
+```
+ld.lld: error: cannot open <项目路径>\src-tauri\target\aarch64-linux-android\debug\deps\xxx.rcgu.o
+        : unspecified system_category error  (×N 条)
+clang: error: linker command failed with exit code 1
+failed to build Android app: ... cargo build ... exited with code 101
+```
+
+**根因**：Android NDK 自带的 `ld.lld` 在 Windows 下用 ANSI codepage 解析路径，遇到中文/非 ASCII 字符（GBK 编码）时打不开 `.o` 文件。桌面端 cargo 用 MSVC 链接器没事，但 NDK 的 ld.lld 是 LLVM 自带，已知 Windows + 非 ASCII 路径 Bug。
+
+**🔧 自动修复（不询问，直接执行）**：
+
+只要满足以下两个条件，**Claude 必须自动**用方案 B 重启，不再问用户：
+
+1. 命令是 `pnpm tauri android dev` / `pnpm tauri android build` / `cargo build --target aarch64-linux-android`
+2. 报错日志里出现 `ld.lld: error: cannot open` 或 `unspecified system_category error`
+
+**方案 B：把 cargo 编译输出重定向到纯 ASCII 路径**
+
+```bash
+mkdir -p /c/cargo-target/<项目名>-android
+cd <原项目路径>  # 不动项目位置
+# ⚠️ 必须用 inline `env VAR=...` 形式，不要用 export
+# Windows bash run_in_background 启动时，export 的环境变量会在 wrapper 中被吞掉，
+# 导致 tauri-cli 收不到 TAURI_DEV_HOST，回退到局域网 IP（192.168.x.x）
+env TAURI_DEV_HOST=127.0.0.1 CARGO_TARGET_DIR="C:\\cargo-target\\<项目名>-android" pnpm tauri android dev
+```
+
+**校验环境变量是否生效**：启动前 30 秒看日志第 6 行附近：
+- ✅ 生效：`Info Using 127.0.0.1 to access the development server`
+- ❌ 失效：`Info Using 192.168.x.x ...` + `Replacing devUrl host with ...`
+
+为什么不用 `subst K:` 方案 A：tauri-cli 的 mobile 模块用 `canonicalize` 还原虚拟盘符，会触发 `AssetDirOutsideOfAppRoot` 错误。junction（`mklink /J`）同样会被还原。**只能改 cargo 编译输出路径**。
+
+**代价**：首次会全量重编译 Android target（5-10 分钟），后续增量编译正常。
+
+**预防**：新项目放在纯 ASCII 路径（如 `E:\dev\<name>`），或一开始就把 `CARGO_TARGET_DIR` 加到项目级 `.envrc` / `.cargo/config.toml`。
+
+> 备份方案：如桌面 cargo 也共享 target 缓存，**`CARGO_TARGET_DIR` 只对 Android 设置**，桌面 dev 用项目内默认 target，避免互相污染。
+
+### Android Gradle 报 `resource color/ic_launcher_background not found`
+
+**症状**：`pnpm tauri android dev` Rust 编译通过、jniLibs 软链建好，但 Gradle 阶段失败：
+
+```
+ERROR: ...res\mipmap-anydpi-v26\ic_launcher.xml:4:
+       AAPT: error: resource color/ic_launcher_background
+       (aka <id>:color/ic_launcher_background) not found.
+Execution failed for task ':app:processArm64DebugResources'.
+```
+
+**根因**：把 `src-tauri/icons/android/mipmap-anydpi-v26/ic_launcher.xml` 拷到 `gen/android/.../res/mipmap-anydpi-v26/` 时，没把对应的 `values/ic_launcher_background.xml`（color 定义）一起拷过去。Adaptive Icon 引用 `@color/ic_launcher_background`，找不到就构建失败。
+
+**🔧 修复**：从 PC 源拷 color 资源到 gen 目录：
+
+```bash
+cp src-tauri/icons/android/values/ic_launcher_background.xml \
+   src-tauri/gen/android/app/src/main/res/values/
+```
+
+或手动新建 `gen/android/app/src/main/res/values/ic_launcher_background.xml`：
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <color name="ic_launcher_background">#fff</color>
+</resources>
+```
+
+**预防**：以后同步 Android 图标资源，**整个 `src-tauri/icons/android/` 目录**全量拷到 `gen/android/.../res/`（包括 `values/` 子目录），不要只拷 mipmap-*。
+
+### Android dev 中途崩 — vite 进程被外部 kill
+
+**症状**：cargo 还在编译时日志突然出现：
+
+```
+ELIFECYCLE  Command failed with exit code 1.
+Error The "beforeDevCommand" terminated with a non-zero status code.
+```
+
+但其它日志没有显式错误，cargo 也没编译失败。
+
+**根因**：`pnpm dev:clean` 启动的 vite (PID X) 在端口 1421 监听后被外部信号终止 — 通常是另一个 dev 会话的 `kill-port 1421` 抢了，或者上一次失败任务的孤儿 vite 进程占着端口、新任务 kill 后接管时序混乱。
+
+**🔧 自动修复**：
+
+1. 用 `npx kill-port 1420 1421 1422`（**禁止 `taskkill /IM node.exe`** — 会把 Claude Code CLI 自己也杀掉）
+2. 检查 `netstat -ano | grep ":142[01]"`，仅剩 `TIME_WAIT` 算干净（无 `LISTENING`）
+3. 重启 dev
+
 ### React 前端常见问题
 
 | 症状 | 可能原因 | 排查方法 |
