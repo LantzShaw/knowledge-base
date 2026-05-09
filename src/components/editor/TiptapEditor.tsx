@@ -192,6 +192,7 @@ import { TableBubbleMenu } from "./TableBubbleMenu";
 import { AiWriteMenu } from "./AiWriteMenu";
 import { WikiLinkDecoration } from "./WikiLinkDecoration";
 import { WikiLinkSuggestion } from "./WikiLinkSuggestion";
+import { SlashCommand } from "./SlashCommand";
 import { useEditorContextMenu } from "./useEditorContextMenu";
 import { ContextMenuOverlay } from "@/components/ui/ContextMenuOverlay";
 import { Video as VideoNode } from "./VideoNode";
@@ -673,6 +674,10 @@ export function TiptapEditor({
   // ensureNoteId 同样用 ref：它常是组件每次渲染新建的闭包，不能进依赖数组
   const ensureNoteIdRef = useRef(ensureNoteId);
   ensureNoteIdRef.current = ensureNoteId;
+  // noteId 也用 ref：编辑器实例只创建一次（useEditor 无 deps），
+  // SlashCommand 媒体项需要函数式取最新 noteId 才能在切笔记后正确插入。
+  const noteIdRef = useRef(noteId);
+  noteIdRef.current = noteId;
   useEffect(() => {
     wikiClickRef.current = onWikiLinkClick;
   }, [onWikiLinkClick]);
@@ -1143,6 +1148,10 @@ export function TiptapEditor({
         onClick: (title: string) => wikiClickRef.current?.(title),
       }),
       WikiLinkSuggestion,
+      SlashCommand.configure({
+        getNoteId: () => noteIdRef.current,
+        ensureNoteId: () => ensureNoteIdRef.current?.(),
+      }),
       // 标题折叠（H1–H3 左侧 chevron 折叠到下一同级标题；走 noteId 维度持久化）
       HeadingFold.configure({
         getFolded: () => {

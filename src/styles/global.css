@@ -869,6 +869,22 @@ body,
   display: none;
 }
 
+/* Tippy.js slash-command 主题 — 与 wiki-suggestion 同款透明壳 */
+.tippy-box[data-theme~="slash-command"] {
+  background: transparent;
+  color: inherit;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+}
+.tippy-box[data-theme~="slash-command"] > .tippy-content {
+  background: transparent;
+  padding: 0;
+}
+.tippy-box[data-theme~="slash-command"] > .tippy-arrow {
+  display: none;
+}
+
 /* 分割线 */
 .tiptap hr {
   border: none;
